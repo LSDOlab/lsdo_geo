@@ -1,10 +1,10 @@
 from csdl import Model
-# from caddee.caddee_core.caddee import CADDEE
-from caddee.caddee_core.system_representation.system_representation import SystemRepresentation
-from caddee.caddee_core.system_parameterization.system_parameterization import SystemParameterization
-from caddee.caddee_core.system_model.system_model import SystemModel
-from caddee.csdl_core.system_model_csdl.system_model_csdl import SystemModelCSDL
-from caddee.csdl_core.system_parameterization_csdl.system_parameterization_csdl import SystemParameterizationCSDL
+# from lsdo_geo.caddee_core.caddee import CADDEE
+from lsdo_geo.caddee_core.system_representation.system_representation import SystemRepresentation
+from lsdo_geo.caddee_core.system_parameterization.system_parameterization import SystemParameterization
+from lsdo_geo.caddee_core.system_model.system_model import SystemModel
+from lsdo_geo.csdl_core.system_model_csdl.system_model_csdl import SystemModelCSDL
+from lsdo_geo.csdl_core.system_parameterization_csdl.system_parameterization_csdl import SystemParameterizationCSDL
 
 
 class CADDEECSDL(Model):
@@ -31,9 +31,9 @@ class CADDEECSDL(Model):
         # caddee
         caddee = self.parameters['caddee']
         # system configuration & parameterization
-        system_representation = caddee.system_representation
+        system_representation = lsdo_geo.system_representation
         psa_connections = system_representation.power_systems_architecture.connections_list
-        system_parameterization = caddee.system_parameterization
+        system_parameterization = lsdo_geo.system_parameterization
         system_parameterization_csdl = SystemParameterizationCSDL(
             system_representation=system_representation,
             system_parameterization=system_parameterization,
@@ -41,7 +41,7 @@ class CADDEECSDL(Model):
         self.add(system_parameterization_csdl, 'system_parameterization')
 
         # system model
-        system_model = caddee.system_model
+        system_model = lsdo_geo.system_model
         system_model_csdl = SystemModelCSDL(
             system_model=system_model,
             psa_connections=psa_connections,    
@@ -58,11 +58,11 @@ class CADDEECSDL(Model):
 
 
 # from csdl import Model
-# from caddee.caddee_core.system_representation.system_representation import SystemRepresentation
-# from caddee.caddee_core.system_parameterization.system_parameterization import SystemParameterization
-# from caddee.caddee_core.system_model.system_model import SystemModel
-# from caddee.csdl_core.system_model_csdl.system_model_csdl import SystemModelCSDL
-# from caddee.csdl_core.system_representation_csdl.system_representation_csdl import SystemRepresentationCSDL
+# from lsdo_geo.caddee_core.system_representation.system_representation import SystemRepresentation
+# from lsdo_geo.caddee_core.system_parameterization.system_parameterization import SystemParameterization
+# from lsdo_geo.caddee_core.system_model.system_model import SystemModel
+# from lsdo_geo.csdl_core.system_model_csdl.system_model_csdl import SystemModelCSDL
+# from lsdo_geo.csdl_core.system_representation_csdl.system_representation_csdl import SystemRepresentationCSDL
 
 
 # class CADDEECSDL(Model):

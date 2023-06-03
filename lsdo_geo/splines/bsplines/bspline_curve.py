@@ -4,11 +4,11 @@ import scipy.sparse as sps
 import vedo
 import vedo.pyplot as plt
 
-from caddee.cython.basis_matrix_curve_py import get_basis_curve_matrix
-from caddee.cython.curve_projection_py import compute_curve_projection
-from caddee.cython.get_open_uniform_py import get_open_uniform
+from lsdo_geo.cython.basis_matrix_curve_py import get_basis_curve_matrix
+from lsdo_geo.cython.curve_projection_py import compute_curve_projection
+from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
 
-from caddee.primitives.bsplines.bspline import BSpline
+from lsdo_geo.primitives.bsplines.bspline import BSpline
 
 class BSplineCurve(BSpline):
     def __init__(self, name, control_points, order_u=4, knots_u=None):

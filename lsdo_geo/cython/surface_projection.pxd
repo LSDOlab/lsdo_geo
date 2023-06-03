@@ -1,10 +1,10 @@
 from libc.stdlib cimport malloc, free
 
-from caddee.cython.get_open_uniform cimport get_open_uniform
-from caddee.cython.basis0 cimport get_basis0
-from caddee.cython.basis1 cimport get_basis1
-from caddee.cython.basis2 cimport get_basis2
-from caddee.cython.basis_matrix_surface cimport get_basis_surface_matrix
+from lsdo_geo.cython.get_open_uniform cimport get_open_uniform
+from lsdo_geo.cython.basis0 cimport get_basis0
+from lsdo_geo.cython.basis1 cimport get_basis1
+from lsdo_geo.cython.basis2 cimport get_basis2
+from lsdo_geo.cython.basis_matrix_surface cimport get_basis_surface_matrix
 
 
 cdef compute_surface_projection(

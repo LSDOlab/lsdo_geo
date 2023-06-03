@@ -1,7 +1,7 @@
 import numpy as np
 cimport numpy as np
 
-from caddee.cython.curve_projection cimport compute_curve_projection
+from lsdo_geo.cython.curve_projection cimport compute_curve_projection
 
 
 def compute_curve_projection(

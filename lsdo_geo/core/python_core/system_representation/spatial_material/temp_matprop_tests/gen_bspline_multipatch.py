@@ -1,9 +1,9 @@
 import numpy as np
 import caddee
-import caddee.primitives.bsplines as bs
-import caddee.primitives.bsplines.bspline_functions as bsf
-import caddee.caddee_core.system_representation.spatial_representation as spatial_representation
-import caddee.caddee_core.system_representation.spatial_material.ls_primitive as ls_primitive
+import lsdo_geo.primitives.bsplines as bs
+import lsdo_geo.primitives.bsplines.bspline_functions as bsf
+import lsdo_geo.caddee_core.system_representation.spatial_representation as spatial_representation
+import lsdo_geo.caddee_core.system_representation.spatial_material.ls_primitive as ls_primitive
 
 #spatial and thickness data
 nx, ny = (40, 40)

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 from basis_matrix_surface_py import get_basis_surface_matrix
-from caddee.cython.get_open_uniform_py import get_open_uniform
+from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
 from surface_projection_py import compute_surface_projection
 
 order_u = 4

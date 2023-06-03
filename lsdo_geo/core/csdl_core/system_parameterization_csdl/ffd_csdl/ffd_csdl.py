@@ -3,13 +3,13 @@ from csdl_om import Simulator
 import numpy as np
 import scipy.sparse as sps
 
-# from caddee.csdl_core.system_parameterization_csdl.ffd_csdl.affine_section_properties_csdl import AffineSectionPropertiesCSDL
-from caddee.csdl_core.system_parameterization_csdl.ffd_csdl.affine_section_properties_csdl import AffineSectionPropertiesCSDL
-from caddee.csdl_core.system_parameterization_csdl.ffd_csdl.rotational_section_properties_csdl import RotationalSectionPropertiesCSDL
-from caddee.csdl_core.system_parameterization_csdl.ffd_csdl.affine_block_deformations_csdl import AffineBlockDeformationsCSDL
-from caddee.csdl_core.system_parameterization_csdl.ffd_csdl.rotational_block_deformations_csdl import RotationalBlockDeformationsCSDL
-from caddee.csdl_core.system_parameterization_csdl.ffd_csdl.local_to_global_csdl import LocalToGlobalCSDL
-from caddee.csdl_core.system_parameterization_csdl.ffd_csdl.ffd_evaluation_csdl import FFDEvaluationCSDL
+# from lsdo_geo.csdl_core.system_parameterization_csdl.ffd_csdl.affine_section_properties_csdl import AffineSectionPropertiesCSDL
+from lsdo_geo.csdl_core.system_parameterization_csdl.ffd_csdl.affine_section_properties_csdl import AffineSectionPropertiesCSDL
+from lsdo_geo.csdl_core.system_parameterization_csdl.ffd_csdl.rotational_section_properties_csdl import RotationalSectionPropertiesCSDL
+from lsdo_geo.csdl_core.system_parameterization_csdl.ffd_csdl.affine_block_deformations_csdl import AffineBlockDeformationsCSDL
+from lsdo_geo.csdl_core.system_parameterization_csdl.ffd_csdl.rotational_block_deformations_csdl import RotationalBlockDeformationsCSDL
+from lsdo_geo.csdl_core.system_parameterization_csdl.ffd_csdl.local_to_global_csdl import LocalToGlobalCSDL
+from lsdo_geo.csdl_core.system_parameterization_csdl.ffd_csdl.ffd_evaluation_csdl import FFDEvaluationCSDL
 
 
 class FFDCSDL(csdl.Model):
@@ -61,7 +61,7 @@ if __name__ == "__main__":
     from python_csdl_backend import Simulator
     import numpy as np
 
-    from caddee.caddee_core.system_representation.system_representation import SystemRepresentation
+    from lsdo_geo.caddee_core.system_representation.system_representation import SystemRepresentation
     system_representation = SystemRepresentation()
     spatial_rep = system_representation.spatial_representation
 
@@ -72,14 +72,14 @@ if __name__ == "__main__":
     spatial_rep.import_file(file_name=file_path+'rect_wing.stp')
 
     # Create Components
-    from caddee.caddee_core.system_representation.component.component import LiftingSurface, Component
+    from lsdo_geo.caddee_core.system_representation.component.component import LiftingSurface, Component
     wing_primitive_names = list(spatial_rep.get_primitives(search_names=['Wing']).keys())
     wing = LiftingSurface(name='wing', spatial_representation=spatial_rep, primitive_names=wing_primitive_names)  # TODO add material arguments
     system_representation.add_component(wing)
 
     # # Parameterization
-    from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_functions import create_cartesian_enclosure_volume
-    from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
+    from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_functions import create_cartesian_enclosure_volume
+    from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
     wing_ffd_set_primitives = wing.get_geometry_primitives()
     wing_ffd_bspline_volume = create_cartesian_enclosure_volume(wing_ffd_set_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
@@ -89,7 +89,7 @@ if __name__ == "__main__":
     wing_ffd_block.add_rotation_v(name='wingtip_twist', order=4, num_dof=10, value=-np.array([np.pi/2, 0., 0., 0., 0., 0., 0., 0., 0., -np.pi/2]))
     wing_ffd_block.add_translation_w(name='wingtip_translation', order=4, num_dof=10, value=np.array([2., 0., 0., 0., 0., 0., 0., 0., 0., 2.]))
 
-    from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_set import SRBGFFDSet
+    from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_set import SRBGFFDSet
     ffd_set = SRBGFFDSet(name='ffd_set', ffd_blocks={wing_ffd_block.name : wing_ffd_block})
 
     ffd_set.setup(project_embedded_entities=True)
@@ -121,7 +121,7 @@ if __name__ == "__main__":
     spatial_rep.import_file(file_name=file_path+'lift_plus_cruise_final_3.stp')
 
     # Create Components
-    from caddee.caddee_core.system_representation.component.component import LiftingSurface
+    from lsdo_geo.caddee_core.system_representation.component.component import LiftingSurface
     wing_primitive_names = list(spatial_rep.get_primitives(search_names=['Wing']).keys())
     wing = LiftingSurface(name='wing', spatial_representation=spatial_rep, primitive_names=wing_primitive_names)  # TODO add material arguments
     tail_primitive_names = list(spatial_rep.get_primitives(search_names=['Tail_1']).keys())
@@ -130,8 +130,8 @@ if __name__ == "__main__":
     system_representation.add_component(horizontal_stabilizer)
 
     # # Parameterization
-    from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_functions import create_cartesian_enclosure_volume
-    from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
+    from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_functions import create_cartesian_enclosure_volume
+    from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
     wing_ffd_set_primitives = wing.get_geometry_primitives()
     wing_ffd_bspline_volume = create_cartesian_enclosure_volume(wing_ffd_set_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
@@ -145,7 +145,7 @@ if __name__ == "__main__":
     horizontal_stabilizer_ffd_block.add_rotation_u(name='horizontal_stabilizer_twist_distribution', order=1, num_dof=1, value=np.array([np.pi/10]))
     horizontal_stabilizer_ffd_block.add_scale_v(name="chord_distribution_scaling", order=2, num_dof=3, value=np.array([-0.5, 0.5, -0.5]))
 
-    from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_set import SRBGFFDSet
+    from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_set import SRBGFFDSet
     ffd_set = SRBGFFDSet(name='ffd_set', ffd_blocks={wing_ffd_block.name : wing_ffd_block, horizontal_stabilizer_ffd_block.name : horizontal_stabilizer_ffd_block})
 
     ffd_set.setup(project_embedded_entities=True)

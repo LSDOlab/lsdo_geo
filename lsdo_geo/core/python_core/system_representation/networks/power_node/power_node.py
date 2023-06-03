@@ -1,5 +1,5 @@
-from caddee.utils.caddee_base import CADDEEBase
-from caddee.caddee_core.system_representation.spatial_representation.component.component import Component
+from lsdo_geo.utils.caddee_base import CADDEEBase
+from lsdo_geo.caddee_core.system_representation.spatial_representation.component.component import Component
 
 class PowerNode(CADDEEBase): pass
 

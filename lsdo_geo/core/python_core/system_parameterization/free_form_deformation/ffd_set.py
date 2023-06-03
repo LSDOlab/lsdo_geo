@@ -29,7 +29,7 @@ class FFDSet:
         Evaluates the FFD model formed from the set of FFD blocks.
         '''
 
-from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
+from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
 # class SRBGFFDSet(FFDSet):     # Could potentially inherit in future, but have to figure out how that relationship will work
 class SRBGFFDSet:
@@ -671,7 +671,7 @@ class SRBGFFDSet:
         '''
         Returns the CADDEE model for the FFD.
         '''
-        from caddee.csdl_core.system_parameterization_csdl.ffd_csdl.ffd_csdl import FFDCSDL
+        from lsdo_geo.csdl_core.system_parameterization_csdl.ffd_csdl.ffd_csdl import FFDCSDL
         return FFDCSDL(ffd_set=self)
 
 

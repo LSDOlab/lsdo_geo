@@ -6,11 +6,11 @@ import scipy.sparse as sps
 import matplotlib.pyplot as plt
 from vedo import Points, Plotter, LegendBox
 
-from src.caddee.concept.bsplines.bspline_curve import BSplineCurve
-from src.caddee.concept.bsplines.bspline_surface import BSplineSurface
-from src.caddee.concept.bsplines.bspline_volume import BSplineVolume
+from src.lsdo_geo.concept.bsplines.bspline_curve import BSplineCurve
+from src.lsdo_geo.concept.bsplines.bspline_surface import BSplineSurface
+from src.lsdo_geo.concept.bsplines.bspline_volume import BSplineVolume
 
-from src.caddee.concept.geometry.geocore.utils.calculate_rotation_mat import calculate_rotation_mat
+from src.lsdo_geo.concept.geometry.geocore.utils.calculate_rotation_mat import calculate_rotation_mat
 # import os
 # os.chdir("../lsdo_geo/lsdo_kit/design/design_geometry/core")
 
@@ -635,7 +635,7 @@ class FFDRotationZParameter(FFDParameter):
 
 if __name__ == "__main__":
 
-    from src.caddee.concept.geometry.geocore.utils.generate_ffd import create_ffd
+    from src.lsdo_geo.concept.geometry.geocore.utils.generate_ffd import create_ffd
     nxp = 5
     nyp = 5
     nzp = 5

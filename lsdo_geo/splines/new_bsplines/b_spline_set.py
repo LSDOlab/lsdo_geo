@@ -1,3 +1,6 @@
+import m3l
+import csdl
+
 import numpy as np
 import scipy.sparse as sps
 import array_mapper as am
@@ -6,17 +9,32 @@ import vedo
 from lsdo_geo.cython.basis_matrix_surface_py import get_basis_surface_matrix
 from lsdo_geo.cython.surface_projection_py import compute_surface_projection
 
-from lsdo_geo.primitives.bsplines.bspline import BSpline
+from lsdo_geo.splines.new_bsplines.b_spline_space import BSplineSpace
 
-class BSplineSurface(BSpline):
-    def __init__(self, name:str, order_u:int, order_v:int, knots_u:np.ndarray, knots_v:np.ndarray, shape:tuple, control_points:np.ndarray):
+from dataclasses import dataclass
+
+@dataclass(init=False)
+class BSplineSet(m3l.Function):
+    '''
+    B-spline class
+    '''
+    def __init__(self, name:str, function_space:BSplineSpace, control_points:np.ndarray=None, upstream_variables:dict=None, map:csdl.Model=None,
+                 b_splines:dict=None):
         self.name = name
-        self.order_u = order_u
-        self.order_v = order_v
-        self.knots_u = knots_u
-        self.knots_v = knots_v
-        self.shape = shape
+        self.function_space = function_space
+        self.coefficients = control_points
         self.control_points = control_points
+        self.upstream_variables = upstream_variables
+        self.map = map
+
+        self.order_u = self.function_space.order[0]
+        self.order_v = self.function_space.order[1]
+        self.knots_u = self.function_space.knots[0]
+        self.knots_v = self.function_space.knots[1]
+        self.shape = self.control_points.shape
+
+        self.b_splines = b_splines
+    
 
     def compute_evaluation_map(self, u_vec, v_vec):
         data = np.zeros(len(u_vec) * self.order_u * self.order_v)
@@ -226,3 +244,27 @@ class BSplineSurface(BSpline):
             return plotting_elements
         else:
             return plotting_elements
+
+
+
+
+
+
+if __name__ == "__main__":
+    from lsdo_geo.splines.new_bsplines.b_spline_space import BSplineSpace
+    from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
+
+    num_control_points = 10
+    order = 4
+    knots_u = np.zeros((num_control_points + 2*order))
+    knots_v = np.zeros((num_control_points + 2*order))
+    get_open_uniform(order=order, num_control_points=num_control_points, knot_vector=knots_u)
+    get_open_uniform(order=order, num_control_points=num_control_points, knot_vector=knots_v)
+    space_of_cubic_bspline_surfaces_with_10_cp = BSplineSpace(name='cubic_bspline_surfaces_10_cp', order=(4,4), knots=(knots_u,knots_v))
+
+    control_points_line_x = np.linspace(num_control_points)
+    control_points_line = np.hstack((control_points_line_x, control_points_line_x, control_points_line_x))
+    control_points = np.meshgrid(control_points_line,control_points_line)
+
+    b_spline = BSpline(name='test_b_spline', function_space=space_of_cubic_bspline_surfaces_with_10_cp, control_points=control_points)
+    b_spline.plot()

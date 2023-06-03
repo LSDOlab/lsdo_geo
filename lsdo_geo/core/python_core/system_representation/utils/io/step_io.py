@@ -5,8 +5,8 @@ import numpy as np
 import copy
 from vedo import Points, Plotter, colors, LegendBox, show
 
-from caddee.primitives.bsplines.bspline_surface import BSplineSurface
-import caddee.primitives.bsplines.bspline_functions as bsp
+from lsdo_geo.primitives.bsplines.bspline_surface import BSplineSurface
+import lsdo_geo.primitives.bsplines.bspline_functions as bsp
 
 import io
 

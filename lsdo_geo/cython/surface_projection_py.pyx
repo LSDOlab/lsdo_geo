@@ -1,7 +1,7 @@
 import numpy as np
 cimport numpy as np
 
-from caddee.cython.surface_projection cimport compute_surface_projection
+from lsdo_geo.cython.surface_projection cimport compute_surface_projection
 
 
 def compute_surface_projection(

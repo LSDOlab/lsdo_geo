@@ -1,11 +1,11 @@
 import numpy as np
 
 from utils.caddee_base import CADDEEBase
-from caddee.caddee_core.system_representation.system_representation import SystemRepresentation
-from caddee.caddee_core.system_representation.component.component import Component
-from caddee.caddee_core.system_representation.utils.material import Material
-from caddee.primitives.primitive import Primitive
-from caddee.primitives.bsplines import bspline_surface, bspline_functions
+from lsdo_geo.caddee_core.system_representation.system_representation import SystemRepresentation
+from lsdo_geo.caddee_core.system_representation.component.component import Component
+from lsdo_geo.caddee_core.system_representation.utils.material import Material
+from lsdo_geo.primitives.primitive import Primitive
+from lsdo_geo.primitives.bsplines import bspline_surface, bspline_functions
 import scipy.sparse as sps
 import vedo
 import array_mapper as am

@@ -1,4 +1,4 @@
-from caddee.utils.caddee_base import CADDEEBase
+from lsdo_geo.utils.caddee_base import CADDEEBase
 
 class power_systems_architecture(CADDEEBase):
     def initialize(self, kwargs):

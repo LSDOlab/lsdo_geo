@@ -1,7 +1,7 @@
 import numpy as np
 cimport numpy as np
 
-from caddee.cython.basis_matrix_curve cimport get_basis_curve_matrix
+from lsdo_geo.cython.basis_matrix_curve cimport get_basis_curve_matrix
 
 
 def get_basis_curve_matrix(

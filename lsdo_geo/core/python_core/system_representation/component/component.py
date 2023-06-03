@@ -1,8 +1,8 @@
 import numpy as np
 from lsdo_modules.module_csdl.module_csdl import ModuleCSDL
-from caddee.utils.caddee_base import CADDEEBase
-# from caddee.caddee_core.system_representation.geometry import Geometry
-from caddee.caddee_core.system_representation.spatial_representation import SpatialRepresentation
+from lsdo_geo.utils.caddee_base import CADDEEBase
+# from lsdo_geo.caddee_core.system_representation.geometry import Geometry
+from lsdo_geo.caddee_core.system_representation.spatial_representation import SpatialRepresentation
 
 class Component(CADDEEBase):
     '''

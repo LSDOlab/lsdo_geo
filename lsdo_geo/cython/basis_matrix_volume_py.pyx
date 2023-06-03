@@ -1,7 +1,7 @@
 import numpy as np
 cimport numpy as np
 
-from caddee.cython.basis_matrix_volume cimport get_basis_volume_matrix
+from lsdo_geo.cython.basis_matrix_volume cimport get_basis_volume_matrix
 
 
 def get_basis_volume_matrix(

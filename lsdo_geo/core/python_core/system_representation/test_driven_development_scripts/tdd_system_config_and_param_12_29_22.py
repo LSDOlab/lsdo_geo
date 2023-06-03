@@ -3,23 +3,23 @@ import numpy as np
 import array_mapper as am
 
 # evtol = cd.CADDEE()
-# from caddee.caddee_core.caddee import CADDEE
+# from lsdo_geo.caddee_core.caddee import CADDEE
 # evtol = CADDEE()
 # evtol.set_units('SI')
 
 # evtol.system_representation = system_representation = cd.SystemRepresentation()
 # evtol.system_paramaterization = system_parameterization = cd.SystemParameterization()
 # evtol.system_model = system_model = cd.SystemModel()
-from caddee.caddee_core.system_representation.system_representation import SystemRepresentation
+from lsdo_geo.caddee_core.system_representation.system_representation import SystemRepresentation
 system_representation = SystemRepresentation()
-from caddee.caddee_core.system_parameterization.system_parameterization import SystemParameterization
+from lsdo_geo.caddee_core.system_parameterization.system_parameterization import SystemParameterization
 system_parameterization = SystemParameterization()
 
 
 # Geometry + Material properties
 file_path = '/models/stp/'
 # system_representation.spatial_representation = spatial_representation = cd.SpatialRepresentation(import_file = file_path + 'rect_wing.stp')
-from caddee.caddee_core.system_representation.spatial_representation.spatial_representation import SpatialRepresentation
+from lsdo_geo.caddee_core.system_representation.spatial_representation.spatial_representation import SpatialRepresentation
 system_representation.spatial_representation = spatial_representation = SpatialRepresentation()
 spatial_representation.import_geometry(file_name=file_path+'rect_wing.stp')
 ''' TODO: Several methods in mechanical structure need to be filled in. '''
@@ -28,7 +28,7 @@ spatial_representation.import_geometry(file_name=file_path+'rect_wing.stp')
 # # rotor1 = cd.Rotor(name='rotor1', file_search_name='rotor, 0')
 # # wing = cd.LiftingSurface(name='wing', file_search_name='Wing')
 # # horizontal_stabilizer = cd.LiftingSurface(name='horizontal_stabilizer', file_search_name='tail, 0')
-# from caddee.caddee_core.system_representation.spatial_representation.component.lifting_surface import LiftingSurface
+# from lsdo_geo.caddee_core.system_representation.spatial_representation.component.lifting_surface import LiftingSurface
 # wing = LiftingSurface(name='wing', primitive_names=['Wing']) # NOTE: WARNING: ODDITY!! This doesn't have enough info.
 # # In order to have enough information, component needs a pointer to the SpatialRepresentation object which is weird and bad.
 # # What the example above does is the Component only stores the string until it's added to the SpatialRepresentation.
@@ -50,7 +50,7 @@ spatial_representation.import_geometry(file_name=file_path+'rect_wing.stp')
 # # -- An alternative idea is to have the user pass in the object, and this method adds the primitives.
 
 ## Alternative
-from caddee.caddee_core.system_representation.spatial_representation.component.component import LiftingSurface
+from lsdo_geo.caddee_core.system_representation.spatial_representation.component.component import LiftingSurface
 wing_no_geometry = LiftingSurface()
 wing = spatial_representation.partition_component(name='wing', primitive_names=['Wing'], obj=wing_no_geometry)
 

@@ -2,9 +2,9 @@
 This file is for functions associated with the FFD "Package"
 '''
 
-from caddee.primitives.bsplines.bspline_surface import BSplineSurface
-from caddee.primitives.bsplines.bspline_volume import BSplineVolume
-from caddee.primitives.bsplines.bspline_functions import generate_open_uniform_knot_vector, create_bspline_from_corners
+from lsdo_geo.primitives.bsplines.bspline_surface import BSplineSurface
+from lsdo_geo.primitives.bsplines.bspline_volume import BSplineVolume
+from lsdo_geo.primitives.bsplines.bspline_functions import generate_open_uniform_knot_vector, create_bspline_from_corners
 
 import numpy as np
 

@@ -2,9 +2,9 @@ import caddee as cd
 import numpy as np
 import array_mapper as am
 
-from caddee.caddee_core.system_representation.system_representation import SystemRepresentation
+from lsdo_geo.caddee_core.system_representation.system_representation import SystemRepresentation
 system_representation = SystemRepresentation()
-from caddee.caddee_core.system_parameterization.system_parameterization import SystemParameterization
+from lsdo_geo.caddee_core.system_parameterization.system_parameterization import SystemParameterization
 system_parameterization = SystemParameterization(system_representation=system_representation)
 
 file_path = 'models/stp/'
@@ -14,7 +14,7 @@ spatial_rep.import_file(file_name=file_path+'tilt_duct_no_rotors_no_people.stp')
 spatial_rep.plot(plot_types=['mesh'])
 
 # Create Components
-from caddee.caddee_core.system_representation.component.component import LiftingSurface
+from lsdo_geo.caddee_core.system_representation.component.component import LiftingSurface
 wing_primitive_names = list(spatial_rep.get_primitives(search_names=['MainWing']).keys())
 wing = LiftingSurface(name='wing', spatial_representation=spatial_rep, primitive_names=wing_primitive_names)
 system_representation.add_component(wing)

@@ -1,7 +1,7 @@
 import numpy as np
 cimport numpy as np
 
-from caddee.cython.volume_projection cimport compute_volume_projection
+from lsdo_geo.cython.volume_projection cimport compute_volume_projection
 
 
 def compute_volume_projection(

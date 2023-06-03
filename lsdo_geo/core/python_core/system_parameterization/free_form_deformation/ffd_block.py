@@ -3,9 +3,9 @@ import numpy as np
 import scipy.sparse as sps
 import array_mapper as am
 
-from caddee.primitives.bsplines.bspline_curve import BSplineCurve
-from caddee.primitives.bsplines.bspline_surface import BSplineSurface
-from caddee.primitives.bsplines.bspline_volume import BSplineVolume
+from lsdo_geo.primitives.bsplines.bspline_curve import BSplineCurve
+from lsdo_geo.primitives.bsplines.bspline_surface import BSplineSurface
+from lsdo_geo.primitives.bsplines.bspline_volume import BSplineVolume
 
 import vedo
 

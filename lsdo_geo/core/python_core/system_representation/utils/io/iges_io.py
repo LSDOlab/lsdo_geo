@@ -1,7 +1,7 @@
 import numpy as np
 from vedo import Points, Plotter, colors, LegendBox, show
 
-from caddee.primitives.bsplines.bspline_surface import BSplineSurface
+from lsdo_geo.primitives.bsplines.bspline_surface import BSplineSurface
 
 import pandas as pd
 import re

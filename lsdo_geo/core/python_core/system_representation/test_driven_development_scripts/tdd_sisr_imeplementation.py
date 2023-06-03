@@ -3,8 +3,8 @@ from python_csdl_backend import Simulator
 import numpy as np
 import array_mapper as am
 
-from caddee.caddee_core.system_representation.system_representation import SystemRepresentation
-from caddee.caddee_core.system_parameterization.system_parameterization import SystemParameterization
+from lsdo_geo.caddee_core.system_representation.system_representation import SystemRepresentation
+from lsdo_geo.caddee_core.system_parameterization.system_parameterization import SystemParameterization
 
 system_representation = SystemRepresentation()
 spatial_rep = system_representation.spatial_representation
@@ -19,7 +19,7 @@ spatial_rep.plot(point_types=['evaluated_points'])
 system_parameterization = SystemParameterization(system_representation=system_representation)
 
 # Create Components
-from caddee.caddee_core.system_representation.component.component import LiftingSurface, Component
+from lsdo_geo.caddee_core.system_representation.component.component import LiftingSurface, Component
 wing_primitive_names = list(spatial_rep.get_primitives(search_names=['Wing']).keys())
 wing = LiftingSurface(name='wing', spatial_representation=spatial_rep, primitive_names=wing_primitive_names)
 tail_primitive_names = list(spatial_rep.get_primitives(search_names=['HT']).keys())
@@ -83,8 +83,8 @@ root_chord = am.norm(root_chord_vector)     # NOTE: Nonlinear operations don't r
 system_representation.add_output(name='wing_root_chord', quantity=root_chord)
 
 # # Parameterization
-from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_functions import create_cartesian_enclosure_volume
-from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
+from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_functions import create_cartesian_enclosure_volume
+from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
 wing_geometry_primitives = wing.get_geometry_primitives()
 wing_ffd_bspline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2),
@@ -104,7 +104,7 @@ horizontal_stabilizer_ffd_block.add_scale_v(name='horizontal_stabilizer_linear_t
                                             cost_factor=1.)
 horizontal_stabilizer_ffd_block.add_rotation_u(name='horizontal_stabilizer_twist_distribution', order=1, num_dof=1, value=np.array([np.pi/10]))
 
-from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_set import SRBGFFDSet
+from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_set import SRBGFFDSet
 ffd_blocks = {wing_ffd_block.name : wing_ffd_block, horizontal_stabilizer_ffd_block.name : horizontal_stabilizer_ffd_block}
 ffd_set = SRBGFFDSet(name='ffd_set', ffd_blocks=ffd_blocks)
 system_parameterization.add_geometry_parameterization(ffd_set)
@@ -120,7 +120,7 @@ cruise_configuration = system_representations['cruise_configuration']
 horizontal_stabilizer_quarter_chord_port = horizontal_stabilizer.project(np.array([28.5, -10., 8.]))
 horizontal_stabilizer_quarter_chord_starboard = horizontal_stabilizer.project(np.array([28.5, 10., 8.]))
 horizontal_stabilizer_acutation_axis = horizontal_stabilizer_quarter_chord_starboard - horizontal_stabilizer_quarter_chord_port
-from caddee.caddee_core.system_representation.prescribed_actuations import PrescribedRotation
+from lsdo_geo.caddee_core.system_representation.prescribed_actuations import PrescribedRotation
 horizontal_stabilizer_actuator_solver = PrescribedRotation(component=tail_actuator, axis=horizontal_stabilizer_acutation_axis)
 horizontal_stabilizer_actuator_solver.set_rotation(name='cruise_tail_actuation', value=0.25 , units='radians')
 cruise_configuration.transform(horizontal_stabilizer_actuator_solver)

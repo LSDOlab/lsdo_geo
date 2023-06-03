@@ -1,4 +1,4 @@
-from caddee.utils.caddee_base import CADDEEBase
+from lsdo_geo.utils.caddee_base import CADDEEBase
 
 class Network(CADDEEBase):
     def initialize(self, kwargs):

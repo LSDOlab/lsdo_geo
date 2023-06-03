@@ -3,13 +3,13 @@ import numpy as np
 import array_mapper as am
 
 # evtol = cd.CADDEE()
-# from caddee.caddee_core.caddee import CADDEE
+# from lsdo_geo.caddee_core.caddee import CADDEE
 # evtol = CADDEE()
 # evtol.set_units('SI')
 
-from caddee.caddee_core.system_representation.system_representation import SystemRepresentation
+from lsdo_geo.caddee_core.system_representation.system_representation import SystemRepresentation
 system_representation = SystemRepresentation()
-from caddee.caddee_core.system_parameterization.system_parameterization import SystemParameterization
+from lsdo_geo.caddee_core.system_parameterization.system_parameterization import SystemParameterization
 system_parameterization = SystemParameterization(system_representation=system_representation)
 
 file_path = 'models/stp/'
@@ -19,7 +19,7 @@ spatial_rep.import_file(file_name=file_path+'lift_plus_cruise_final_3.stp')
 spatial_rep.plot(plot_types=['mesh'])
 
 # Create Components
-from caddee.caddee_core.system_representation.component.component import LiftingSurface
+from lsdo_geo.caddee_core.system_representation.component.component import LiftingSurface
 wing_primitive_names = list(spatial_rep.get_primitives(search_names=['Wing']).keys())
 wing = LiftingSurface(name='wing', spatial_representation=spatial_rep, primitive_names=wing_primitive_names)  # TODO add material arguments
 tail_primitive_names = list(spatial_rep.get_primitives(search_names=['Tail_1']).keys())
@@ -49,8 +49,8 @@ system_representation.add_component(horizontal_stabilizer)
 # Note: Powertrain and material definitions have been skipped for the sake of time in this iteration.
 
 # # Parameterization
-from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_functions import create_cartesian_enclosure_volume
-from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
+from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_functions import create_cartesian_enclosure_volume
+from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
 wing_geometry_primitives = wing.get_geometry_primitives()
 wing_ffd_bspline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
@@ -68,7 +68,7 @@ plotting_elements = wing_ffd_block.plot(plot_embedded_entities=False, show=False
 plotting_elements = horizontal_stabilizer_ffd_block.plot(plot_embedded_entities=False, show=False, additional_plotting_elements=plotting_elements)
 spatial_rep.plot(additional_plotting_elements=plotting_elements)
 
-from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_set import SRBGFFDSet
+from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_set import SRBGFFDSet
 ffd_set = SRBGFFDSet(name='ffd_set', ffd_blocks={wing_ffd_block.name : wing_ffd_block, horizontal_stabilizer_ffd_block.name : horizontal_stabilizer_ffd_block})
 
 ''' TODO Finish addressing code starting from below. '''

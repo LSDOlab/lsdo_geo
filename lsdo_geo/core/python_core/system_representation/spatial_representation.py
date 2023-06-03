@@ -5,9 +5,9 @@ import os
 from pathlib import Path
 import vedo
 import pickle
-from caddee.caddee_core.system_representation.system_primitive.system_primitive import SystemPrimitive
-from caddee.caddee_core.system_representation.utils.io.step_io import read_openvsp_stp, write_step, read_gmsh_stp
-from caddee.caddee_core.system_representation.utils.io.iges_io import read_iges, write_iges
+from lsdo_geo.caddee_core.system_representation.system_primitive.system_primitive import SystemPrimitive
+from lsdo_geo.caddee_core.system_representation.utils.io.step_io import read_openvsp_stp, write_step, read_gmsh_stp
+from lsdo_geo.caddee_core.system_representation.utils.io.iges_io import read_iges, write_iges
 from caddee import IMPORTS_FILES_FOLDER
 
 class SpatialRepresentation:
@@ -248,7 +248,7 @@ class SpatialRepresentation:
                 pickle.dump(self.primitives, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     def refit_geometry(self, num_control_points:int=25, fit_resolution:int=50, only_non_differentiable:bool=False, file_name=None):
-        import caddee.primitives.bsplines.bspline_functions as mfd  # lsdo_manifolds
+        import lsdo_geo.primitives.bsplines.bspline_functions as mfd  # lsdo_manifolds
 
         if file_name is not None:
             fn = os.path.basename(file_name)

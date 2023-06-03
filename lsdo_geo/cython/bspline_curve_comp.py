@@ -1,7 +1,7 @@
 import numpy as np
 import scipy.sparse as sps
 
-from caddee.cython.basis_matrix_curve_py import get_basis_curve_matrix
+from lsdo_geo.cython.basis_matrix_curve_py import get_basis_curve_matrix
 
 from openmdao.api import ExplicitComponent
 

@@ -3,16 +3,16 @@ import numpy as np
 import array_mapper as am
 
 # evtol = cd.CADDEE()
-# from caddee.caddee_core.caddee import CADDEE
+# from lsdo_geo.caddee_core.caddee import CADDEE
 # evtol = CADDEE()
 # evtol.set_units('SI')
 
 # evtol.system_representation = system_representation = cd.SystemRepresentation()
 # evtol.system_paramaterization = system_parameterization = cd.SystemParameterization()
 # evtol.system_model = system_model = cd.SystemModel()
-from caddee.caddee_core.system_representation.system_representation import SystemRepresentation
+from lsdo_geo.caddee_core.system_representation.system_representation import SystemRepresentation
 system_representation = SystemRepresentation()
-from caddee.caddee_core.system_parameterization.system_parameterization import SystemParameterization
+from lsdo_geo.caddee_core.system_parameterization.system_parameterization import SystemParameterization
 system_parameterization = SystemParameterization()
 
 # Geometry + Material properties
@@ -27,7 +27,7 @@ geo.plot(plot_types=['mesh'])
 # geo.plot(plot_type='point_cloud')
 
 # Create Components
-from caddee.caddee_core.system_representation.component.component import LiftingSurface, Component
+from lsdo_geo.caddee_core.system_representation.component.component import LiftingSurface, Component
 wing = LiftingSurface(name='wing', geometry=geo, geometry_primitive_names=['Wing'])  # TODO add material arguments
 horizontal_stabilizer = LiftingSurface(name='horizontal_stabilizer', geometry=geo, geometry_primitive_names=['Tail_1'])
 rotor_hub_1 = Component(name='rotor_1_hub', geometry=geo, geometry_primitive_names=['Rotor_1_Hub'])
@@ -44,7 +44,7 @@ rotor_1_disk = Component(name='rotor_1_disk', geometry=geo, geometry_primitive_n
 system_representation.add_component(wing)
 system_representation.add_component(horizontal_stabilizer)
 
-# from caddee.caddee_core.system_representation.component.component import Rotor
+# from lsdo_geo.caddee_core.system_representation.component.component import Rotor
 # rotor1 = Rotor(name='rotor1', geometry=geo, geometry_primitive_names=['Rotor, 0'])
 # system_representation.add_component(rotor1)
 
@@ -101,8 +101,8 @@ geo.plot_meshes(plotting_points, mesh_plot_types=['point_cloud'], primitives_opa
 
 
 # Parameterization
-from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_functions import create_cartesian_enclosure_volume
-from caddee.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
+from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_functions import create_cartesian_enclosure_volume
+from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
 wing_ffd_bspline_volume = create_cartesian_enclosure_volume(wing.geometry_primitives, num_control_points=(2, 10, 2), order=(2,4,2))
 wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_bspline_volume, embedded_entities=wing.geometry_primitives)

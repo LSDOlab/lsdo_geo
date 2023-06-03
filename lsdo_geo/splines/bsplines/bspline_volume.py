@@ -2,10 +2,10 @@ import numpy as np
 import array_mapper as am
 import scipy.sparse as sps
 
-from caddee.cython.basis_matrix_volume_py import get_basis_volume_matrix
-from caddee.cython.volume_projection_py import compute_volume_projection
+from lsdo_geo.cython.basis_matrix_volume_py import get_basis_volume_matrix
+from lsdo_geo.cython.volume_projection_py import compute_volume_projection
 
-from caddee.primitives.bsplines.bspline import BSpline
+from lsdo_geo.primitives.bsplines.bspline import BSpline
 
 import vedo
 

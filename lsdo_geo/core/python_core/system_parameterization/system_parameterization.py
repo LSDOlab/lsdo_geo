@@ -1,6 +1,6 @@
-# from caddee.utils.caddee_base import CADDEEBase
+# from lsdo_geo.utils.caddee_base import CADDEEBase
 
-from caddee.caddee_core.system_representation.system_representation import SystemRepresentation
+from lsdo_geo.caddee_core.system_representation.system_representation import SystemRepresentation
 
 # class SystemParameterization(CADDEEBase):
 class SystemParameterization():
@@ -49,7 +49,7 @@ class SystemParameterization():
         '''
         Constructs and returns the CADDEE model.
         '''
-        from caddee.csdl_core.system_parameterization_csdl.system_parameterization_csdl import SystemParameterizationCSDL
+        from lsdo_geo.csdl_core.system_parameterization_csdl.system_parameterization_csdl import SystemParameterizationCSDL
         return SystemParameterizationCSDL(system_parameterization=self)
 
 

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 from basis_matrix_volume_py import get_basis_volume_matrix
-from caddee.cython.get_open_uniform_py import get_open_uniform
+from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
 from volume_projection_py import compute_volume_projection
 
 order_u = 3
