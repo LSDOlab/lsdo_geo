@@ -5,12 +5,12 @@ This file is for functions associated with the B-splines "Package"
 import numpy as np
 import scipy.sparse as sps
 
-from lsdo_geo.primitives.bsplines.bspline_curve import BSplineCurve
-from lsdo_geo.primitives.bsplines.bspline_surface import BSplineSurface
-from lsdo_geo.primitives.bsplines.bspline_volume import BSplineVolume
+from lsdo_geo.splines.bsplines.bspline_curve import BSplineCurve
+from lsdo_geo.splines.bsplines.bspline_surface import BSplineSurface
+from lsdo_geo.splines.bsplines.bspline_volume import BSplineVolume
 
-from lsdo_geo.cython.basis_matrix_surface_py import get_basis_surface_matrix
-from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
+from caddee.cython.basis_matrix_surface_py import get_basis_surface_matrix
+from caddee.cython.get_open_uniform_py import get_open_uniform
 
 
 '''

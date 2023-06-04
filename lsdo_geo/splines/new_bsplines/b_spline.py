@@ -15,24 +15,35 @@ from dataclasses import dataclass
 
 # TODO: I'm going to leave this class as surface for now, but I want to generalize to n-dimensional.
 
-@dataclass(init=False)
+@dataclass
 class BSpline(m3l.Function):
     '''
     B-spline class
     '''
-    def __init__(self, name:str, function_space:BSplineSpace, control_points:np.ndarray=None, upstream_variables:dict=None, map:csdl.Model=None):
-        self.name = name
-        self.function_space = function_space
-        self.coefficients = control_points
-        self.control_points = control_points
-        self.upstream_variables = upstream_variables
-        self.map = map
+    control_points : np.ndarray = None
+
+    def __post_init__(self):
+        self.coefficients = self.control_points
 
         self.order_u = self.function_space.order[0]
         self.order_v = self.function_space.order[1]
         self.knots_u = self.function_space.knots[0]
         self.knots_v = self.function_space.knots[1]
         self.shape = self.control_points.shape
+
+    # def __init__(self, name:str, function_space:BSplineSpace, control_points:np.ndarray=None, upstream_variables:dict=None, map:csdl.Model=None):
+    #     self.name = name
+    #     self.function_space = function_space
+    #     self.coefficients = control_points
+    #     self.control_points = control_points
+    #     self.upstream_variables = upstream_variables
+    #     self.map = map
+
+    #     self.order_u = self.function_space.order[0]
+    #     self.order_v = self.function_space.order[1]
+    #     self.knots_u = self.function_space.knots[0]
+    #     self.knots_v = self.function_space.knots[1]
+    #     self.shape = self.control_points.shape
     
 
     def compute_evaluation_map(self, u_vec, v_vec):

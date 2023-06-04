@@ -6,8 +6,8 @@ import scipy.sparse as sps
 import array_mapper as am
 import vedo
 
-from lsdo_geo.cython.basis_matrix_surface_py import get_basis_surface_matrix
-from lsdo_geo.cython.surface_projection_py import compute_surface_projection
+from caddee.cython.basis_matrix_surface_py import get_basis_surface_matrix
+from caddee.cython.surface_projection_py import compute_surface_projection
 
 from lsdo_geo.splines.new_bsplines.b_spline_space import BSplineSpace
 
@@ -251,20 +251,26 @@ class BSplineSet(m3l.Function):
 
 
 if __name__ == "__main__":
-    from lsdo_geo.splines.new_bsplines.b_spline_space import BSplineSpace
-    from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
+    from lsdo_geo.splines.new_bsplines.b_spline_set_space import BSplineSetSpace
+    # from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
 
     num_control_points = 10
-    order = 4
-    knots_u = np.zeros((num_control_points + 2*order))
-    knots_v = np.zeros((num_control_points + 2*order))
-    get_open_uniform(order=order, num_control_points=num_control_points, knot_vector=knots_u)
-    get_open_uniform(order=order, num_control_points=num_control_points, knot_vector=knots_v)
-    space_of_cubic_bspline_surfaces_with_10_cp = BSplineSpace(name='cubic_bspline_surfaces_10_cp', order=(4,4), knots=(knots_u,knots_v))
+    order = 3
+    # knots_u = np.zeros((num_control_points + 2*order))
+    knots_u_beginning = np.zeros((order-1,))
+    knots_u_middle = np.linspace(0., 1., num_control_points-2*order)
+    knots_u_end = np.ones((order-1,))
+    knots_u = np.hstack((knots_u_beginning, knots_u_middle, knots_u_end))
+    knots_v = knots_u
+    # knots_v = np.zeros((num_control_points + 2*order))
+    # get_open_uniform(order=order, num_control_points=num_control_points, knot_vector=knots_u)
+    # get_open_uniform(order=order, num_control_points=num_control_points, knot_vector=knots_v)
+    space_of_cubic_bspline_surfaces_with_10_cp = BSplineSpace(name='cubic_bspline_surfaces_10_cp', order=(order,order), knots=(knots_u,knots_v))
 
-    control_points_line_x = np.linspace(num_control_points)
-    control_points_line = np.hstack((control_points_line_x, control_points_line_x, control_points_line_x))
-    control_points = np.meshgrid(control_points_line,control_points_line)
+    control_points_line = np.linspace(0., 1., num_control_points)
+    control_points_x, control_points_y = np.meshgrid(control_points_line,control_points_line)
+    control_points = np.stack((control_points_x, control_points_y, 0.1*np.random.rand(10,10)), axis=-1)
+    # control_points = np.hstack((control_points, np.random.rand(10,10).reshape((10,10,1))))
 
-    b_spline = BSpline(name='test_b_spline', function_space=space_of_cubic_bspline_surfaces_with_10_cp, control_points=control_points)
+    b_spline = BSplineSet(name='test_b_spline', function_space=space_of_cubic_bspline_surfaces_with_10_cp, control_points=control_points)
     b_spline.plot()
