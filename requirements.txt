@@ -11,3 +11,7 @@ sphinx-autoapi
 numpydoc
 gitpython
 git+https://github.com/anugrahjo/sphinx-collections.git
+
+scipy
+vedo
+git+https://github.com/LSDOLab/array_mapper.git

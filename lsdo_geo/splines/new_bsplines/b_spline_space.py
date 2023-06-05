@@ -21,4 +21,3 @@ class BSplineSpace(m3l.FunctionSpace):
         self.coefficients_shape = self.control_points_shape
         self.num_control_points = np.prod(self.control_points_shape)
         self.num_coefficients = self.num_control_points
-
