@@ -105,5 +105,5 @@ setup(
         'Topic :: Software Development :: Testing',
         'Topic :: Software Development :: Libraries',
     ],
-    # ext_modules=ext_modules
+    ext_modules=ext_modules
 )
