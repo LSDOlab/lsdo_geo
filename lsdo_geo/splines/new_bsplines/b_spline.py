@@ -6,8 +6,8 @@ import scipy.sparse as sps
 import array_mapper as am
 import vedo
 
-from caddee.cython.basis_matrix_surface_py import get_basis_surface_matrix
-from caddee.cython.surface_projection_py import compute_surface_projection
+from lsdo_geo.cython.basis_matrix_surface_py import get_basis_surface_matrix
+from lsdo_geo.cython.surface_projection_py import compute_surface_projection
 
 from lsdo_geo.splines.new_bsplines.b_spline_space import BSplineSpace
 
