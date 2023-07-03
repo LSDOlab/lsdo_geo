@@ -30,9 +30,6 @@ cdef get_basis_surface_matrix(
     elif v_der == 2:
         get_basis_v = get_basis2
 
-    # get_open_uniform(order_u, num_control_points_u, knot_vector_u)
-    # get_open_uniform(order_v, num_control_points_v, knot_vector_v)
-
     i_nz = 0
     for i_pt in range(num_points):
         i_start_u = get_basis_u(order_u, num_control_points_u, u_vec[i_pt], knot_vector_u, basis_u)
@@ -48,5 +45,3 @@ cdef get_basis_surface_matrix(
 
     free(basis_u)
     free(basis_v)
-    # free(knot_vector_u)
-    # free(knot_vector_v)
