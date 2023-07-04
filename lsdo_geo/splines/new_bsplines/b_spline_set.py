@@ -9,99 +9,61 @@ import vedo
 from lsdo_geo.cython.basis_matrix_surface_py import get_basis_surface_matrix
 from lsdo_geo.cython.surface_projection_py import compute_surface_projection
 
-from lsdo_geo.splines.new_bsplines.b_spline_space import BSplineSpace
+from lsdo_geo.splines.new_bsplines.b_spline_set_space import BSplineSetSpace
+from lsdo_geo.splines.new_bsplines.b_spline import BSpline
 
 from dataclasses import dataclass
 
-@dataclass(init=False)
+# TODO: I'm going to leave this class as surface for now, but I want to generalize to n-dimensional.
+
+@dataclass
 class BSplineSet(m3l.Function):
     '''
     B-spline class
     '''
-    def __init__(self, name:str, function_space:BSplineSpace, control_points:np.ndarray=None, upstream_variables:dict=None, map:csdl.Model=None,
-                 b_splines:dict=None):
-        self.name = name
-        self.function_space = function_space
-        self.coefficients = control_points
-        self.control_points = control_points
-        self.upstream_variables = upstream_variables
-        self.map = map
+    space : BSplineSetSpace
+    # b_splines : dict[str, BSpline] = None # NOTE: DON'T DO THIS. A B-spline set is a function picked from the space of B-spline set functions.
+    # This functionality can be achieved by creating a function that will create this BSplineSet from a dictionary of B-splines.
 
-        self.order_u = self.function_space.order[0]
-        self.order_v = self.function_space.order[1]
-        self.knots_u = self.function_space.knots[0]
-        self.knots_v = self.function_space.knots[1]
-        self.shape = self.control_points.shape
+    def __post_init__(self):
+        # self.coefficients = self.control_points
+        self.control_points = self.coefficients
+        self.num_physical_dimensions = self.control_points.shape[-1]
 
-        self.b_splines = b_splines
-    
+        self.num_control_points = np.prod(self.control_points.shape[:-1])
 
-    def compute_evaluation_map(self, u_vec, v_vec):
-        data = np.zeros(len(u_vec) * self.order_u * self.order_v)
-        row_indices = np.zeros(len(data), np.int32)
-        col_indices = np.zeros(len(data), np.int32)
+        # self.control_points_shape = self.space.control_points_shape
 
-        num_control_points = self.shape[0] * self.shape[1]
+        # NOTE: For aggregation, see not on BSplineSetSpace (it should come later probably)
+        # # Promote attributes to make this object a bit more intuitive
+        # self.order = self.space.order
+        # self.knots = self.space.knots
+        # self.num_control_points = self.space.num_control_points
+        # self.num_parametric_dimensions = self.space.num_parametric_dimensions
 
-        get_basis_surface_matrix(self.order_u, self.shape[0], 0, u_vec, self.knots_u, 
-            self.order_v, self.shape[1], 0, v_vec, self.knots_v, 
-            len(u_vec), data, row_indices, col_indices)
 
-        basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_control_points) )
+    # NOTE: I need some sort of index here to specify which B-spline it is? Seems necessary.
+    def evaluate_points(self, parametric_coordinates:np.ndarray) -> sps.csc_matrix:       
+        num_control_points = self.num_control_points
         
-        return basis0
-
-    def compute_derivative_evaluation_map(self, u_vec, v_vec):
-        data = np.zeros(len(u_vec) * self.order_u * self.order_v)
-        row_indices = np.zeros(len(data), np.int32)
-        col_indices = np.zeros(len(data), np.int32)        
-
-        num_control_points = self.shape[0] * self.shape[1]
-
-        get_basis_surface_matrix(self.order_u, self.control_points.shape[0], 1, u_vec, self.knots_u, 
-            self.order_v, self.control_points.shape[1], 1, v_vec, self.knots_v, 
-            len(u_vec), data, row_indices, col_indices)
-
-        basis1 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_control_points) )
-        
-        return basis1
-
-    def compute_second_derivative_evaluation_map(self, u_vec, v_vec):
-        data = np.zeros(len(u_vec) * self.order_u * self.order_v)
-        row_indices = np.zeros(len(data), np.int32)
-        col_indices = np.zeros(len(data), np.int32)      
-
-        num_control_points = self.shape[0] * self.shape[1]
-        
-        get_basis_surface_matrix(self.order_u, self.control_points.shape[0], 2, u_vec, self.knots_u, 
-            self.order_v, self.control_points.shape[1], 2, v_vec, self.knots_v, 
-            len(u_vec), data, row_indices, col_indices)
-
-        basis2 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_control_points) )
-        
-        return basis2
-
-    def evaluate_points(self, u_vec, v_vec):       
-        num_control_points = self.shape[0] * self.shape[1]
-        
-        basis0 = self.compute_evaluation_map(u_vec, v_vec)
-        points = basis0.dot(self.control_points.reshape((num_control_points, self.shape[2])))
+        basis0 = self.space.compute_evaluation_map(parametric_coordinates)
+        points = basis0.dot(self.control_points.reshape((num_control_points, self.num_physical_dimensions)))
 
         return points
 
-    def evaluate_derivative(self, u_vec, v_vec):
-        num_control_points = self.shape[0] * self.shape[1]
+    def evaluate_derivative(self, parametric_coordinates:np.ndarray) -> sps.csc_matrix:
+        num_control_points = self.num_control_points
         
-        basis1 = self.compute_derivative_evaluation_map(u_vec, v_vec)
-        derivs1 = basis1.dot(self.control_points.reshape((num_control_points, self.shape[2])))
+        basis1 = self.space.compute_derivative_evaluation_map(parametric_coordinates)
+        derivs1 = basis1.dot(self.control_points.reshape((num_control_points, self.num_physical_dimensions)))
 
         return derivs1 
 
-    def evaluate_second_derivative(self, u_vec, v_vec):
-        num_control_points = self.shape[0] * self.shape[1]
+    def evaluate_second_derivative(self, parametric_coordinates:np.ndarray) -> sps.csc_matrix:
+        num_control_points = self.num_control_points
         
-        basis2 = self.compute_second_derivative_evaluation_map(u_vec, v_vec)
-        derivs2 = basis2.dot(self.control_points.reshape((num_control_points, self.shape[2])))
+        basis2 = self.space.compute_second_derivative_evaluation_map(parametric_coordinates)
+        derivs2 = basis2.dot(self.control_points.reshape((num_control_points, self.num_physical_dimensions)))
 
         return derivs2
 
@@ -127,20 +89,21 @@ class BSplineSet(m3l.Function):
         
         u_vec_flattened = np.zeros(num_points)
         v_vec_flattened = np.zeros(num_points)
-        num_control_points = np.cumprod(self.shape[:-1])[-1]
+        num_control_points = self.num_control_points
 
         compute_surface_projection(
-            np.array([self.order_u]), np.array([self.shape[0]]),
-            np.array([self.order_v]), np.array([self.shape[1]]),
+            np.array([self.order[0]]), np.array([self.control_points_shape[0]]),
+            np.array([self.order[1]]), np.array([self.control_points_shape[1]]),
             num_points, max_iter,
             flattened_points, 
             self.control_points.reshape((-1,)),
-            self.knots_u, self.knots_v,
+            self.knots[0], self.knots[1],
             u_vec_flattened, v_vec_flattened, grid_search_n,
             direction.reshape((-1,)), np.zeros((num_points,), dtype=int), self.control_points.reshape((num_control_points, -1))
         )
 
-        map = self.compute_evaluation_map(u_vec_flattened, v_vec_flattened)
+        parametric_coordinates = np.stack((u_vec_flattened, v_vec_flattened), axis=-1)
+        map = self.space.compute_evaluation_map(parametric_coordinates)
         projected_points = am.array(input=self.control_points.reshape((num_control_points,-1)), linear_map=map, shape=input_shape)
 
         if plot:
@@ -195,13 +158,14 @@ class BSplineSet(m3l.Function):
             if point_type == 'evaluated_points':
                 num_points_u = 25
                 num_points_v = 25
-                u_vec = np.einsum('i,j->ij', np.linspace(0., 1., num_points_u), np.ones(num_points_v)).flatten()
-                v_vec = np.einsum('i,j->ij', np.ones(num_points_u), np.linspace(0., 1., num_points_v)).flatten()
+                u_vec = np.einsum('i,j->ij', np.linspace(0., 1., num_points_u), np.ones(num_points_v)).reshape((-1,1))
+                v_vec = np.einsum('i,j->ij', np.ones(num_points_u), np.linspace(0., 1., num_points_v)).reshape((-1,1))
+                parametric_coordinates = np.hstack((u_vec, v_vec))
                 num_plotting_points = num_points_u * num_points_v
-                plotting_points = self.evaluate_points(u_vec=u_vec, v_vec=v_vec)
+                plotting_points = self.evaluate_points(parametric_coordinates=parametric_coordinates)
                 plotting_points_shape = (num_points_u, num_points_v, plotting_points.shape[-1])
             elif point_type == 'control_points':
-                plotting_points_shape = self.shape
+                plotting_points_shape = self.control_points.shape
                 num_plotting_points = np.cumprod(plotting_points_shape[:-1])[-1]
                 plotting_points = self.control_points.reshape((num_plotting_points,-1))
 
@@ -246,31 +210,36 @@ class BSplineSet(m3l.Function):
             return plotting_elements
 
 
-
-
-
-
 if __name__ == "__main__":
-    from lsdo_geo.splines.new_bsplines.b_spline_set_space import BSplineSetSpace
-    # from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
+    from lsdo_geo.splines.new_bsplines.b_spline_space import BSplineSpace
 
     num_control_points = 10
-    order = 3
-    # knots_u = np.zeros((num_control_points + 2*order))
-    knots_u_beginning = np.zeros((order-1,))
-    knots_u_middle = np.linspace(0., 1., num_control_points-2*order)
-    knots_u_end = np.ones((order-1,))
-    knots_u = np.hstack((knots_u_beginning, knots_u_middle, knots_u_end))
-    knots_v = knots_u
-    # knots_v = np.zeros((num_control_points + 2*order))
-    # get_open_uniform(order=order, num_control_points=num_control_points, knot_vector=knots_u)
-    # get_open_uniform(order=order, num_control_points=num_control_points, knot_vector=knots_v)
-    space_of_cubic_bspline_surfaces_with_10_cp = BSplineSpace(name='cubic_bspline_surfaces_10_cp', order=(order,order), knots=(knots_u,knots_v))
+    order = 4
+    space_of_cubic_bspline_surfaces_with_10_cp = BSplineSpace(name='cubic_bspline_surfaces_10_cp', order=(order,order),
+                                                              control_points_shape=(num_control_points,num_control_points))
 
     control_points_line = np.linspace(0., 1., num_control_points)
     control_points_x, control_points_y = np.meshgrid(control_points_line,control_points_line)
     control_points = np.stack((control_points_x, control_points_y, 0.1*np.random.rand(10,10)), axis=-1)
-    # control_points = np.hstack((control_points, np.random.rand(10,10).reshape((10,10,1))))
 
-    b_spline = BSplineSet(name='test_b_spline', function_space=space_of_cubic_bspline_surfaces_with_10_cp, control_points=control_points)
-    b_spline.plot()
+    b_spline = BSpline(name='test_b_spline', space=space_of_cubic_bspline_surfaces_with_10_cp, coefficients=control_points)
+
+    plotting_elements = b_spline.plot(point_types=['evaluated_points'], plot_types=['mesh'])
+
+    parametric_coordinates = np.array([
+        [0., 0.],
+        [0., 1.],
+        [1., 0.],
+        [1., 1.],
+        [0.5, 0.5],
+        [0.25, 0.75]
+    ])
+
+    print('points: ', b_spline.evaluate_points(parametric_coordinates=parametric_coordinates))
+    print('derivative:', b_spline.evaluate_derivative(parametric_coordinates=parametric_coordinates))
+    print('second derivative: ', b_spline.evaluate_second_derivative(parametric_coordinates=parametric_coordinates))
+
+    projecting_points_z = np.zeros((6,))
+    projecting_points = np.stack((parametric_coordinates[:,0], parametric_coordinates[:,1], projecting_points_z), axis=-1)
+
+    b_spline.project(points=projecting_points, plot=True)
