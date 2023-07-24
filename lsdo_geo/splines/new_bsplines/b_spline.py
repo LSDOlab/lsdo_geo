@@ -43,21 +43,29 @@ class BSpline(m3l.Function):
 
         return points
 
-    def evaluate_derivative(self, parametric_coordinates:np.ndarray) -> sps.csc_matrix:
+    def evaluate_derivative(self, parametric_coordinates:np.ndarray, parametric_derivative_order=None) -> sps.csc_matrix:
         num_control_points = self.num_control_points
         
-        basis1 = self.space.compute_derivative_evaluation_map(parametric_coordinates)
-        derivs1 = basis1.dot(self.control_points.reshape((num_control_points, self.num_physical_dimensions)))
+        basis = self.space.compute_evaluation_map(parametric_coordinates, parametric_derivative_order)
+        output = basis.dot(self.control_points.reshape((num_control_points, self.num_physical_dimensions)))
 
-        return derivs1 
+        return output 
 
-    def evaluate_second_derivative(self, parametric_coordinates:np.ndarray) -> sps.csc_matrix:
-        num_control_points = self.num_control_points
+    # def evaluate_derivative(self, parametric_coordinates:np.ndarray, parametric_derivative_order=None) -> sps.csc_matrix:
+    #     num_control_points = self.num_control_points
         
-        basis2 = self.space.compute_second_derivative_evaluation_map(parametric_coordinates)
-        derivs2 = basis2.dot(self.control_points.reshape((num_control_points, self.num_physical_dimensions)))
+    #     basis1 = self.space.compute_derivative_evaluation_map(parametric_coordinates)
+    #     derivs1 = basis1.dot(self.control_points.reshape((num_control_points, self.num_physical_dimensions)))
 
-        return derivs2
+    #     return derivs1 
+
+    # def evaluate_second_derivative(self, parametric_coordinates:np.ndarray) -> sps.csc_matrix:
+    #     num_control_points = self.num_control_points
+        
+    #     basis2 = self.space.compute_second_derivative_evaluation_map(parametric_coordinates)
+    #     derivs2 = basis2.dot(self.control_points.reshape((num_control_points, self.num_physical_dimensions)))
+
+    #     return derivs2
 
 
     def project(self, points:np.ndarray, direction:np.ndarray=None, grid_search_n:int=50,

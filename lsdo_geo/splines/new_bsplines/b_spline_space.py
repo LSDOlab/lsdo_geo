@@ -41,8 +41,16 @@ class BSplineSpace(m3l.FunctionSpace):
                 self.knots.append(knots_i)
 
 
-    def compute_evaluation_map(self, parametric_coordinates:np.ndarray) -> sps.csc_matrix:
+    def compute_evaluation_map(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> sps.csc_matrix:
         # NOTE: parametric coordinates are in shape (np,3) where 3 corresponds to u,v,w
+        num_parametric_coordinates = parametric_coordinates.shape[-1]
+        if parametric_derivative_order is None:
+            parametric_derivative_order = (0,)*num_parametric_coordinates
+        if type(parametric_derivative_order) is int:
+            parametric_derivative_order = (parametric_derivative_order,)*num_parametric_coordinates
+        elif len(parametric_derivative_order) == 1 and num_parametric_coordinates != 1:
+            parametric_derivative_order = parametric_derivative_order*num_parametric_coordinates
+
         num_points = np.prod(parametric_coordinates.shape[:-1])
         order_multiplied = 1
         for i in range(len(self.order)):
@@ -61,67 +69,67 @@ class BSplineSpace(m3l.FunctionSpace):
             order_v = self.order[1]
             knots_u = self.knots[0]
             knots_v = self.knots[1]
-            get_basis_surface_matrix(order_u, self.control_points_shape[0], 0, u_vec, knots_u, 
-                order_v, self.control_points_shape[1], 0, v_vec, knots_v, 
+            get_basis_surface_matrix(order_u, self.control_points_shape[0], parametric_derivative_order[0], u_vec, knots_u, 
+                order_v, self.control_points_shape[1], parametric_derivative_order[1], v_vec, knots_v, 
                 len(u_vec), data, row_indices, col_indices)
 
         basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_control_points))
         
         return basis0
 
-    def compute_derivative_evaluation_map(self, parametric_coordinates:np.ndarray) -> sps.csc_matrix:
-        num_points = np.prod(parametric_coordinates.shape[:-1])
-        order_multiplied = 1
-        for i in range(len(self.order)):
-            order_multiplied *= self.order[i]
+    # def compute_derivative_evaluation_map(self, parametric_coordinates:np.ndarray) -> sps.csc_matrix:
+    #     num_points = np.prod(parametric_coordinates.shape[:-1])
+    #     order_multiplied = 1
+    #     for i in range(len(self.order)):
+    #         order_multiplied *= self.order[i]
 
-        data = np.zeros(num_points * order_multiplied) 
-        row_indices = np.zeros(len(data), np.int32)
-        col_indices = np.zeros(len(data), np.int32)
+    #     data = np.zeros(num_points * order_multiplied) 
+    #     row_indices = np.zeros(len(data), np.int32)
+    #     col_indices = np.zeros(len(data), np.int32)
 
-        num_control_points = self.num_control_points
+    #     num_control_points = self.num_control_points
 
-        if self.num_parametric_dimensions == 2:
-            u_vec = parametric_coordinates[:,0].copy()
-            v_vec = parametric_coordinates[:,1].copy()
-            order_u = self.order[0]
-            order_v = self.order[1]
-            knots_u = self.knots[0]
-            knots_v = self.knots[1]
-            get_basis_surface_matrix(order_u, self.control_points_shape[0], 1, u_vec, knots_u, 
-                order_v, self.control_points_shape[1], 1, v_vec, knots_v, 
-                len(u_vec), data, row_indices, col_indices)
+    #     if self.num_parametric_dimensions == 2:
+    #         u_vec = parametric_coordinates[:,0].copy()
+    #         v_vec = parametric_coordinates[:,1].copy()
+    #         order_u = self.order[0]
+    #         order_v = self.order[1]
+    #         knots_u = self.knots[0]
+    #         knots_v = self.knots[1]
+    #         get_basis_surface_matrix(order_u, self.control_points_shape[0], 1, u_vec, knots_u, 
+    #             order_v, self.control_points_shape[1], 1, v_vec, knots_v, 
+    #             len(u_vec), data, row_indices, col_indices)
 
-        basis1 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_control_points))
+    #     basis1 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_control_points))
         
-        return basis1
+    #     return basis1
 
-    def compute_second_derivative_evaluation_map(self, parametric_coordinates:np.ndarray) -> sps.csc_matrix:
-        num_points = np.prod(parametric_coordinates.shape[:-1])
-        order_multiplied = 1
-        for i in range(len(self.order)):
-            order_multiplied *= self.order[i]
+    # def compute_second_derivative_evaluation_map(self, parametric_coordinates:np.ndarray) -> sps.csc_matrix:
+    #     num_points = np.prod(parametric_coordinates.shape[:-1])
+    #     order_multiplied = 1
+    #     for i in range(len(self.order)):
+    #         order_multiplied *= self.order[i]
 
-        data = np.zeros(num_points * order_multiplied) 
-        row_indices = np.zeros(len(data), np.int32)
-        col_indices = np.zeros(len(data), np.int32)
+    #     data = np.zeros(num_points * order_multiplied) 
+    #     row_indices = np.zeros(len(data), np.int32)
+    #     col_indices = np.zeros(len(data), np.int32)
 
-        num_control_points = self.num_control_points
+    #     num_control_points = self.num_control_points
 
-        if self.num_parametric_dimensions == 2:
-            u_vec = parametric_coordinates[:,0].copy()
-            v_vec = parametric_coordinates[:,1].copy()
-            order_u = self.order[0]
-            order_v = self.order[1]
-            knots_u = self.knots[0]
-            knots_v = self.knots[1]
-            get_basis_surface_matrix(order_u, self.control_points_shape[0], 2, u_vec, knots_u, 
-                order_v, self.control_points_shape[1], 2, v_vec, knots_v, 
-                len(u_vec), data, row_indices, col_indices)
+    #     if self.num_parametric_dimensions == 2:
+    #         u_vec = parametric_coordinates[:,0].copy()
+    #         v_vec = parametric_coordinates[:,1].copy()
+    #         order_u = self.order[0]
+    #         order_v = self.order[1]
+    #         knots_u = self.knots[0]
+    #         knots_v = self.knots[1]
+    #         get_basis_surface_matrix(order_u, self.control_points_shape[0], 2, u_vec, knots_u, 
+    #             order_v, self.control_points_shape[1], 2, v_vec, knots_v, 
+    #             len(u_vec), data, row_indices, col_indices)
 
-        basis2 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_control_points))
+    #     basis2 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_control_points))
         
-        return basis2
+    #     return basis2
 
 
 if __name__ == "__main__":
