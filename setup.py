@@ -88,6 +88,7 @@ setup(
         'setuptools',
         'wheel',
         'twine',
+        'cython',
     ],
     classifiers=[
         'Programming Language :: Python',
