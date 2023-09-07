@@ -51,7 +51,7 @@ class BSplineSpace(m3l.FunctionSpace):
         elif len(parametric_derivative_order) == 1 and num_parametric_coordinates != 1:
             parametric_derivative_order = parametric_derivative_order*num_parametric_coordinates
 
-        num_points = np.prod(parametric_coordinates.shape[:-1])
+        num_points = np.prod(parametric_coordinates.shape)
         order_multiplied = 1
         for i in range(len(self.order)):
             order_multiplied *= self.order[i]
