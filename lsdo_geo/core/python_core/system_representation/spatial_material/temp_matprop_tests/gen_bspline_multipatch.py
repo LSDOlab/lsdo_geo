@@ -1,7 +1,7 @@
 import numpy as np
 import caddee
-import lsdo_geo.primitives.bsplines as bs
-import lsdo_geo.primitives.bsplines.bspline_functions as bsf
+import lsdo_geo.primitives.b_splines as bs
+import lsdo_geo.primitives.b_splines.b_spline_functions as bsf
 import lsdo_geo.caddee_core.system_representation.spatial_representation as spatial_representation
 import lsdo_geo.caddee_core.system_representation.spatial_material.ls_primitive as ls_primitive
 
@@ -23,18 +23,18 @@ z3v = (-x3v**2+1)/4
 t3v = .015+.01*y3v
 
 spatial_data1 = np.dstack((x1v,y1v,z1v))
-spatial_bspline1 = bsf.fit_bspline(spatial_data1)
+spatial_b_spline1 = bsf.fit_b_spline(spatial_data1)
 spatial_data2 = np.dstack((x2v,y2v,z2v))
-spatial_bspline2 = bsf.fit_bspline(spatial_data2)
+spatial_b_spline2 = bsf.fit_b_spline(spatial_data2)
 spatial_data3 = np.dstack((x3v,y3v,z3v))
-spatial_bspline3 = bsf.fit_bspline(spatial_data3)
+spatial_b_spline3 = bsf.fit_b_spline(spatial_data3)
 
 # ms = spatial_representation.SpatialRepresentation()
-# ms.primitives["spatial"] = spatial_bspline
+# ms.primitives["spatial"] = spatial_b_spline
 # # ms.plot(plot_type="mesh", show=False)
 # ms.plot(show=False)
 
-#spatial_bspline.plot()
+#spatial_b_spline.plot()
 
 nu, nv = (40,40)
 u = np.linspace(0,1,nu)
@@ -46,9 +46,9 @@ points2 = np.zeros((nu,nv,3))
 points3 = np.zeros((nu,nv,3))
 
 for i in range(0,nv):
-    points1[i,:,:] = spatial_bspline1.evaluate_points(u_v[i,:],v_v[i,:])
-    points2[i,:,:] = spatial_bspline2.evaluate_points(u_v[i,:],v_v[i,:])
-    points3[i,:,:] = spatial_bspline3.evaluate_points(u_v[i,:],v_v[i,:])
+    points1[i,:,:] = spatial_b_spline1.evaluate_points(u_v[i,:],v_v[i,:])
+    points2[i,:,:] = spatial_b_spline2.evaluate_points(u_v[i,:],v_v[i,:])
+    points3[i,:,:] = spatial_b_spline3.evaluate_points(u_v[i,:],v_v[i,:])
 
 # make level set data
 r = 0.5
@@ -56,9 +56,9 @@ ls_data1 = np.zeros(z1v.shape)
 ls_data2 = np.zeros(z2v.shape)
 ls_data3 = np.zeros(z3v.shape)
 
-parametric_coords1 = spatial_bspline1.project(spatial_data1, return_parametric_coordinates=True)
-parametric_coords2 = spatial_bspline2.project(spatial_data2, return_parametric_coordinates=True)
-parametric_coords3 = spatial_bspline3.project(spatial_data3, return_parametric_coordinates=True)
+parametric_coords1 = spatial_b_spline1.project(spatial_data1, return_parametric_coordinates=True)
+parametric_coords2 = spatial_b_spline2.project(spatial_data2, return_parametric_coordinates=True)
+parametric_coords3 = spatial_b_spline3.project(spatial_data3, return_parametric_coordinates=True)
 
 for i in range(0,nx):
     for j in range(0,ny):
@@ -76,20 +76,20 @@ for i in range(0,nx):
             ls_data3[i,j] = -1
 
 
-#ls bsplines
+#ls b_splines
 ls_data1 = np.expand_dims(ls_data1, axis=2)
 ls_data2 = np.expand_dims(ls_data2, axis=2)
 ls_data3 = np.expand_dims(ls_data3, axis=2)
 
 n_cp = 15
 
-ls_bspline1 = bsf.fit_bspline(ls_data1)
-ls_bspline2 = bsf.fit_bspline(ls_data2)
-ls_bspline3 = bsf.fit_bspline(ls_data3)
+ls_b_spline1 = bsf.fit_b_spline(ls_data1)
+ls_b_spline2 = bsf.fit_b_spline(ls_data2)
+ls_b_spline3 = bsf.fit_b_spline(ls_data3)
 
-levelset1 = ls_primitive.LSPrimitive(primitive=ls_bspline1)
-levelset2 = ls_primitive.LSPrimitive(primitive=ls_bspline2)
-levelset3 = ls_primitive.LSPrimitive(primitive=ls_bspline3)
+levelset1 = ls_primitive.LSPrimitive(primitive=ls_b_spline1)
+levelset2 = ls_primitive.LSPrimitive(primitive=ls_b_spline2)
+levelset3 = ls_primitive.LSPrimitive(primitive=ls_b_spline3)
 
 ls_values1 = np.zeros((nu,nv,1))
 ls_values2 = np.zeros((nu,nv,1))
@@ -100,23 +100,23 @@ for i in range(0,nv):
     ls_values2[i,:,:] = levelset2.evaluate_points(u_v[i,:],v_v[i,:])
     ls_values3[i,:,:] = levelset3.evaluate_points(u_v[i,:],v_v[i,:])
 
-# thickness bsplines
+# thickness b_splines
 t1v = np.expand_dims(t1v, axis=2)
 t2v = np.expand_dims(t2v, axis=2)
 t3v = np.expand_dims(t3v, axis=2)
 
-t1_bspline = bsf.fit_bspline(t1v)
-t2_bspline = bsf.fit_bspline(t2v)
-t3_bspline = bsf.fit_bspline(t3v)
+t1_b_spline = bsf.fit_b_spline(t1v)
+t2_b_spline = bsf.fit_b_spline(t2v)
+t3_b_spline = bsf.fit_b_spline(t3v)
 
 t_values1 = np.zeros((nu,nv,1))
 t_values2 = np.zeros((nu,nv,1))
 t_values3 = np.zeros((nu,nv,1))
 
 for i in range(0,nv):
-    t_values1[i,:,:] = t1_bspline.evaluate_points(u_v[i,:],v_v[i,:])
-    t_values2[i,:,:] = t2_bspline.evaluate_points(u_v[i,:],v_v[i,:])
-    t_values3[i,:,:] = t3_bspline.evaluate_points(u_v[i,:],v_v[i,:])
+    t_values1[i,:,:] = t1_b_spline.evaluate_points(u_v[i,:],v_v[i,:])
+    t_values2[i,:,:] = t2_b_spline.evaluate_points(u_v[i,:],v_v[i,:])
+    t_values3[i,:,:] = t3_b_spline.evaluate_points(u_v[i,:],v_v[i,:])
 
 
 max_t = max([np.amax(t_values1), np.amax(t_values2), np.amax(t_values3)])

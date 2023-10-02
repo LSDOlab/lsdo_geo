@@ -3,9 +3,9 @@ import numpy as np
 import scipy.sparse as sps
 import array_mapper as am
 
-from lsdo_geo.primitives.bsplines.bspline_curve import BSplineCurve
-from lsdo_geo.primitives.bsplines.bspline_surface import BSplineSurface
-from lsdo_geo.primitives.bsplines.bspline_volume import BSplineVolume
+from lsdo_geo.primitives.b_splines.b_spline_curve import BSplineCurve
+from lsdo_geo.primitives.b_splines.b_spline_surface import BSplineSurface
+from lsdo_geo.primitives.b_splines.b_spline_volume import BSplineVolume
 
 import vedo
 
@@ -18,9 +18,9 @@ class Parameter:
     property_type : str
         The type of property that is being parameterized (for example: scale_v)
     order: int
-        The degree of the bspline curve to represent the parameter.
+        The degree of the b_spline curve to represent the parameter.
     num_dof: int
-        The number of degrees of freedom for the parameter (control points for bspline).
+        The number of degrees of freedom for the parameter (control points for b_spline).
     value: np.ndarray
         The prescribed value for parameter
     connection_name: str
@@ -250,9 +250,9 @@ class SRBGFFDBlock(FFDBlock):
                 section_property_map[:,0] = 1.  # TODO make work or piecewise constant.
                 section_property_map = section_property_map.tocsc()
             else:
-                parameter_bspline_curve = BSplineCurve(name=f'order_{parameter.order}_{parameter.property_type}', order_u=order, control_points=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
-                parameter_bspline_map = parameter_bspline_curve.compute_evaluation_map(np.linspace(0., 1., num_sections))
-                section_property_map = parameter_bspline_map
+                parameter_b_spline_curve = BSplineCurve(name=f'order_{parameter.order}_{parameter.property_type}', order_u=order, control_points=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
+                parameter_b_spline_map = parameter_b_spline_curve.compute_evaluation_map(np.linspace(0., 1., num_sections))
+                section_property_map = parameter_b_spline_map
 
             # add section property map to section properties map to create a single map
             if parameter.value is not None or parameter.connection_name is not None:
@@ -323,9 +323,9 @@ class SRBGFFDBlock(FFDBlock):
                 sectional_rotation_map[:,0] = 1.  # TODO make work or piecewise constant.
                 sectional_rotation_map = sectional_rotation_map.tocsc()
             else:
-                parameter_bspline_curve = BSplineCurve(name=f'order_{order}_{parameter.property_type}', order_u=order, control_points=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
-                parameter_bspline_map = parameter_bspline_curve.compute_evaluation_map(np.linspace(0., 1., num_sections))
-                sectional_rotation_map = parameter_bspline_map
+                parameter_b_spline_curve = BSplineCurve(name=f'order_{order}_{parameter.property_type}', order_u=order, control_points=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
+                parameter_b_spline_map = parameter_b_spline_curve.compute_evaluation_map(np.linspace(0., 1., num_sections))
+                sectional_rotation_map = parameter_b_spline_map
 
             # add section property map to section properties map to create a single map            
             rotational_section_properties_map[(property_index*num_sections):((property_index+1)*num_sections), parameter_starting_index:parameter_ending_index] = sectional_rotation_map
@@ -439,7 +439,7 @@ class SRBGFFDBlock(FFDBlock):
         if self.num_dof == 0:
             return None
 
-        embedded_entities = self.project(self.embedded_points, grid_search_n=5, plot=False)
+        embedded_entities = self.project(self.embedded_points, grid_search_density=5, plot=False)
         self.embedded_entities_map = embedded_entities.linear_map
 
         return self.embedded_entities_map
@@ -473,9 +473,9 @@ class SRBGFFDBlock(FFDBlock):
         return cost_matrix
 
 
-    def project(self, points:np.ndarray, direction:np.ndarray=None, grid_search_n:int=50,
+    def project(self, points:np.ndarray, direction:np.ndarray=None, grid_search_density:int=50,
                     max_iter:int=100, return_parametric_coordinates:bool=False, plot:bool=False):
-        return self.primitive.project(points=points, direction=direction, grid_search_n=grid_search_n,
+        return self.primitive.project(points=points, direction=direction, grid_search_density=grid_search_density,
                     max_iter=max_iter, return_parametric_coordinates=return_parametric_coordinates, plot=plot)
 
 

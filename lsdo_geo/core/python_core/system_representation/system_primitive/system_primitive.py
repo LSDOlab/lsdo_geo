@@ -111,7 +111,7 @@ class SystemPrimitive:
         # return derivs2
         pass
 
-    def project(self, points:np.ndarray, direction:np.ndarray=None, grid_search_n:int=50,
+    def project(self, points:np.ndarray, direction:np.ndarray=None, grid_search_density:int=50,
                     max_iter:int=100, properties:list=['geometry']):
         '''
         Parameters
@@ -122,14 +122,14 @@ class SystemPrimitive:
             The list of primitives to project onto.
         direction : {np.ndarray, am.MappedArray}, optional
             An axis for perfoming projection along an axis. The projection will return the closest point to the axis.
-        grid_search_n : int, optional
+        grid_search_density : int, optional
             The resolution of the grid search prior to the Newton iteration for solving the optimization problem.
         max_iterations : int, optional
             The maximum number of iterations for the Newton iteration.
         properties : list
             The list of properties to be returned (in order) {geometry, parametric_coordinates, (material_name, array_of_properties),...}
         '''
-        parametric_coordinates = self.geometry_primitive.project(points=points, direction=direction, grid_search_n=grid_search_n,
+        parametric_coordinates = self.geometry_primitive.project(points=points, direction=direction, grid_search_density=grid_search_density,
                     max_iter=max_iter, return_parametric_coordinates=True)
         # parametric_coordinates_flattened = parametric_coordinates.reshape((-1, parametric_coordinates.shape[-1]))
         

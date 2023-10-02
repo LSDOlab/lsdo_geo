@@ -4,7 +4,7 @@ import numpy as np
 # from lsdo_geo.caddee_core.system_representation.component.component import Component
 from lsdo_geo.caddee_core.system_representation.utils.material import Material
 from lsdo_geo.primitives.primitive import Primitive
-from lsdo_geo.primitives.bsplines import bspline_surface, bspline_functions
+from lsdo_geo.primitives.b_splines import b_spline_surface, b_spline_functions
 import scipy.sparse as sps
 import vedo
 import array_mapper as am

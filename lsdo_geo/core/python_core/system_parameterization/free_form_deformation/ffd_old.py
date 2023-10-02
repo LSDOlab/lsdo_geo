@@ -6,9 +6,9 @@ import scipy.sparse as sps
 import matplotlib.pyplot as plt
 from vedo import Points, Plotter, LegendBox
 
-from src.lsdo_geo.concept.bsplines.bspline_curve import BSplineCurve
-from src.lsdo_geo.concept.bsplines.bspline_surface import BSplineSurface
-from src.lsdo_geo.concept.bsplines.bspline_volume import BSplineVolume
+from src.lsdo_geo.concept.b_splines.b_spline_curve import BSplineCurve
+from src.lsdo_geo.concept.b_splines.b_spline_surface import BSplineSurface
+from src.lsdo_geo.concept.b_splines.b_spline_volume import BSplineVolume
 
 from src.lsdo_geo.concept.geometry.geocore.utils.calculate_rotation_mat import calculate_rotation_mat
 # import os
@@ -284,9 +284,9 @@ class FFDBlock(object):
                 section_property_map[:,0] = 1.  # TODO make work or piecewise constant.
                 section_property_map = section_property_map.tocsc()
             else:
-                parameter_bspline_curve = BSplineCurve(name=f'degree_{ffd_parameter.degree}_{property_name}', order_u=order, control_points=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
-                parameter_bspline_map = parameter_bspline_curve.compute_eval_map_points(np.linspace(0., 1., num_sections))
-                section_property_map = parameter_bspline_map
+                parameter_b_spline_curve = BSplineCurve(name=f'degree_{ffd_parameter.degree}_{property_name}', order_u=order, control_points=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
+                parameter_b_spline_map = parameter_b_spline_curve.compute_eval_map_points(np.linspace(0., 1., num_sections))
+                section_property_map = parameter_b_spline_map
 
             # add section property map to section properties map to create a single map
             if ffd_parameter.value is not None or ffd_parameter.connection_name is not None:
@@ -356,9 +356,9 @@ class FFDBlock(object):
                 sectional_rotation_map[:,0] = 1.  # TODO make work or piecewise constant.
                 sectional_rotation_map = sectional_rotation_map.tocsc()
             else:
-                parameter_bspline_curve = BSplineCurve(name=f'degree_{ffd_parameter.degree}_{property_name}', order_u=order, control_points=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
-                parameter_bspline_map = parameter_bspline_curve.compute_eval_map_points(np.linspace(0., 1., num_sections))
-                sectional_rotation_map = parameter_bspline_map
+                parameter_b_spline_curve = BSplineCurve(name=f'degree_{ffd_parameter.degree}_{property_name}', order_u=order, control_points=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
+                parameter_b_spline_map = parameter_b_spline_curve.compute_eval_map_points(np.linspace(0., 1., num_sections))
+                sectional_rotation_map = parameter_b_spline_map
 
             # add section property map to section properties map to create a single map            
             sectional_rotations_map[(property_index*num_sections):((property_index+1)*num_sections), parameter_starting_index:parameter_ending_index] = sectional_rotation_map
@@ -588,8 +588,8 @@ class FFDBlock(object):
 class FFDParameter:
     '''
     Inputs:
-    - degree: The degree of the bspline curve to represent the parameter.
-    - num_dof: The number of degrees of freedom for the parameter (control points for bspline).
+    - degree: The degree of the b_spline curve to represent the parameter.
+    - num_dof: The number of degrees of freedom for the parameter (control points for b_spline).
     - cost_factor: The cost weighting on using the parameter when achieving geometric inputs and constraints.
     - value: The prescribed value for parameter
     - connection_name: The name that be used to create a csdl hanging input.
@@ -676,15 +676,15 @@ if __name__ == "__main__":
     # 'Surf_WFWKRQIMCA, Wing, 0, 14', 'Surf_WFWKRQIMCA, Wing, 0, 15', 
     # ]
 
-    # bspline_entities = [geo.input_bspline_entity_dict[wing_surface_names[0]],
-    #    geo.input_bspline_entity_dict[wing_surface_names[1]], 
-    #    geo.input_bspline_entity_dict[wing_surface_names[2]],
-    #    geo.input_bspline_entity_dict[wing_surface_names[3]]]
+    # b_spline_entities = [geo.input_b_spline_entity_dict[wing_surface_names[0]],
+    #    geo.input_b_spline_entity_dict[wing_surface_names[1]], 
+    #    geo.input_b_spline_entity_dict[wing_surface_names[2]],
+    #    geo.input_b_spline_entity_dict[wing_surface_names[3]]]
 
 
     # local_axes = {'xprime': np.array([1,0,0]), 'yprime': np.array([0,1,0]), 'zprime': np.array([0,0,1]) }
 
-    # test_ffd = FFD('test', ffd_control_points, embedded_entities_pointers=bspline_entities)
+    # test_ffd = FFD('test', ffd_control_points, embedded_entities_pointers=b_spline_entities)
     test_ffd = FFD('test', ffd_control_points)
     
     test_ffd.add_shape_parameter('rot_x', 'linear', 2, 3, False, val=1.0)

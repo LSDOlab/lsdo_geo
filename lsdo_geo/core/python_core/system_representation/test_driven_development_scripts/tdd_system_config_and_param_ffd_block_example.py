@@ -100,11 +100,11 @@ points = np.array([
     ]
 ])
 wing_geometry_primitives = wing.get_geometry_primitives()
-wing_ffd_bspline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
-wing_ffd_bspline_volume.plot()
-# from lsdo_geo.primitives.bsplines.bspline_functions import create_bspline_from_corners
-# wing_ffd_bspline_volume = create_bspline_from_corners(points, order=(4,3,2), num_control_points=(10,4,3))
-wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_bspline_volume, embedded_entities=wing_geometry_primitives)
+wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+wing_ffd_b_spline_volume.plot()
+# from lsdo_geo.primitives.b_splines.b_spline_functions import create_b_spline_from_corners
+# wing_ffd_b_spline_volume = create_b_spline_from_corners(points, order=(4,3,2), num_control_points=(10,4,3))
+wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_b_spline_volume, embedded_entities=wing_geometry_primitives)
 wing_ffd_block.plot(plot_embedded_entities=True)
 wing_ffd_block.plot_sections(opacity=1.)
 
@@ -144,8 +144,8 @@ num_chordwise_vlm = 5
 leading_edge = wing.project(np.linspace(np.array([0., -9., 0.]), np.array([0., 9., 0.]), num_spanwise_vlm), direction=np.array([0., 0., -1.]))  # returns MappedArray
 trailing_edge = wing.project(np.linspace(np.array([4., -9., 0.]), np.array([4., 9., 0.]), num_spanwise_vlm), direction=np.array([0., 0., -1.]))   # returns MappedArray
 chord_surface = am.linspace(leading_edge, trailing_edge, num_chordwise_vlm)
-wing_upper_surface_wireframe = wing.project(chord_surface.value + np.array([0., 0., 1.]), direction=np.array([0., 0., -1.]), grid_search_n=25)
-wing_lower_surface_wireframe = wing.project(chord_surface.value - np.array([0., 0., 1.]), direction=np.array([0., 0., 1.]), grid_search_n=25)
+wing_upper_surface_wireframe = wing.project(chord_surface.value + np.array([0., 0., 1.]), direction=np.array([0., 0., -1.]), grid_search_density=25)
+wing_lower_surface_wireframe = wing.project(chord_surface.value - np.array([0., 0., 1.]), direction=np.array([0., 0., 1.]), grid_search_density=25)
 wing_camber_surface = am.linspace(wing_upper_surface_wireframe, wing_lower_surface_wireframe, 1) # this linspace will return average when n=1
 
 

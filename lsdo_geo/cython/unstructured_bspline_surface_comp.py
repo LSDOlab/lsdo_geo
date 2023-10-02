@@ -103,7 +103,7 @@ if __name__ == '__main__':
 
     prob.model.add_subsystem('inputs_comp', comp, promotes=['*'])
     prob.model.add_subsystem(
-        'bspline_surface', 
+        'b_spline_surface', 
         UnstructuredBSplineSurfaceComp(
             n_points=num_points, order_u=order_u, order_v=order_v, u_vec=u_vec, v_vec=v_vec,
             n_control_points_u=num_control_points_u, n_control_points_v=num_control_points_v, n_t=2,

@@ -678,7 +678,7 @@ class SRBGFFDSet:
 def ffd_block_project(ffd_block, project_points):
     if project_points:
         ffd_block.assemble()
-        return ffd_block.project(ffd_block.embedded_points, grid_search_n=5)
+        return ffd_block.project(ffd_block.embedded_points, grid_search_density=5)
     elif ffd_block.evaluation_map is not None:
         return ffd_block.evaluation_map
     else:

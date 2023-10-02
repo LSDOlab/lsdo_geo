@@ -78,8 +78,10 @@ cdef compute_surface_projection(
         num_control_points_v = surfs_num_control_points_v[ns]
         # get_open_uniform(order_u, num_control_points_u, knot_vector_u)
         # get_open_uniform(order_v, num_control_points_v, knot_vector_v)
-        for i in range(len(surfs_cps[ns,:])):
-            cps[i] = surfs_cps[ns,i]
+        # print('surf cps', surfs_cps)
+        # print('len(surf_cps)', len(surfs_cps[ns,:]))
+        # for i in range(len(surfs_cps[ns,:])):
+        #     cps[i] = surfs_cps[ns,i]
 
         # Getting normalizing factor measuring surface size
 
@@ -179,8 +181,11 @@ cdef compute_surface_projection(
                             order_u, num_control_points_u, x[0], knot_vector_u, basis_u0)
                         i_start_v = get_basis0(
                             order_v, num_control_points_v, x[1], knot_vector_v, basis_v0)
-                        #print('x0',x[0],'x1',x[1])
-                        #print('i_start_u',i_start_u,'i_start_v',i_start_v)
+                        # print('x0',x[0],'x1',x[1])
+                        # if x[0] == 0.25:
+                        #     print('order_u', order_u, 'num_control_points_u', num_control_points_u)
+                        #     print('order_v', order_v, 'num_control_points_v', num_control_points_v)
+                        #     print('i_start_u',i_start_u,'i_start_v',i_start_v)
                         for k in range(3): 
                             P00[k] = 0.
                             for i_order_u in range(order_u):
@@ -190,12 +195,16 @@ cdef compute_surface_projection(
                                     C[k] = cps[index]
 
                                     P00[k] = P00[k] + basis_u0[i_order_u] * basis_v0[i_order_v] * C[k]
+                        # print('P00',P00)
                         for k in range(3) :
                             D[k] = P00[k] - P[k]
                         temp_distance = 0
                         temp_product = 0
                         if norm(3,A) == 0:
                             temp_distance = norm(3,D)
+                            # if x[0] < 0.3 or x[0] == 1:
+                            # if x[0] <= 0.255 and x[1] > 0.6:
+                            #     print('u:', x[0], ' v:', x[1], 'P00', P00, 'D', D, ' distance:', temp_distance, ' min_distance:', distance)
                             if temp_distance < distance :
                                 u_closest = x[0]
                                 v_closest = x[1]
@@ -207,7 +216,8 @@ cdef compute_surface_projection(
                             tao = 1e-5
                             temp_distance2 = dot(3,D,D) - dot(3,D,nA)**2 + tao*dot(3,D,D)#dot(3, n1, n2)
                             temp_distance2 = temp_distance2/size_norm_factor
-                            #print(i, temp_product)
+                            # print('u:', x[0], ' v:', x[1], 'P00', P00, ' distance:', temp_distance2, ' min_distance:', distance2)
+                            # print(i, distance2)
                             if temp_distance2 < distance2 :
                                 #print('test',i, temp_product)
                                 u_closest = x[0]
@@ -225,11 +235,6 @@ cdef compute_surface_projection(
         #for i in range(num_points) :
             #u_vec[i] = u_vec_initial[i]
             #v_vec[i] = v_vec_initial[i]
-
-
-
-
-
 
 
 

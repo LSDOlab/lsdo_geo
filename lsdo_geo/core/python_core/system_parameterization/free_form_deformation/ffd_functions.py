@@ -2,9 +2,9 @@
 This file is for functions associated with the FFD "Package"
 '''
 
-from lsdo_geo.primitives.bsplines.bspline_surface import BSplineSurface
-from lsdo_geo.primitives.bsplines.bspline_volume import BSplineVolume
-from lsdo_geo.primitives.bsplines.bspline_functions import generate_open_uniform_knot_vector, create_bspline_from_corners
+from lsdo_geo.primitives.b_splines.b_spline_surface import BSplineSurface
+from lsdo_geo.primitives.b_splines.b_spline_volume import BSplineVolume
+from lsdo_geo.primitives.b_splines.b_spline_functions import generate_open_uniform_knot_vector, create_b_spline_from_corners
 
 import numpy as np
 
@@ -62,7 +62,7 @@ def create_cartesian_enclosure_volume(enclosed_entities:list, num_control_points
         new_xyz_to_uvw_indices[swapped_xyz_index] = xyz_index
         xyz_to_uvw_indices = new_xyz_to_uvw_indices
 
-    volume = create_bspline_from_corners(corners=points, order=order, num_control_points=num_control_points,
+    volume = create_b_spline_from_corners(corners=points, order=order, num_control_points=num_control_points,
             knot_vectors=knot_vectors, name=None)
 
     return volume

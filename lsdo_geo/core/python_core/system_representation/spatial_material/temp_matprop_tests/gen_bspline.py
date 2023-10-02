@@ -1,7 +1,7 @@
 import numpy as np
 import caddee
-import lsdo_geo.primitives.bsplines as bs
-import lsdo_geo.primitives.bsplines.bspline_functions as bsf
+import lsdo_geo.primitives.b_splines as bs
+import lsdo_geo.primitives.b_splines.b_spline_functions as bsf
 import lsdo_geo.caddee_core.system_representation.spatial_representation as spatial_representation
 import lsdo_geo.caddee_core.system_representation.spatial_material.ls_primitive as ls_primitive
 
@@ -15,16 +15,16 @@ spatial_data = np.dstack((xv,yv,zv))
 
 print(spatial_data.shape)
 
-spatial_bspline = bsf.fit_bspline(spatial_data)
+spatial_b_spline = bsf.fit_b_spline(spatial_data)
 
-print(spatial_bspline.knots_u)
+print(spatial_b_spline.knots_u)
 
 # ms = spatial_representation.SpatialRepresentation()
-# ms.primitives["spatial"] = spatial_bspline
+# ms.primitives["spatial"] = spatial_b_spline
 # # ms.plot(plot_type="mesh", show=False)
 # ms.plot(show=False)
 
-#spatial_bspline.plot()
+#spatial_b_spline.plot()
 
 
 nu, nv = (20,20)
@@ -41,7 +41,7 @@ points = np.zeros((nu,nv,3))
 
 for i in range(0,nv):
     #print(i)
-    points[i,:,:] = spatial_bspline.evaluate_points(u_v[i,:],v_v[i,:])
+    points[i,:,:] = spatial_b_spline.evaluate_points(u_v[i,:],v_v[i,:])
     #print(points[i,0,0])
 
 # print(points)
@@ -53,7 +53,7 @@ for i in range(0,nv):
 r = 0.5
 ls_data = np.zeros(zv.shape)
 
-parametric_coords = spatial_bspline.project(spatial_data, return_parametric_coordinates=True)
+parametric_coords = spatial_b_spline.project(spatial_data, return_parametric_coordinates=True)
 
 
 for i in range(0,nx):
@@ -66,9 +66,9 @@ for i in range(0,nx):
 ls_data = np.expand_dims(ls_data, axis=2)
 
 
-ls_bspline = bsf.fit_bspline(ls_data)
+ls_b_spline = bsf.fit_b_spline(ls_data)
 
-levelset = ls_primitive.LSPrimitive(primitive=ls_bspline)
+levelset = ls_primitive.LSPrimitive(primitive=ls_b_spline)
 
 ls_values = np.zeros((nu,nv,1))
 for i in range(0,nv):

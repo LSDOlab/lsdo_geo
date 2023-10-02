@@ -21,7 +21,7 @@ print('eVTOL-sw-bounded.IGS')
 path = str(Path(Path(__file__).parent.absolute()).parent.absolute())
 file_name = os.path.join(path, 'DesignGeometry/CAD/eVTOL-sw-bounded.IGS')
 iges = pyiges.read(file_name)#examples.impeller
-bsurf = iges.bspline_surfaces()
+bsurf = iges.b_spline_surfaces()
 print('Number of surfaces: ', len(bsurf))
 #ns = 27
 temp = 1e16

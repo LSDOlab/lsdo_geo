@@ -40,7 +40,7 @@ class Component(CADDEEBase):
     def get_geometry_primitives(self):
         return self.spatial_representation.get_geometry_primitives(search_names=self.primitive_names)
     
-    def project(self, points:np.ndarray, direction:np.ndarray=None, grid_search_n:int=25,
+    def project(self, points:np.ndarray, direction:np.ndarray=None, grid_search_density:int=25,
                 max_iterations=100, offset:np.ndarray=None, plot:bool=False):
         '''
         Projects points onto the system.
@@ -53,7 +53,7 @@ class Component(CADDEEBase):
             The list of primitives to project onto.
         direction : {np.ndarray, am.MappedArray}, optional
             An axis for perfoming projection along an axis. The projection will return the closest point to the axis.
-        grid_search_n : int, optional
+        grid_search_density : int, optional
             The resolution of the grid search prior to the Newton iteration for solving the optimization problem.
         max_iterations : int, optional
             The maximum number of iterations for the Newton iteration.
@@ -65,7 +65,7 @@ class Component(CADDEEBase):
             A boolean on whether or not to plot the projection result.
         '''
         projected_points = self.spatial_representation.project(points=points, targets=self.primitive_names.copy(), 
-                direction=direction, grid_search_n=grid_search_n, max_iterations=max_iterations, offset=offset, plot=plot)
+                direction=direction, grid_search_density=grid_search_density, max_iterations=max_iterations, offset=offset, plot=plot)
 
         return projected_points
 

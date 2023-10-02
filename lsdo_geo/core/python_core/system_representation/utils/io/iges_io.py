@@ -1,7 +1,7 @@
 import numpy as np
 from vedo import Points, Plotter, colors, LegendBox, show
 
-from lsdo_geo.primitives.bsplines.bspline_surface import BSplineSurface
+from lsdo_geo.primitives.b_splines.b_spline_surface import BSplineSurface
 
 import pandas as pd
 import re
@@ -39,7 +39,7 @@ def read_iges(geo,file_name):
     # surf_list = []
     # # Directory lines is ALWAYS a multiple of 2
     # for i in range(directory_lines//2):
-    #     # 128 is bspline surface type
+    #     # 128 is b_spline surface type
     #     if int(Ifile[2*i + dir_offset][0:8]) == 128:
     #         start = int(Ifile[2*i + dir_offset][8:16])
     #         num_lines = int(Ifile[2*i + 1 + dir_offset][24:32])
@@ -207,7 +207,7 @@ def read_iges(geo,file_name):
             knots_v = knots_v/knots_v[-1]
             print('knots_u',knots_u,'knots_v',knots_v)
             exit()
-            geo.input_bspline_entity_dict[parsed_info[0]] = (BSplineSurface(
+            geo.input_b_spline_entity_dict[parsed_info[0]] = (BSplineSurface(
                 name=parsed_info[0],
                 order_u=int(parsed_info[1])+1,
                 order_v=int(parsed_info[2])+1,
@@ -231,7 +231,7 @@ def read_iges(geo,file_name):
     filtered_point_table = point_table.loc[point_table["lines"].isin(line_numbs_total_array)]
     point_table = pd.DataFrame(filtered_point_table['raw_point'].str.findall(r"(-?\d+\.\d*E?-?\d*)").to_list(), columns=['x', 'y', 'z'])
     point_table["lines"] = filtered_point_table["lines"].values
-    geo.initial_input_bspline_entity_dict = copy.deepcopy(geo.input_bspline_entity_dict)
+    geo.initial_input_b_spline_entity_dict = copy.deepcopy(geo.input_b_spline_entity_dict)
     initial_surfaces = []
     for i in range(num_surf):
         num_rows_of_cps = parsed_info_dict[f'surf{i}_cp_line_nums'].shape[0]
@@ -241,8 +241,8 @@ def read_iges(geo,file_name):
             col_cntrl_pts = point_table.loc[point_table["lines"].isin(parsed_info_dict[f'surf{i}_cp_line_nums'][j])][['x', 'y', 'z']]
             if ((len(col_cntrl_pts) != num_cp_per_row) and (len(col_cntrl_pts) != 1)):
                 print('SKIPPED SURFACES: ', parsed_info_dict[f'surf{i}_name'])
-                # geo.initial_input_bspline_entity_dict.pop(f'surf{i}_name', None)
-                # geo.input_bspline_entity_dict.pop(f'surf{i}_name', None)
+                # geo.initial_input_b_spline_entity_dict.pop(f'surf{i}_name', None)
+                # geo.input_b_spline_entity_dict.pop(f'surf{i}_name', None)
                 # filtered = True
                 # continue
                 for k in range(num_cp_per_row):
@@ -252,21 +252,21 @@ def read_iges(geo,file_name):
                 cntrl_pts[j,:,:] = col_cntrl_pts
 
         # print('Control Points shape: ', cntrl_pts.shape)
-        geo.input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']].shape = np.array(cntrl_pts.shape)
-        geo.initial_input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']].shape = np.array(cntrl_pts.shape)
+        geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].shape = np.array(cntrl_pts.shape)
+        geo.initial_input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].shape = np.array(cntrl_pts.shape)
         # print('NUMBER OF CONTROL POINTS IMPORT: ', num_cp)
-        # geo.input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']].starting_geometry_index = num_cp
-        # geo.initial_input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']].starting_geometry_index = num_cp
+        # geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].starting_geometry_index = num_cp
+        # geo.initial_input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].starting_geometry_index = num_cp
         cntrl_pts = np.reshape(cntrl_pts, (num_rows_of_cps*num_cp_per_row,3))     
-        geo.input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points = cntrl_pts
-        geo.initial_input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points = cntrl_pts
+        geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points = cntrl_pts
+        geo.initial_input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points = cntrl_pts
         # print('Number of rows: ', num_rows_of_cps)
         # print('Number of cp per row: ', num_cp_per_row)
         # num_cp += num_rows_of_cps * num_cp_per_row
-        #initial = geo.input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']]
-        #print(geo.input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']])
+        #initial = geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']]
+        #print(geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']])
         #print(parsed_info_dict[f'surf{i}_name'])
-        #print(geo.input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']])
+        #print(geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']])
         print('CONTROL POINTS SHAPE: ', cntrl_pts.shape)
         print('INDEXING CONTROL POINTS SHAPE: ', cntrl_pts.shape[0])
         
@@ -274,14 +274,14 @@ def read_iges(geo,file_name):
             or np.sum(parsed_info_dict[f'surf{i}_v_multiplicities'][1:-1]) != len(parsed_info_dict[f'surf{i}_v_multiplicities'][1:-1])\
             or np.any(cntrl_pts.shape[0] <= 8):
             if not filtered:
-                geo.remove_multiplicity(geo.input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']])
+                geo.remove_multiplicity(geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']])
         #exit()
-        initial_surfaces.append(np.reshape(geo.input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points, geo.input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']].shape))
-        #print(i,geo.input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']].shape ,np.shape(geo.input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points))
-        geo.total_cntrl_pts_vector = np.append(geo.total_cntrl_pts_vector, geo.input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points)
+        initial_surfaces.append(np.reshape(geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points, geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].shape))
+        #print(i,geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].shape ,np.shape(geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points))
+        geo.total_cntrl_pts_vector = np.append(geo.total_cntrl_pts_vector, geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points)
         
     # nvert, nedge, ngroup, surf_ptrs, edge_ptrs, surf_group, edge_group = geo.compute_topology(initial_surfaces)
-    # size, topo, bspline = geo.compute_indices(initial_surfaces, nvert, nedge, ngroup, surf_ptrs, edge_ptrs, surf_group, edge_group)
+    # size, topo, b_spline = geo.compute_indices(initial_surfaces, nvert, nedge, ngroup, surf_ptrs, edge_ptrs, surf_group, edge_group)
     # vec = {
     #     'df_str': None,
     #     'df': None,
@@ -291,7 +291,7 @@ def read_iges(geo,file_name):
     #     'pt': None,
     # }
     # for vec_type in ['df_str', 'df', 'cp', 'cp_str', 'pt_str', 'pt']:
-    #     geo.initialize_vec(vec_type, vec_type, vec, size, topo['surf_group'], bspline, 3) 
+    #     geo.initialize_vec(vec_type, vec_type, vec, size, topo['surf_group'], b_spline, 3) 
     # print('Vector sizes (unique, structured)')
     # print('---------------------------------')
     # print('# free control points:', np.shape(geo.vec['df']), np.shape(geo.vec['df_str']))
@@ -299,7 +299,7 @@ def read_iges(geo,file_name):
     # print('# discretized points: ', np.shape(geo.vec['pt']), np.shape(geo.vec['pt_str']))
     
     if len(geo.total_cntrl_pts_vector)%3!= 0: 
-        print('Warning: Incorrectly imported bspline object')
+        print('Warning: Incorrectly imported b_spline object')
     geo.total_cntrl_pts_vector = np.reshape(geo.total_cntrl_pts_vector,(len(geo.total_cntrl_pts_vector)//3,3))            
     print('Complete import')
     pass
@@ -316,7 +316,7 @@ def write_iges(geo, file_name, plot = False):
         if plot == True:
             vp_out = Plotter()
             vps = []
-            for surf, color in zip(geo.output_bspline_entity_dict.values(), colors.colors.values()):
+            for surf, color in zip(geo.output_b_spline_entity_dict.values(), colors.colors.values()):
                 vps.append(Points(surf.control_points, r=8, c = color).legend(surf.name))
             #TODO legend
             #lb = LegendBox(vps, nmax=i, width = 0.2, pad = 0, pos = "top-left")

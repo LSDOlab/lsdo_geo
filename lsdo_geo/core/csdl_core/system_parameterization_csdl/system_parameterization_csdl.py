@@ -89,8 +89,8 @@ if __name__ == "__main__":
     # from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
     # wing_ffd_set_primitives = wing.get_geometry_primitives()
-    # wing_ffd_bspline_volume = create_cartesian_enclosure_volume(wing_ffd_set_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
-    # wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_bspline_volume, embedded_entities=wing_ffd_set_primitives)
+    # wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_ffd_set_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+    # wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_b_spline_volume, embedded_entities=wing_ffd_set_primitives)
 
     # wing_ffd_block.add_rotation_u(name='twist_distribution', order=4, num_dof=10, value=-1/2*np.array([0., 0.11, 0.22, 0.33, 0.44, 0.44, 0.33, 0.22, 0.11, 0.]))
     # wing_ffd_block.add_rotation_v(name='wingtip_twist', order=4, num_dof=10, value=-np.array([np.pi/2, 0., 0., 0., 0., 0., 0., 0., 0., -np.pi/2]))
@@ -118,7 +118,7 @@ if __name__ == "__main__":
     # # print("Python and CSDL difference", np.linalg.norm(sim['ffd_embedded_entities'] - embedded_entities))
 
     # spatial_rep.update(sim['system_representation_geometry'])
-    # plotting_elements = wing_ffd_block.plot_sections(control_points=sim['ffd_control_points'].reshape(wing_ffd_bspline_volume.shape), plot_embedded_entities=False, opacity=0.75, show=False)
+    # plotting_elements = wing_ffd_block.plot_sections(control_points=sim['ffd_control_points'].reshape(wing_ffd_b_spline_volume.shape), plot_embedded_entities=False, opacity=0.75, show=False)
     # spatial_rep.plot(additional_plotting_elements=plotting_elements)
 
     '''
@@ -145,14 +145,14 @@ if __name__ == "__main__":
     from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
     wing_ffd_set_primitives = wing.get_geometry_primitives()
-    wing_ffd_bspline_volume = create_cartesian_enclosure_volume(wing_ffd_set_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
-    wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_bspline_volume, embedded_entities=wing_ffd_set_primitives)
+    wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_ffd_set_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+    wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_b_spline_volume, embedded_entities=wing_ffd_set_primitives)
     # wing_ffd_block.add_rotation_u(name='twist_distribution', order=4, num_dof=10, value=-1/2*np.array([0., 0.11, 0.22, 0.33, 0.44, 0.44, 0.33, 0.22, 0.11, 0.]))
     wing_ffd_block.add_scale_v(name="chord_distribution_scaling", order=2, num_dof=3, value=np.array([0.5, 1.5, 0.5]))
 
     horizontal_stabilizer_ffd_set_primitives = horizontal_stabilizer.get_geometry_primitives()
-    horizontal_stabilizer_ffd_bspline_volume = create_cartesian_enclosure_volume(horizontal_stabilizer_ffd_set_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
-    horizontal_stabilizer_ffd_block = SRBGFFDBlock(name='horizontal_stabilizer_ffd_block', primitive=horizontal_stabilizer_ffd_bspline_volume, embedded_entities=horizontal_stabilizer_ffd_set_primitives)
+    horizontal_stabilizer_ffd_b_spline_volume = create_cartesian_enclosure_volume(horizontal_stabilizer_ffd_set_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+    horizontal_stabilizer_ffd_block = SRBGFFDBlock(name='horizontal_stabilizer_ffd_block', primitive=horizontal_stabilizer_ffd_b_spline_volume, embedded_entities=horizontal_stabilizer_ffd_set_primitives)
     horizontal_stabilizer_ffd_block.add_rotation_u(name='horizontal_stabilizer_twist_distribution', order=1, num_dof=1, value=np.array([np.pi/10]))
     horizontal_stabilizer_ffd_block.add_scale_v(name="horizontal_stabilizer_chord_distribution_scaling", order=2, num_dof=3, value=np.array([-0.5, 0.5, -0.5]))
 
@@ -183,10 +183,10 @@ if __name__ == "__main__":
     spatial_rep.update(sim['system_representation_geometry'])
     
     plotting_elements = wing_ffd_block.plot_sections(
-        control_points=(sim['ffd_control_points'][:wing_ffd_block.num_control_points,:]).reshape(wing_ffd_bspline_volume.shape),
+        control_points=(sim['ffd_control_points'][:wing_ffd_block.num_control_points,:]).reshape(wing_ffd_b_spline_volume.shape),
         plot_embedded_entities=False, opacity=0.75, show=False)
     plotting_elements = horizontal_stabilizer_ffd_block.plot_sections(
-        control_points=(sim['ffd_control_points'][wing_ffd_block.num_control_points:,:]).reshape(wing_ffd_bspline_volume.shape), 
+        control_points=(sim['ffd_control_points'][wing_ffd_block.num_control_points:,:]).reshape(wing_ffd_b_spline_volume.shape), 
         plot_embedded_entities=False, opacity=0.75, additional_plotting_elements=plotting_elements, show=False)
     # spatial_rep.plot()
     spatial_rep.plot(additional_plotting_elements=plotting_elements)

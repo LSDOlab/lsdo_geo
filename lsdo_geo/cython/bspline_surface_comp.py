@@ -98,7 +98,7 @@ if __name__ == '__main__':
     comp.add_output('ctrl_pts', val = cps)
 
     prob.model.add_subsystem('inputs_comp', comp, promotes=['*'])
-    prob.model.add_subsystem('bspline_surface', BSplineSurfaceComp(
+    prob.model.add_subsystem('b_spline_surface', BSplineSurfaceComp(
         n_points_u = num_points_u, n_points_v = num_points_v, order_u = order_u, order_v = order_v,
         u_vec = np.linspace(0., 1., num_points_u), v_vec = np.linspace(0., 1., num_points_v),
         # u_vec = np.array([0]), v_vec = np.linspace(0., 1., num_points_v),

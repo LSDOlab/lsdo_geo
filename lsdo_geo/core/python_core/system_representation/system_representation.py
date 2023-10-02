@@ -85,7 +85,7 @@ class SystemRepresentation(CADDEEBase):
 
     
     def project(self, points:np.ndarray, targets:tuple=None, direction:np.ndarray=None,
-                grid_search_n:int=25, max_iterations=100, offset:np.ndarray=None, plot:bool=False):
+                grid_search_density:int=25, max_iterations=100, offset:np.ndarray=None, plot:bool=False):
         '''
         Projects points onto the system.
 
@@ -97,7 +97,7 @@ class SystemRepresentation(CADDEEBase):
             The list of primitives to project onto.
         direction : {np.ndarray, am.MappedArray}, optional
             An axis for perfoming projection along an axis. The projection will return the closest point to the axis.
-        grid_search_n : int, optional
+        grid_search_density : int, optional
             The resolution of the grid search prior to the Newton iteration for solving the optimization problem.
         max_iterations : int, optional
             The maximum number of iterations for the Newton iteration.
@@ -109,7 +109,7 @@ class SystemRepresentation(CADDEEBase):
             A boolean on whether or not to plot the projection result.
         '''
         return self.spatial_representation.project(points=points, targets=targets, direction=direction,
-            grid_search_n=grid_search_n, max_iterations=max_iterations, offset=offset, plot=plot)
+            grid_search_density=grid_search_density, max_iterations=max_iterations, offset=offset, plot=plot)
 
     def add_input(self, function, connection_name=None, val=None):
         pass

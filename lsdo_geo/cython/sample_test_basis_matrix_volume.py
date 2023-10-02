@@ -30,7 +30,7 @@ row_indices = np.zeros(nnz, np.int32)
 col_indices = np.zeros(nnz, np.int32)
 
 '''
-Below we create the points that we want to evaluate the bspline volume at
+Below we create the points that we want to evaluate the b_spline volume at
 '''
 u_vec = np.einsum('i,j,k->ijk', np.linspace(0., 1., num_points_u), np.ones(num_points_v), np.ones(num_points_w)).flatten()
 v_vec = np.einsum('i,j,k->ijk', np.ones(num_points_u), np.linspace(0., 1., num_points_v), np.ones(num_points_w)).flatten()

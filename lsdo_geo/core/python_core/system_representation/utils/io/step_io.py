@@ -5,8 +5,8 @@ import numpy as np
 import copy
 from vedo import Points, Plotter, colors, LegendBox, show
 
-from lsdo_geo.primitives.bsplines.bspline_surface import BSplineSurface
-import lsdo_geo.primitives.bsplines.bspline_functions as bsp
+from lsdo_geo.primitives.b_splines.b_spline_surface import BSplineSurface
+import lsdo_geo.primitives.b_splines.b_spline_functions as bsp
 
 import io
 
@@ -155,7 +155,7 @@ def read_gmsh_stp(geo, file_name):
     filtered_point_table = point_table.loc[point_table["lines"].isin(line_numbs_total_array)]
     point_table = pd.DataFrame(filtered_point_table['raw_point'].str.findall(r"-?\d+\.\d*E?-?\+?\d*").to_list(), columns=['x', 'y', 'z'])
     point_table["lines"] = filtered_point_table["lines"].values
-    geo.initial_input_bspline_entity_dict = copy.deepcopy(geo.primitives)
+    geo.initial_input_b_spline_entity_dict = copy.deepcopy(geo.primitives)
     initial_surfaces = []
     for i in range(num_surf):
         num_rows_of_cps = parsed_info_dict[f'surf{i}_cp_line_nums'].shape[0]
@@ -166,7 +166,7 @@ def read_gmsh_stp(geo, file_name):
             col_cntrl_pts = point_table.loc[point_table["lines"].isin(parsed_info_dict[f'surf{i}_cp_line_nums'][j])][['x', 'y', 'z']]
             if ((len(col_cntrl_pts) != num_cp_per_row) and (len(col_cntrl_pts) != 1)):
                 #print('SKIPPED SURFACES: ', parsed_info_dict[f'surf{i}_name'])
-                # geo.initial_input_bspline_entity_dict.pop(f'surf{i}_name', None)
+                # geo.initial_input_b_spline_entity_dict.pop(f'surf{i}_name', None)
                 # geo.primitives.pop(f'surf{i}_name', None)
                 # filtered = True
                 # continue
@@ -178,13 +178,13 @@ def read_gmsh_stp(geo, file_name):
 
         # print('Control Points shape: ', cntrl_pts.shape)
         geo.primitives[parsed_info_dict[f'surf{i}_name']].shape = np.array(cntrl_pts.shape)
-        geo.initial_input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']].shape = np.array(cntrl_pts.shape)
+        geo.initial_input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].shape = np.array(cntrl_pts.shape)
         # print('NUMBER OF CONTROL POINTS IMPORT: ', num_cp)
         # geo.primitives[parsed_info_dict[f'surf{i}_name']].starting_geometry_index = num_cp
-        # geo.initial_input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']].starting_geometry_index = num_cp
+        # geo.initial_input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].starting_geometry_index = num_cp
         cntrl_pts = np.reshape(cntrl_pts, (num_rows_of_cps*num_cp_per_row,3))     
         geo.primitives[parsed_info_dict[f'surf{i}_name']].control_points = cntrl_pts
-        geo.initial_input_bspline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points = cntrl_pts
+        geo.initial_input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points = cntrl_pts
         # print('Number of rows: ', num_rows_of_cps)
         # print('Number of cp per row: ', num_cp_per_row)
         # num_cp += num_rows_of_cps * num_cp_per_row
@@ -208,7 +208,7 @@ def read_gmsh_stp(geo, file_name):
         geo.total_cntrl_pts_vector = np.append(geo.total_cntrl_pts_vector, geo.primitives[parsed_info_dict[f'surf{i}_name']].control_points)
     
     if len(geo.total_cntrl_pts_vector)%3!= 0: 
-        print('Warning: Incorrectly imported bspline object')
+        print('Warning: Incorrectly imported b_spline object')
     geo.total_cntrl_pts_vector = np.reshape(geo.total_cntrl_pts_vector,(len(geo.total_cntrl_pts_vector)//3,3))            
     print('Complete import')
 
@@ -223,7 +223,7 @@ def read_openvsp_stp(file_name):
             return
 
     '''Stage 1: Parse all information and line numbers for each surface and create B-spline objects'''
-    bsplines = {}
+    b_splines = {}
     parsed_info_dict = {}
     with open(file_name, 'r') as f:
         b_spline_surf_info = re.findall(r"B_SPLINE_SURFACE_WITH_KNOTS.*\)", f.read())
@@ -309,7 +309,7 @@ def read_openvsp_stp(file_name):
             knots_v = np.repeat(knots_v, parsed_info[9])
             knots_v = knots_v/knots_v[-1]
 
-            bsplines[parsed_info[0]] = BSplineSurface(
+            b_splines[parsed_info[0]] = BSplineSurface(
                 name=parsed_info[0],
                 order_u=int(parsed_info[1])+1,
                 order_v=int(parsed_info[2])+1,
@@ -351,20 +351,20 @@ def read_openvsp_stp(file_name):
                 filtered = False
                 cntrl_pts[j,:,:] = col_cntrl_pts
 
-        bspline_name = parsed_info_dict[f'surf{i}_name']
-        bsplines[bspline_name].shape = np.array(cntrl_pts.shape)
+        b_spline_name = parsed_info_dict[f'surf{i}_name']
+        b_splines[b_spline_name].shape = np.array(cntrl_pts.shape)
         cntrl_pts = np.reshape(cntrl_pts, (num_rows_of_cps*num_cp_per_row,3))     
-        bsplines[bspline_name].control_points = cntrl_pts
+        b_splines[b_spline_name].control_points = cntrl_pts
         
         # if np.sum(parsed_info_dict[f'surf{i}_u_multiplicities'][1:-1]) != len(parsed_info_dict[f'surf{i}_u_multiplicities'][1:-1]) \
         #     or np.sum(parsed_info_dict[f'surf{i}_v_multiplicities'][1:-1]) != len(parsed_info_dict[f'surf{i}_v_multiplicities'][1:-1])\
         #     or np.any(cntrl_pts.shape[0] <= 8):
         #     if not filtered:
-        #         bsplines[bspline_name] = bsp.refit_bspline(bspline=bsplines[bspline_name], name=bspline_name, num_control_points=(10,), fit_resolution=(25,))
-        #         # bsplines[bspline_name] = bsp.refit_bspline(bspline=bsplines[bspline_name], name=bspline_name, num_control_points=(25,), fit_resolution=(50,))
+        #         b_splines[b_spline_name] = bsp.refit_b_spline(b_spline=b_splines[b_spline_name], name=b_spline_name, num_control_points=(10,), fit_resolution=(25,))
+        #         # b_splines[b_spline_name] = bsp.refit_b_spline(b_spline=b_splines[b_spline_name], name=b_spline_name, num_control_points=(25,), fit_resolution=(50,))
           
     print('Complete import')
-    return bsplines
+    return b_splines
 
 
 def write_step(geo, file_name):

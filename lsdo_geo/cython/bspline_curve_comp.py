@@ -77,7 +77,7 @@ if __name__ == '__main__':
     comp.add_output('ctrl_pts', val = cp_array)
 
     prob.model.add_subsystem('inputs_comp', comp, promotes=['*'])
-    prob.model.add_subsystem('bspline_curve', BSplineCurveComp(
+    prob.model.add_subsystem('b_spline_curve', BSplineCurveComp(
         n_points = n_points, order = order, n_control_points = cp_array.shape[0], n_t = cp_array.shape[1]),
         promotes=['*']
     )

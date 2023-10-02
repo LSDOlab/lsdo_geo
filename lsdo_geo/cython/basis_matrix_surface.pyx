@@ -35,6 +35,8 @@ cdef get_basis_surface_matrix(
         i_start_u = get_basis_u(order_u, num_control_points_u, u_vec[i_pt], knot_vector_u, basis_u)
         i_start_v = get_basis_v(order_v, num_control_points_v, v_vec[i_pt], knot_vector_v, basis_v)
 
+        # print('i_start_u', i_start_u, 'i_start_v', i_start_v)
+
         for i_order_u in range(order_u):
             for i_order_v in range(order_v):
                 data[i_nz] = basis_u[i_order_u] * basis_v[i_order_v]

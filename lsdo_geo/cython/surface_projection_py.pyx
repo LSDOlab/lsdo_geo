@@ -18,7 +18,7 @@ def compute_surface_projection(
 ):
     compute_surface_projection(
         surfs_order_u, surfs_num_control_points_u,
-        surfs_order_u, surfs_num_control_points_v,
+        surfs_order_v, surfs_num_control_points_v,
         num_points, max_iter,
         &pts[0], &cps[0],
         &knot_vector_u[0], &knot_vector_v[0],

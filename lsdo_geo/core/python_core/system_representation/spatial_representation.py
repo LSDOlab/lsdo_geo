@@ -55,7 +55,7 @@ class SpatialRepresentation:
 
 
     def project(self, points:np.ndarray, targets:list=None, direction:np.ndarray=None,
-                grid_search_n:int=25, max_iterations=100, properties:list=['geometry'],
+                grid_search_density:int=25, max_iterations=100, properties:list=['geometry'],
                 offset:np.ndarray=None, plot:bool=False):
         '''
         Projects points onto the system.
@@ -68,7 +68,7 @@ class SpatialRepresentation:
             The list of primitives to project onto.
         direction : {np.ndarray, am.MappedArray}, optional
             An axis for perfoming projection along an axis. The projection will return the closest point to the axis.
-        grid_search_n : int, optional
+        grid_search_density : int, optional
             The resolution of the grid search prior to the Newton iteration for solving the optimization problem.
         max_iterations : int, optional
             The maximum number of iterations for the Newton iteration.
@@ -102,7 +102,7 @@ class SpatialRepresentation:
         projected_points_on_each_target = []
         # Project all points onto each target
         for target in targets:   # TODO Parallelize this for loop
-            target_projected_points = target.project(points=points, direction=direction, grid_search_n=grid_search_n,
+            target_projected_points = target.project(points=points, direction=direction, grid_search_density=grid_search_density,
                     max_iter=max_iterations, properties=['geometry', 'parametric_coordinates'])
                     # properties are not passed in here because we NEED geometry
             projected_points_on_each_target.append(target_projected_points)
@@ -248,7 +248,7 @@ class SpatialRepresentation:
                 pickle.dump(self.primitives, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     def refit_geometry(self, num_control_points:int=25, fit_resolution:int=50, only_non_differentiable:bool=False, file_name=None):
-        import lsdo_geo.primitives.bsplines.bspline_functions as mfd  # lsdo_manifolds
+        import lsdo_geo.primitives.b_splines.b_spline_functions as mfd  # lsdo_manifolds
 
         if file_name is not None:
             fn = os.path.basename(file_name)
@@ -276,7 +276,7 @@ class SpatialRepresentation:
                     #     i_should_refit = False
                 if i_should_refit:
                     self.primitives[primitive_name].geometry_primitive = \
-                        mfd.refit_bspline(bspline=primitive.geometry_primitive, name=primitive_name, \
+                        mfd.refit_b_spline(b_spline=primitive.geometry_primitive, name=primitive_name, \
                                         num_control_points=(num_control_points,), fit_resolution=(fit_resolution,))
                     self.primitives[primitive_name].assemble()
             self.assemble()
@@ -292,10 +292,10 @@ class SpatialRepresentation:
                     pickle.dump(self.primitives, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     def read_openvsp_stp(self, file_name):
-        bsplines = read_openvsp_stp(file_name)
+        b_splines = read_openvsp_stp(file_name)
         imported_primitives = {}
-        for bspline in list(bsplines.values()):
-            primitive = SystemPrimitive(name=bspline.name, geometry_primitive=bspline)
+        for b_spline in list(b_splines.values()):
+            primitive = SystemPrimitive(name=b_spline.name, geometry_primitive=b_spline)
             imported_primitives[primitive.name] = primitive
         self.primitives.update(imported_primitives)
         return imported_primitives
