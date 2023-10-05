@@ -24,10 +24,10 @@ class AffineBlockDeformationsCSDL(csdl.Model):
 
         # Evaluate maps to get FFD control points
         if ffd_set.num_dof != 0:
-            affine_deformed_ffd_control_points_flattened = csdl.matvec(affine_block_deformations_map, section_properties)
+            affine_deformed_ffd_coefficients_flattened = csdl.matvec(affine_block_deformations_map, section_properties)
             NUM_PARAMETRIC_DIMENSIONS = 3
-            affine_deformed_ffd_control_points = csdl.reshape(affine_deformed_ffd_control_points_flattened, new_shape=(ffd_set.num_control_points, NUM_PARAMETRIC_DIMENSIONS))
-            self.register_output("affine_deformed_ffd_control_points", affine_deformed_ffd_control_points)
+            affine_deformed_ffd_coefficients = csdl.reshape(affine_deformed_ffd_coefficients_flattened, new_shape=(ffd_set.num_coefficients, NUM_PARAMETRIC_DIMENSIONS))
+            self.register_output("affine_deformed_ffd_coefficients", affine_deformed_ffd_coefficients)
         else:   # Purely so CSDL doesn't throw an error for the model not doing anything
             self.create_input('dummy_input_affine_block_deformations', val=0.)
 
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
     wing_geometry_primitives = wing.get_geometry_primitives()
-    wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+    wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_coefficients=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
     wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_b_spline_volume, embedded_entities=wing_geometry_primitives)
 
     wing_ffd_block.add_scale_v(name='linear_taper', order=2, num_dof=3, value=np.array([0., 1., 0.]), cost_factor=1.)
@@ -73,18 +73,18 @@ if __name__ == "__main__":
 
     ffd_set.setup(project_embedded_entities=False)
     affine_section_properties = ffd_set.evaluate_affine_section_properties()
-    affine_deformed_ffd_control_points = ffd_set.evaluate_affine_block_deformations()
-    print('Python evaluation: affine deformed FFD control_points: \n', affine_deformed_ffd_control_points)
+    affine_deformed_ffd_coefficients = ffd_set.evaluate_affine_block_deformations()
+    print('Python evaluation: affine deformed FFD coefficients: \n', affine_deformed_ffd_coefficients)
 
     sim = Simulator(AffineBlockDeformationsCSDL(ffd_set=ffd_set))
     sim.run()
     # sim.visualize_implementation()        # Only csdl_om can do this
 
-    print('CSDL evaluation: affine deformed FFD control_points: \n', sim['affine_deformed_ffd_control_points'])
-    print("Python and CSDL difference", np.linalg.norm(sim['affine_deformed_ffd_control_points'] - affine_deformed_ffd_control_points))
+    print('CSDL evaluation: affine deformed FFD coefficients: \n', sim['affine_deformed_ffd_coefficients'])
+    print("Python and CSDL difference", np.linalg.norm(sim['affine_deformed_ffd_coefficients'] - affine_deformed_ffd_coefficients))
 
-    wing_ffd_block.plot_sections(control_points=sim['affine_deformed_ffd_control_points'].reshape(wing_ffd_b_spline_volume.shape), offset_sections=True, plot_embedded_entities=False, opacity=0.75, show=True)
-    # wing_ffd_b_spline_volume.control_points = sim['affine_deformed_ffd_control_points'].reshape(wing_ffd_b_spline_volume.shape)
+    wing_ffd_block.plot_sections(coefficients=sim['affine_deformed_ffd_coefficients'].reshape(wing_ffd_b_spline_volume.shape), offset_sections=True, plot_embedded_entities=False, opacity=0.75, show=True)
+    # wing_ffd_b_spline_volume.coefficients = sim['affine_deformed_ffd_coefficients'].reshape(wing_ffd_b_spline_volume.shape)
     # wing_ffd_b_spline_volume.plot()
 
     
@@ -111,12 +111,12 @@ if __name__ == "__main__":
     from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
     wing_geometry_primitives = wing.get_geometry_primitives()
-    wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+    wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_coefficients=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
     wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_b_spline_volume, embedded_entities=wing_geometry_primitives)
     wing_ffd_block.add_scale_v(name='linear_taper', order=2, num_dof=3, value=np.array([0., 1., 0.]), cost_factor=1.)
 
     horizontal_stabilizer_geometry_primitives = horizontal_stabilizer.get_geometry_primitives()
-    horizontal_stabilizer_ffd_b_spline_volume = create_cartesian_enclosure_volume(horizontal_stabilizer_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+    horizontal_stabilizer_ffd_b_spline_volume = create_cartesian_enclosure_volume(horizontal_stabilizer_geometry_primitives, num_coefficients=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
     horizontal_stabilizer_ffd_block = SRBGFFDBlock(name='horizontal_stabilizer_ffd_block', primitive=horizontal_stabilizer_ffd_b_spline_volume, embedded_entities=horizontal_stabilizer_geometry_primitives)
     horizontal_stabilizer_ffd_block.add_scale_v(name='horizontal_stabilizer_linear_taper', order=2, num_dof=3, value=np.array([0.5, 0.5, 0.5]), cost_factor=1.)
 
@@ -129,21 +129,21 @@ if __name__ == "__main__":
 
     ffd_set.setup(project_embedded_entities=False)
     affine_section_properties = ffd_set.evaluate_affine_section_properties()
-    affine_deformed_ffd_control_points = ffd_set.evaluate_affine_block_deformations()
-    print('Python evaluation: affine deformed FFD control_points: \n', affine_deformed_ffd_control_points)
+    affine_deformed_ffd_coefficients = ffd_set.evaluate_affine_block_deformations()
+    print('Python evaluation: affine deformed FFD coefficients: \n', affine_deformed_ffd_coefficients)
 
     sim = Simulator(AffineBlockDeformationsCSDL(ffd_set=ffd_set))
     sim.run()
     # sim.visualize_implementation()    $ Only usable with csdl_om
 
-    print('CSDL evaluation: affine deformed FFD control_points: \n', sim['affine_deformed_ffd_control_points'])
-    print("Python and CSDL difference", np.linalg.norm(sim['affine_deformed_ffd_control_points'] - affine_deformed_ffd_control_points))
+    print('CSDL evaluation: affine deformed FFD coefficients: \n', sim['affine_deformed_ffd_coefficients'])
+    print("Python and CSDL difference", np.linalg.norm(sim['affine_deformed_ffd_coefficients'] - affine_deformed_ffd_coefficients))
 
-    wing_ffd_block.plot_sections(control_points=(sim['affine_deformed_ffd_control_points'][0:11*2*2,:]).reshape(wing_ffd_b_spline_volume.shape), offset_sections=True, plot_embedded_entities=False, opacity=0.75, show=True)
-    horizontal_stabilizer_ffd_block.plot_sections(control_points=(sim['affine_deformed_ffd_control_points'][11*2*2:,:]).reshape(horizontal_stabilizer_ffd_b_spline_volume.shape), offset_sections=True, plot_embedded_entities=False, opacity=0.75, show=True)
+    wing_ffd_block.plot_sections(coefficients=(sim['affine_deformed_ffd_coefficients'][0:11*2*2,:]).reshape(wing_ffd_b_spline_volume.shape), offset_sections=True, plot_embedded_entities=False, opacity=0.75, show=True)
+    horizontal_stabilizer_ffd_block.plot_sections(coefficients=(sim['affine_deformed_ffd_coefficients'][11*2*2:,:]).reshape(horizontal_stabilizer_ffd_b_spline_volume.shape), offset_sections=True, plot_embedded_entities=False, opacity=0.75, show=True)
 
 
-    # wing_ffd_b_spline_volume.control_points = (sim['affine_deformed_ffd_control_points'][0:11*2*2,:]).reshape(wing_ffd_b_spline_volume.shape)
+    # wing_ffd_b_spline_volume.coefficients = (sim['affine_deformed_ffd_coefficients'][0:11*2*2,:]).reshape(wing_ffd_b_spline_volume.shape)
     # wing_ffd_b_spline_volume.plot()
-    # horizontal_stabilizer_ffd_b_spline_volume.control_points = (sim['affine_deformed_ffd_control_points'][11*2*2:,:]).reshape(horizontal_stabilizer_ffd_b_spline_volume.shape)
+    # horizontal_stabilizer_ffd_b_spline_volume.coefficients = (sim['affine_deformed_ffd_coefficients'][11*2*2:,:]).reshape(horizontal_stabilizer_ffd_b_spline_volume.shape)
     # horizontal_stabilizer_ffd_b_spline_volume.plot()

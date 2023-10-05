@@ -13,9 +13,9 @@ order_u = 3
 order_v = 3
 order_w = 3
 
-num_control_points_u = 4
-num_control_points_v = 4
-num_control_points_w = 4
+num_coefficients_u = 4
+num_coefficients_v = 4
+num_coefficients_w = 4
 
 # num_points_u = 5
 # num_points_v = 5
@@ -32,32 +32,32 @@ num_control_points_w = 4
 # w_vec = np.einsum('i,j,k->ijk', np.ones(num_points_u), np.ones(num_points_v), np.linspace(0., 1., num_points_w)).flatten()
 
 
-knot_vector_u = np.zeros(num_control_points_u+order_u)
-knot_vector_v = np.zeros(num_control_points_v+order_v)
-knot_vector_w = np.zeros(num_control_points_w+order_w)
+knot_vector_u = np.zeros(num_coefficients_u+order_u)
+knot_vector_v = np.zeros(num_coefficients_v+order_v)
+knot_vector_w = np.zeros(num_coefficients_w+order_w)
 
 
-get_open_uniform(order_u, num_control_points_u, knot_vector_u)
-get_open_uniform(order_v, num_control_points_v, knot_vector_v)
-get_open_uniform(order_w, num_control_points_w, knot_vector_w)
+get_open_uniform(order_u, num_coefficients_u, knot_vector_u)
+get_open_uniform(order_v, num_coefficients_v, knot_vector_v)
+get_open_uniform(order_w, num_coefficients_w, knot_vector_w)
 
 
 # get_basis_volume_matrix(
-#     order_u, num_control_points_u, 0, u_vec, knot_vector_u,
-#     order_v, num_control_points_v, 0, v_vec, knot_vector_v,
-#     order_w, num_control_points_w, 0, w_vec, knot_vector_w,
+#     order_u, num_coefficients_u, 0, u_vec, knot_vector_u,
+#     order_v, num_coefficients_v, 0, v_vec, knot_vector_v,
+#     order_w, num_coefficients_w, 0, w_vec, knot_vector_w,
 #     num_points_u * num_points_v * num_points_w, data, row_indices, col_indices,
 # )
 # basis0 = sps.csc_matrix(
 #     (data, (row_indices, col_indices)), 
-#     shape=(num_points_u * num_points_v * num_points_w, num_control_points_u * num_control_points_v * num_control_points_w),
+#     shape=(num_points_u * num_points_v * num_points_w, num_coefficients_u * num_coefficients_v * num_coefficients_w),
 # )
 
-cps = np.zeros((num_control_points_u, num_control_points_v, num_control_points_w, 3))
-cps[:, :, :, 0] = np.einsum('i,j,k->ijk', np.linspace(0., 1., num_control_points_u), np.ones(num_control_points_v),  np.ones(num_control_points_w))
-cps[:, :, :, 1] = np.einsum('i,j,k->ijk', np.ones(num_control_points_u), np.linspace(0., 1., num_control_points_v),  np.ones(num_control_points_w))
-cps[:, :, :, 2] = np.einsum('i,j,k->ijk', np.ones(num_control_points_u),  np.ones(num_control_points_v), (np.linspace(0., 1., num_control_points_w)))
-cps = cps.reshape((num_control_points_u * num_control_points_v * num_control_points_w, 3))
+cps = np.zeros((num_coefficients_u, num_coefficients_v, num_coefficients_w, 3))
+cps[:, :, :, 0] = np.einsum('i,j,k->ijk', np.linspace(0., 1., num_coefficients_u), np.ones(num_coefficients_v),  np.ones(num_coefficients_w))
+cps[:, :, :, 1] = np.einsum('i,j,k->ijk', np.ones(num_coefficients_u), np.linspace(0., 1., num_coefficients_v),  np.ones(num_coefficients_w))
+cps[:, :, :, 2] = np.einsum('i,j,k->ijk', np.ones(num_coefficients_u),  np.ones(num_coefficients_v), (np.linspace(0., 1., num_coefficients_w)))
+cps = cps.reshape((num_coefficients_u * num_coefficients_v * num_coefficients_w, 3))
 
 # pts = basis0.dot(cps)
 
@@ -76,23 +76,23 @@ v_vec = 0.5 * np.ones(num_points)
 w_vec = 0.5 * np.ones(num_points)
 
 # compute_volume_projection(
-#     order_u, num_control_points_u,
-#     order_v, num_control_points_v,
-#     order_w, num_control_points_w,
+#     order_u, num_coefficients_u,
+#     order_v, num_coefficients_v,
+#     order_w, num_coefficients_w,
 #     num_points, max_iter,
 #     points.reshape(num_points * 3), 
-#     cps.reshape(num_control_points_u * num_control_points_v * num_control_points_w * 3),
+#     cps.reshape(num_coefficients_u * num_coefficients_v * num_coefficients_w * 3),
 #     knot_vector_u, knot_vector_v, knot_vector_w,
 #     u_vec, v_vec, w_vec,0.,np.array([0.,0.,0.])
 # )
 
 compute_volume_projection(
-    order_u, num_control_points_u,
-    order_v, num_control_points_v,
-    order_w, num_control_points_w,
+    order_u, num_coefficients_u,
+    order_v, num_coefficients_v,
+    order_w, num_coefficients_w,
     num_points, max_iter,
     points.reshape(num_points * 3), 
-    cps.reshape(num_control_points_u * num_control_points_v * num_control_points_w * 3),
+    cps.reshape(num_coefficients_u * num_coefficients_v * num_coefficients_w * 3),
     knot_vector_u, knot_vector_v, knot_vector_w,
     u_vec, v_vec, w_vec,0.,np.array([0.,0.,0.])
 )
@@ -102,13 +102,13 @@ nnz = num_points * order_u * order_v * order_w
 data = np.zeros(nnz)
 row_indices = np.zeros(nnz, np.int32)
 col_indices = np.zeros(nnz, np.int32)
-knot_vector_u = np.zeros(num_control_points_u+order_u)
-knot_vector_v = np.zeros(num_control_points_v+order_v)
-knot_vector_w = np.zeros(num_control_points_v+order_w)
+knot_vector_u = np.zeros(num_coefficients_u+order_u)
+knot_vector_v = np.zeros(num_coefficients_v+order_v)
+knot_vector_w = np.zeros(num_coefficients_v+order_w)
 
-get_open_uniform(order_u, num_control_points_u, knot_vector_u)
-get_open_uniform(order_v, num_control_points_v, knot_vector_v)
-get_open_uniform(order_w, num_control_points_w, knot_vector_w)
+get_open_uniform(order_u, num_coefficients_u, knot_vector_u)
+get_open_uniform(order_v, num_coefficients_v, knot_vector_v)
+get_open_uniform(order_w, num_coefficients_w, knot_vector_w)
 
 # print('order_u', order_u)
 # print('order_v', order_v)
@@ -116,9 +116,9 @@ get_open_uniform(order_w, num_control_points_w, knot_vector_w)
 # print('knot_vector_u', knot_vector_u)
 # print('knot_vector_v', knot_vector_v)
 # print('knot_vector_w', knot_vector_w)
-# print('num_control_points_u', num_control_points_u)
-# print('num_control_points_v', num_control_points_v)
-# print('num_control_points_w', num_control_points_w)
+# print('num_coefficients_u', num_coefficients_u)
+# print('num_coefficients_v', num_coefficients_v)
+# print('num_coefficients_w', num_coefficients_w)
 # print('u min and max', np.min(u_vec), np.max(u_vec))
 # print('v min and max', np.min(v_vec), np.max(v_vec))
 # print('w min and max', np.min(w_vec), np.max(w_vec))
@@ -128,19 +128,19 @@ get_open_uniform(order_w, num_control_points_w, knot_vector_w)
 
 
 get_basis_volume_matrix(
-    order_u, num_control_points_u, 0, u_vec, knot_vector_u,
-    order_v, num_control_points_v, 0, v_vec, knot_vector_v,
-    order_w, num_control_points_w, 0, w_vec, knot_vector_w,
+    order_u, num_coefficients_u, 0, u_vec, knot_vector_u,
+    order_v, num_coefficients_v, 0, v_vec, knot_vector_v,
+    order_w, num_coefficients_w, 0, w_vec, knot_vector_w,
 
     num_points, data, row_indices, col_indices,
 )
 
 basis0 = sps.csc_matrix(
     (data, (row_indices, col_indices)), 
-    shape=(num_points, num_control_points_u * num_control_points_v * num_control_points_w),
+    shape=(num_points, num_coefficients_u * num_coefficients_v * num_coefficients_w),
 )
 
-cps = cps.reshape((num_control_points_u * num_control_points_v * num_control_points_w, 3))
+cps = cps.reshape((num_coefficients_u * num_coefficients_v * num_coefficients_w, 3))
 
 pts = basis0.dot(cps)
 

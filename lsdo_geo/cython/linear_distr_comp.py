@@ -5,18 +5,18 @@ from openmdao.api import ExplicitComponent
 class LinearDistrComp(ExplicitComponent):
     def initialize(self):
         self.options.declare('n_points', types = int)
-        self.options.declare('n_control_points', types = int)
+        self.options.declare('n_coefficients', types = int)
         self.options.declare('n_t', types = int)
     
     def setup(self):
         n_points = self.options['n_points']
-        n_control_points = self.options['n_control_points']
+        n_coefficients = self.options['n_coefficients']
         n_t = self.options['n_t']
 
         self.ctrl_pts = ctrl_pts = 'ctrl_pts'
         self.pts = pts = 'pts'
 
-        self.add_input(ctrl_pts, shape = (n_control_points, n_t))
+        self.add_input(ctrl_pts, shape = (n_coefficients, n_t))
         self.add_output(pts, shape = (n_points, n_t))
 
         self.declare_partials(pts, ctrl_pts)
@@ -36,7 +36,7 @@ if __name__ == '__main__':
 
     n_t = 5
     n_points = 10
-    n_control_points = 2
+    n_coefficients = 2
 
     prob = Problem()
     comp = IndepVarComp()
@@ -47,7 +47,7 @@ if __name__ == '__main__':
 
     prob.model.add_subsystem('indeps_comp', comp, promotes=['*'])
 
-    comp = LinearDistrComp(n_points=n_points, n_control_points=n_control_points, n_t=n_t)
+    comp = LinearDistrComp(n_points=n_points, n_coefficients=n_coefficients, n_t=n_t)
     prob.model.add_subsystem('LinearDistrComp', comp, promotes=['*'])
     
     prob.setup()

@@ -7,8 +7,8 @@ from get_open_uniform_py import get_open_uniform
 
 order_u = 4
 order_v = 4
-num_control_points_u = 4
-num_control_points_v = 4
+num_coefficients_u = 4
+num_coefficients_v = 4
 num_points_u = 5
 num_points_v = 6
 
@@ -22,30 +22,30 @@ v_vec = np.einsum('i,j->ij', np.ones(num_points_u), np.linspace(0., 1., num_poin
 #u_vec = np.linspace(0, 1, 4)
 # print('u_vec',u_vec)
 # print('v_vec',v_vec)
-knot_vector_u = np.zeros(num_control_points_u+order_u)
-knot_vector_v = np.zeros(num_control_points_v+order_v)
+knot_vector_u = np.zeros(num_coefficients_u+order_u)
+knot_vector_v = np.zeros(num_coefficients_v+order_v)
 
-get_open_uniform(order_u, num_control_points_u, knot_vector_u)
-get_open_uniform(order_v, num_control_points_v, knot_vector_v)
+get_open_uniform(order_u, num_coefficients_u, knot_vector_u)
+get_open_uniform(order_v, num_coefficients_v, knot_vector_v)
 
 get_basis_surface_matrix(
-    order_u, num_control_points_u, 0, u_vec, knot_vector_u,
-    order_v, num_control_points_v, 0, v_vec, knot_vector_v,
+    order_u, num_coefficients_u, 0, u_vec, knot_vector_u,
+    order_v, num_coefficients_v, 0, v_vec, knot_vector_v,
     num_points_u * num_points_v, data, row_indices, col_indices,
 )
 print(knot_vector_u)
 print(knot_vector_v)
 basis0 = sps.csc_matrix(
     (data, (row_indices, col_indices)), 
-    shape=(num_points_u * num_points_v, num_control_points_u * num_control_points_v),
+    shape=(num_points_u * num_points_v, num_coefficients_u * num_coefficients_v),
 )
 print(np.shape(basis0.toarray()))
 #print(basis0.toarray())
 
-cps = np.zeros((num_control_points_u, num_control_points_v, 2))
-cps[:, :, 0] = np.einsum('i,j->ij', np.linspace(0., 1., num_control_points_u), np.ones(num_control_points_v))
-cps[:, :, 1] = np.einsum('i,j->ij', np.ones(num_control_points_u), np.linspace(0., 1., num_control_points_v))
-cps = cps.reshape((num_control_points_u * num_control_points_v, 2))
+cps = np.zeros((num_coefficients_u, num_coefficients_v, 2))
+cps[:, :, 0] = np.einsum('i,j->ij', np.linspace(0., 1., num_coefficients_u), np.ones(num_coefficients_v))
+cps[:, :, 1] = np.einsum('i,j->ij', np.ones(num_coefficients_u), np.linspace(0., 1., num_coefficients_v))
+cps = cps.reshape((num_coefficients_u * num_coefficients_v, 2))
 
 pts = basis0.dot(cps)
 

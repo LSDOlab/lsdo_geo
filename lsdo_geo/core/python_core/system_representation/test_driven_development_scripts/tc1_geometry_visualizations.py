@@ -13,7 +13,7 @@ file_name = 'lift_plus_cruise.stp'
 # file_path = 'models/stp/'
 spatial_rep.import_file(file_name=file_path+file_name)
 # spatial_rep.import_file(file_name=file_path+'lift_plus_cruise_final_3.stp')
-spatial_rep.refit_geometry(num_control_points=15, fit_resolution=30, file_name=file_path + file_name)
+spatial_rep.refit_geometry(num_coefficients=15, fit_resolution=30, file_name=file_path + file_name)
 
 import vedo
 plotting_elements = spatial_rep.plot(surface_texture='metallic')
@@ -142,7 +142,7 @@ from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_func
 from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
 wing_geometry_primitives = wing.get_geometry_primitives()
-wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_coefficients=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
 wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_b_spline_volume, embedded_entities=wing_geometry_primitives)
 wing_ffd_block.add_scale_v(name='linear_chord_distribution', order=2, num_dof=3, value=np.array([0., 1., 0.]))
 # wing_ffd_block.add_scale_w(name='constant_thickness_scaling', order=1, num_dof=1, value=np.array([0.5]))
@@ -150,14 +150,14 @@ wing_ffd_block.add_scale_v(name='linear_chord_distribution', order=2, num_dof=3,
 wing_ffd_block.add_translation_u(name='wingspan_dof', order=2, num_dof=2, value=np.array([-30., 30]))
 
 horizontal_stabilizer_geometry_primitives = horizontal_stabilizer.get_geometry_primitives()
-horizontal_stabilizer_ffd_b_spline_volume = create_cartesian_enclosure_volume(horizontal_stabilizer_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+horizontal_stabilizer_ffd_b_spline_volume = create_cartesian_enclosure_volume(horizontal_stabilizer_geometry_primitives, num_coefficients=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
 horizontal_stabilizer_ffd_block = SRBGFFDBlock(name='horizontal_stabilizer_ffd_block', primitive=horizontal_stabilizer_ffd_b_spline_volume, embedded_entities=horizontal_stabilizer_geometry_primitives)
 # horizontal_stabilizer_ffd_block.add_scale_v(name='horizontal_stabilizer_linear_taper', order=2, num_dof=3, value=np.array([0.5, 0.5, 0.5]), cost_factor=1.)
 # horizontal_stabilizer_ffd_block.add_rotation_u(name='horizontal_stabilizer_twist_distribution', order=1, num_dof=1, value=np.array([np.pi/10]))
 horizontal_stabilizer_ffd_block.add_translation_v('tail_moment_arm', order=1, num_dof=1, value=np.array([0.]))
 
 rotor_1_geometry_primitives = rotor_1.get_geometry_primitives()
-rotor_1_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_1_geometry_primitives, num_control_points=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
+rotor_1_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_1_geometry_primitives, num_coefficients=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
 rotor_1_ffd_block = SRBGFFDBlock(name='rotor_1_ffd_block', primitive=rotor_1_ffd_b_spline_volume, embedded_entities=rotor_1_geometry_primitives)
 rotor_1_ffd_block.add_scale_v(name='rotor_1_x_scaling', order=1, num_dof=1, value=np.array([2.]))
 rotor_1_ffd_block.add_scale_w(name='rotor_1_y_scaling', order=1, num_dof=1, value=np.array([2.]))
@@ -165,7 +165,7 @@ rotor_1_ffd_block.add_translation_v(name='rotor_1_translation_x', order=1, num_d
 rotor_1_ffd_block.add_translation_w(name='rotor_1_translation_y', order=1, num_dof=1, value=np.array([2.]))
 
 rotor_2_geometry_primitives = rotor_2.get_geometry_primitives()
-rotor_2_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_2_geometry_primitives, num_control_points=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
+rotor_2_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_2_geometry_primitives, num_coefficients=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
 rotor_2_ffd_block = SRBGFFDBlock(name='rotor_2_ffd_block', primitive=rotor_2_ffd_b_spline_volume, embedded_entities=rotor_2_geometry_primitives)
 rotor_2_ffd_block.add_scale_v(name='rotor_2_x_scaling', order=1, num_dof=1, value=np.array([2.]))
 rotor_2_ffd_block.add_scale_w(name='rotor_2_y_scaling', order=1, num_dof=1, value=np.array([2.]))
@@ -173,7 +173,7 @@ rotor_2_ffd_block.add_translation_v(name='rotor_2_translation_x', order=1, num_d
 rotor_2_ffd_block.add_translation_w(name='rotor_2_translation_y', order=1, num_dof=1, value=np.array([2.]))
 
 rotor_3_geometry_primitives = rotor_3.get_geometry_primitives()
-rotor_3_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_3_geometry_primitives, num_control_points=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
+rotor_3_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_3_geometry_primitives, num_coefficients=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
 rotor_3_ffd_block = SRBGFFDBlock(name='rotor_3_ffd_block', primitive=rotor_3_ffd_b_spline_volume, embedded_entities=rotor_3_geometry_primitives)
 rotor_3_ffd_block.add_scale_v(name='rotor_3_x_scaling', order=1, num_dof=1, value=np.array([2.]))
 rotor_3_ffd_block.add_scale_w(name='rotor_3_y_scaling', order=1, num_dof=1, value=np.array([2.]))
@@ -181,7 +181,7 @@ rotor_3_ffd_block.add_translation_v(name='rotor_3_translation_x', order=1, num_d
 rotor_3_ffd_block.add_translation_w(name='rotor_3_translation_y', order=1, num_dof=1, value=np.array([2.]))
 
 rotor_4_geometry_primitives = rotor_4.get_geometry_primitives()
-rotor_4_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_4_geometry_primitives, num_control_points=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
+rotor_4_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_4_geometry_primitives, num_coefficients=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
 rotor_4_ffd_block = SRBGFFDBlock(name='rotor_4_ffd_block', primitive=rotor_4_ffd_b_spline_volume, embedded_entities=rotor_4_geometry_primitives)
 rotor_4_ffd_block.add_scale_v(name='rotor_4_x_scaling', order=1, num_dof=1, value=np.array([2.]))
 rotor_4_ffd_block.add_scale_w(name='rotor_4_y_scaling', order=1, num_dof=1, value=np.array([2.]))
@@ -189,7 +189,7 @@ rotor_4_ffd_block.add_translation_v(name='rotor_4_translation_x', order=1, num_d
 rotor_4_ffd_block.add_translation_w(name='rotor_4_translation_y', order=1, num_dof=1, value=np.array([2.]))
 
 rotor_5_geometry_primitives = rotor_5.get_geometry_primitives()
-rotor_5_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_5_geometry_primitives, num_control_points=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
+rotor_5_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_5_geometry_primitives, num_coefficients=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
 rotor_5_ffd_block = SRBGFFDBlock(name='rotor_5_ffd_block', primitive=rotor_5_ffd_b_spline_volume, embedded_entities=rotor_5_geometry_primitives)
 rotor_5_ffd_block.add_scale_v(name='rotor_5_x_scaling', order=1, num_dof=1, value=np.array([2.]))
 rotor_5_ffd_block.add_scale_w(name='rotor_5_y_scaling', order=1, num_dof=1, value=np.array([2.]))
@@ -197,7 +197,7 @@ rotor_5_ffd_block.add_translation_v(name='rotor_5_translation_x', order=1, num_d
 rotor_5_ffd_block.add_translation_w(name='rotor_5_translation_y', order=1, num_dof=1, value=np.array([2.]))
 
 rotor_6_geometry_primitives = rotor_6.get_geometry_primitives()
-rotor_6_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_6_geometry_primitives, num_control_points=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
+rotor_6_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_6_geometry_primitives, num_coefficients=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
 rotor_6_ffd_block = SRBGFFDBlock(name='rotor_6_ffd_block', primitive=rotor_6_ffd_b_spline_volume, embedded_entities=rotor_6_geometry_primitives)
 rotor_6_ffd_block.add_scale_v(name='rotor_6_x_scaling', order=1, num_dof=1, value=np.array([2.]))
 rotor_6_ffd_block.add_scale_w(name='rotor_6_y_scaling', order=1, num_dof=1, value=np.array([2.]))
@@ -205,7 +205,7 @@ rotor_6_ffd_block.add_translation_v(name='rotor_6_translation_x', order=1, num_d
 rotor_6_ffd_block.add_translation_w(name='rotor_6_translation_y', order=1, num_dof=1, value=np.array([2.]))
 
 rotor_7_geometry_primitives = rotor_7.get_geometry_primitives()
-rotor_7_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_7_geometry_primitives, num_control_points=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
+rotor_7_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_7_geometry_primitives, num_coefficients=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
 rotor_7_ffd_block = SRBGFFDBlock(name='rotor_7_ffd_block', primitive=rotor_7_ffd_b_spline_volume, embedded_entities=rotor_7_geometry_primitives)
 rotor_7_ffd_block.add_scale_v(name='rotor_7_x_scaling', order=1, num_dof=1, value=np.array([2.]))
 rotor_7_ffd_block.add_scale_w(name='rotor_7_y_scaling', order=1, num_dof=1, value=np.array([2.]))
@@ -213,7 +213,7 @@ rotor_7_ffd_block.add_translation_v(name='rotor_7_translation_x', order=1, num_d
 rotor_7_ffd_block.add_translation_w(name='rotor_7_translation_y', order=1, num_dof=1, value=np.array([2.]))
 
 rotor_8_geometry_primitives = rotor_8.get_geometry_primitives()
-rotor_8_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_8_geometry_primitives, num_control_points=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
+rotor_8_ffd_b_spline_volume = create_cartesian_enclosure_volume(rotor_8_geometry_primitives, num_coefficients=(2, 2, 2), order=(2,2,2), xyz_to_uvw_indices=(2,0,1))
 rotor_8_ffd_block = SRBGFFDBlock(name='rotor_8_ffd_block', primitive=rotor_8_ffd_b_spline_volume, embedded_entities=rotor_8_geometry_primitives)
 rotor_8_ffd_block.add_scale_v(name='rotor_8_x_scaling', order=1, num_dof=1, value=np.array([2.]))
 rotor_8_ffd_block.add_scale_w(name='rotor_8_y_scaling', order=1, num_dof=1, value=np.array([2.]))
@@ -263,9 +263,9 @@ my_model.add(system_representation_model, 'system_representation')
 # affine_section_properties = ffd_set.evaluate_affine_section_properties(prescribed_affine_dof=np.append(initial_guess_linear_taper, np.zeros(4,)))
 # affine_section_properties = ffd_set.evaluate_affine_section_properties()
 # rotational_section_properties = ffd_set.evaluate_rotational_section_properties()
-# affine_deformed_ffd_control_points = ffd_set.evaluate_affine_block_deformations()
-# rotated_ffd_control_points = ffd_set.evaluate_rotational_block_deformations()
-# ffd_control_points = ffd_set.evaluate_control_points()
+# affine_deformed_ffd_coefficients = ffd_set.evaluate_affine_block_deformations()
+# rotated_ffd_coefficients = ffd_set.evaluate_rotational_block_deformations()
+# ffd_coefficients = ffd_set.evaluate_coefficients()
 # ffd_embedded_entities = ffd_set.evaluate_embedded_entities()
 
 # updated_primitives_names = wing.primitive_names.copy()
@@ -280,8 +280,8 @@ my_model.add(system_representation_model, 'system_representation')
 # updated_primitives_names.extend(rotor_8.primitive_names.copy())
 # spatial_rep.update(ffd_embedded_entities, updated_primitives_names)
 
-# wing_camber_surface.evaluate(spatial_rep.control_points['geometry'])
-# horizontal_stabilizer_camber_surface.evaluate(spatial_rep.control_points['geometry'])
+# wing_camber_surface.evaluate(spatial_rep.coefficients['geometry'])
+# horizontal_stabilizer_camber_surface.evaluate(spatial_rep.coefficients['geometry'])
 
 # spatial_rep.plot()
 
@@ -344,14 +344,14 @@ initial_geometry_plot = spatial_rep.plot_meshes([wing_camber_surface, horizontal
 
 affine_section_properties = ffd_set.evaluate_affine_section_properties(prescribed_affine_dof=affine_dof[-1,:])
 rotational_section_properties = ffd_set.evaluate_rotational_section_properties()
-affine_deformed_ffd_control_points = ffd_set.evaluate_affine_block_deformations()
-rotated_ffd_control_points = ffd_set.evaluate_rotational_block_deformations()
-ffd_control_points = ffd_set.evaluate_control_points()
+affine_deformed_ffd_coefficients = ffd_set.evaluate_affine_block_deformations()
+rotated_ffd_coefficients = ffd_set.evaluate_rotational_block_deformations()
+ffd_coefficients = ffd_set.evaluate_coefficients()
 ffd_embedded_entities = ffd_set.evaluate_embedded_entities()
 updated_primitives_names = list(ffd_set.embedded_entities.keys())
 spatial_rep.update(ffd_embedded_entities, updated_primitives_names)
-wing_camber_surface.evaluate(spatial_rep.control_points['geometry'])
-horizontal_stabilizer_camber_surface.evaluate(spatial_rep.control_points['geometry'])
+wing_camber_surface.evaluate(spatial_rep.coefficients['geometry'])
+horizontal_stabilizer_camber_surface.evaluate(spatial_rep.coefficients['geometry'])
 combined_geometry_plot = spatial_rep.plot_meshes([wing_camber_surface, horizontal_stabilizer_camber_surface], primitives_opacity=0.9, mesh_opacity=1., additional_plotting_elements=initial_geometry_plot)
 camera = dict(
     position=(-35, -30, 35),
@@ -368,14 +368,14 @@ video = Video('test.mp4', duration=None, fps=10, backend="cv")
 for iter in range(num_iterations):
     affine_section_properties = ffd_set.evaluate_affine_section_properties(prescribed_affine_dof=affine_dof[iter,:])
     rotational_section_properties = ffd_set.evaluate_rotational_section_properties()
-    affine_deformed_ffd_control_points = ffd_set.evaluate_affine_block_deformations()
-    rotated_ffd_control_points = ffd_set.evaluate_rotational_block_deformations()
-    ffd_control_points = ffd_set.evaluate_control_points()
+    affine_deformed_ffd_coefficients = ffd_set.evaluate_affine_block_deformations()
+    rotated_ffd_coefficients = ffd_set.evaluate_rotational_block_deformations()
+    ffd_coefficients = ffd_set.evaluate_coefficients()
     ffd_embedded_entities = ffd_set.evaluate_embedded_entities()
     updated_primitives_names = list(ffd_set.embedded_entities.keys())
     spatial_rep.update(ffd_embedded_entities, updated_primitives_names)
-    wing_camber_surface.evaluate(spatial_rep.control_points['geometry'])
-    horizontal_stabilizer_camber_surface.evaluate(spatial_rep.control_points['geometry'])
+    wing_camber_surface.evaluate(spatial_rep.coefficients['geometry'])
+    horizontal_stabilizer_camber_surface.evaluate(spatial_rep.coefficients['geometry'])
 
     iteration_plot = spatial_rep.plot_meshes([wing_camber_surface, horizontal_stabilizer_camber_surface], primitives_opacity=0.75, 
                      mesh_plot_types=['wireframe'], mesh_opacity=1., additional_plotting_elements=initial_geometry_plot, show=False)

@@ -128,7 +128,7 @@ def read_gmsh_stp(geo, file_name):
                 order_u=int(parsed_info[1])+1,
                 order_v=int(parsed_info[2])+1,
                 shape=None,
-                control_points=None,
+                coefficients=None,
                 knots_u=knots_u,
                 knots_v=knots_v))
 
@@ -183,8 +183,8 @@ def read_gmsh_stp(geo, file_name):
         # geo.primitives[parsed_info_dict[f'surf{i}_name']].starting_geometry_index = num_cp
         # geo.initial_input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].starting_geometry_index = num_cp
         cntrl_pts = np.reshape(cntrl_pts, (num_rows_of_cps*num_cp_per_row,3))     
-        geo.primitives[parsed_info_dict[f'surf{i}_name']].control_points = cntrl_pts
-        geo.initial_input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points = cntrl_pts
+        geo.primitives[parsed_info_dict[f'surf{i}_name']].coefficients = cntrl_pts
+        geo.initial_input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].coefficients = cntrl_pts
         # print('Number of rows: ', num_rows_of_cps)
         # print('Number of cp per row: ', num_cp_per_row)
         # num_cp += num_rows_of_cps * num_cp_per_row
@@ -203,9 +203,9 @@ def read_gmsh_stp(geo, file_name):
             if not filtered:
                 geo.remove_multiplicity(geo.primitives[parsed_info_dict[f'surf{i}_name']])
         #exit()
-        initial_surfaces.append(np.reshape(geo.primitives[parsed_info_dict[f'surf{i}_name']].control_points, geo.primitives[parsed_info_dict[f'surf{i}_name']].shape))
-        #print(i,geo.primitives[parsed_info_dict[f'surf{i}_name']].shape ,np.shape(geo.primitives[parsed_info_dict[f'surf{i}_name']].control_points))
-        geo.total_cntrl_pts_vector = np.append(geo.total_cntrl_pts_vector, geo.primitives[parsed_info_dict[f'surf{i}_name']].control_points)
+        initial_surfaces.append(np.reshape(geo.primitives[parsed_info_dict[f'surf{i}_name']].coefficients, geo.primitives[parsed_info_dict[f'surf{i}_name']].shape))
+        #print(i,geo.primitives[parsed_info_dict[f'surf{i}_name']].shape ,np.shape(geo.primitives[parsed_info_dict[f'surf{i}_name']].coefficients))
+        geo.total_cntrl_pts_vector = np.append(geo.total_cntrl_pts_vector, geo.primitives[parsed_info_dict[f'surf{i}_name']].coefficients)
     
     if len(geo.total_cntrl_pts_vector)%3!= 0: 
         print('Warning: Incorrectly imported b_spline object')
@@ -314,7 +314,7 @@ def read_openvsp_stp(file_name):
                 order_u=int(parsed_info[1])+1,
                 order_v=int(parsed_info[2])+1,
                 shape=None,
-                control_points=None,
+                coefficients=None,
                 knots_u=knots_u,
                 knots_v=knots_v)
 
@@ -354,14 +354,14 @@ def read_openvsp_stp(file_name):
         b_spline_name = parsed_info_dict[f'surf{i}_name']
         b_splines[b_spline_name].shape = np.array(cntrl_pts.shape)
         cntrl_pts = np.reshape(cntrl_pts, (num_rows_of_cps*num_cp_per_row,3))     
-        b_splines[b_spline_name].control_points = cntrl_pts
+        b_splines[b_spline_name].coefficients = cntrl_pts
         
         # if np.sum(parsed_info_dict[f'surf{i}_u_multiplicities'][1:-1]) != len(parsed_info_dict[f'surf{i}_u_multiplicities'][1:-1]) \
         #     or np.sum(parsed_info_dict[f'surf{i}_v_multiplicities'][1:-1]) != len(parsed_info_dict[f'surf{i}_v_multiplicities'][1:-1])\
         #     or np.any(cntrl_pts.shape[0] <= 8):
         #     if not filtered:
-        #         b_splines[b_spline_name] = bsp.refit_b_spline(b_spline=b_splines[b_spline_name], name=b_spline_name, num_control_points=(10,), fit_resolution=(25,))
-        #         # b_splines[b_spline_name] = bsp.refit_b_spline(b_spline=b_splines[b_spline_name], name=b_spline_name, num_control_points=(25,), fit_resolution=(50,))
+        #         b_splines[b_spline_name] = bsp.refit_b_spline(b_spline=b_splines[b_spline_name], name=b_spline_name, num_coefficients=(10,), fit_resolution=(25,))
+        #         # b_splines[b_spline_name] = bsp.refit_b_spline(b_spline=b_splines[b_spline_name], name=b_spline_name, num_coefficients=(25,), fit_resolution=(50,))
           
     print('Complete import')
     return b_splines

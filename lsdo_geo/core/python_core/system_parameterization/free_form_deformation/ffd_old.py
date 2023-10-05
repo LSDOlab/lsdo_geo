@@ -24,15 +24,15 @@ TODO:
 '''
 
 class FFDBlock(object):
-    def __init__(self, name: str, control_points, embedded_entities_pointers = [], local_axes=dict(xprime=None, yprime=None, zprime=None), uvw_axis_indices=(0, 1, 2),
-                    section_origins=None, local_control_points=None, shape=None, order_u=10, order_v=10, order_w=10,
+    def __init__(self, name: str, coefficients, embedded_entities_pointers = [], local_axes=dict(xprime=None, yprime=None, zprime=None), uvw_axis_indices=(0, 1, 2),
+                    section_origins=None, local_coefficients=None, shape=None, order_u=10, order_v=10, order_w=10,
                     knots_u=None, knots_v=None, knots_w=None):
         
         self.name = name
 
-        self.nxp = control_points.shape[0]
-        self.nyp = control_points.shape[1]
-        self.nzp = control_points.shape[2]
+        self.nxp = coefficients.shape[0]
+        self.nyp = coefficients.shape[1]
+        self.nzp = coefficients.shape[2]
         
         self.embedded_entities_pointers = embedded_entities_pointers.copy()
         self.embedded_points = [] 
@@ -56,21 +56,21 @@ class FFDBlock(object):
         self.num_affine_prescribed_dof = 0
         self.num_rotational_dof = 0
         self.num_dof = 0
-        self.num_affine_free_ffd_control_points = 0
+        self.num_affine_free_ffd_coefficients = 0
 
-        self.num_ffd_control_points = control_points.reshape((-1,3)).shape[0]
+        self.num_ffd_coefficients = coefficients.reshape((-1,3)).shape[0]
         
         if shape is None:
-            shape = control_points.shape
+            shape = coefficients.shape
         else:
-            control_points = control_points.reshape(shape)
+            coefficients = coefficients.reshape(shape)
 
-        if control_points.shape[0] <= order_u:
-            order_u = control_points.shape[0]
-        if control_points.shape[1] <= order_v:
-            order_v = control_points.shape[1]
-        if control_points.shape[2] <= order_w:
-            order_w = control_points.shape[2]
+        if coefficients.shape[0] <= order_u:
+            order_u = coefficients.shape[0]
+        if coefficients.shape[1] <= order_v:
+            order_v = coefficients.shape[1]
+        if coefficients.shape[2] <= order_w:
+            order_w = coefficients.shape[2]
 
         if knots_u is None:
             knots_u = np.zeros(shape[0] + order_u)
@@ -89,18 +89,18 @@ class FFDBlock(object):
         # else:
         #     self._generate_embedded_coordinates()
 
-        self.b_spline_volume = BSplineVolume(name, order_u, order_v, order_w, knots_u, knots_v, knots_w, shape, control_points)
-        self.control_points = self.b_spline_volume.control_points
+        self.b_spline_volume = BSplineVolume(name, order_u, order_v, order_w, knots_u, knots_v, knots_w, shape, coefficients)
+        self.coefficients = self.b_spline_volume.coefficients
 
         self.generate_section_origins(section_origins)
         self._generate_local_coordinate_directions(local_axes)
-        self._generate_local_control_points_coordinates()
+        self._generate_local_coefficients_coordinates()
         self.num_sections = self.nxp
 
         self.free_section_properties_map = None
         self.prescribed_section_properties_map = None
         self.sectional_rotations_map = None
-        self.ffd_control_points_map = None
+        self.ffd_coefficients_map = None
         self.evaluation_map = None
 
     def add_ffd_parameter(self, ffd_parameter):
@@ -134,8 +134,8 @@ class FFDBlock(object):
                 self.num_affine_prescribed_dof += ffd_parameter.num_dof
             else:
                 self.num_affine_free_dof += ffd_parameter.num_dof
-                if self.num_affine_free_ffd_control_points == 0:
-                    self.num_affine_free_ffd_control_points = self.num_ffd_control_points
+                if self.num_affine_free_ffd_coefficients == 0:
+                    self.num_affine_free_ffd_coefficients = self.num_ffd_coefficients
                 
         else:
             raise Exception("When adding ffd parameter, please pass in specific FFDParameter object.")
@@ -179,16 +179,16 @@ class FFDBlock(object):
             raise Exception('Origin shape must be equal to (nxp, 3)')
 
 
-    def _generate_local_control_points_coordinates(self):
-        self.local_control_points = np.zeros((self.nxp, self.nyp, self.nzp, 3))
+    def _generate_local_coefficients_coordinates(self):
+        self.local_coefficients = np.zeros((self.nxp, self.nyp, self.nzp, 3))
         # print(self.section_origins)
-        # print(self.control_points)
+        # print(self.coefficients)
         # for i in range(self.nxp):
 
-        #     self.local_control_points[i, :, :, :] = self.control_points[i, :, :, :] - self.section_origins[i, :]
-        #     print(self.control_points[i, :, :, :] )
+        #     self.local_coefficients[i, :, :, :] = self.coefficients[i, :, :, :] - self.section_origins[i, :]
+        #     print(self.coefficients[i, :, :, :] )
 
-        #     print(self.local_control_points[i,:,:,:])
+        #     print(self.local_coefficients[i,:,:,:])
         #     print(self.section_origins[i,:])
 
         #     global_2_loc_rotmat_x = calculate_rotation_mat(xglobal, self.xprime[i, :])
@@ -198,21 +198,21 @@ class FFDBlock(object):
         #     # rot_mat = global_2_loc_rotmat_x.dot(global_2_loc_rotmat_y).dot(global_2_loc_rotmat_z)
         #     rot_mat = global_2_loc_rotmat_x.dot(global_2_loc_rotmat_z)
 
-        #     self.local_control_points[i,:,:,:] = np.matmul(self.local_control_points[i,:,:,:], rot_mat)
+        #     self.local_coefficients[i,:,:,:] = np.matmul(self.local_coefficients[i,:,:,:], rot_mat)
 
-        #     print(self.local_control_points[i,:,:,:])
+        #     print(self.local_coefficients[i,:,:,:])
 
-        #     self.initial_scale_y = np.max(self.local_control_points[i,:,:,1]) - np.min(self.local_control_points[i,:,:,1])
-        #     self.initial_scale_z = np.max(self.local_control_points[i,:,:,2]) - np.min(self.local_control_points[i,:,:,2])
+        #     self.initial_scale_y = np.max(self.local_coefficients[i,:,:,1]) - np.min(self.local_coefficients[i,:,:,1])
+        #     self.initial_scale_z = np.max(self.local_coefficients[i,:,:,2]) - np.min(self.local_coefficients[i,:,:,2])
 
         #     # Normalizing all of the y-coordinates
-        #     self.local_control_points[i,:,:,1] = self.local_control_points[i,:,:,1] / self.initial_scale_y
+        #     self.local_coefficients[i,:,:,1] = self.local_coefficients[i,:,:,1] / self.initial_scale_y
 
         #     # Normalizing all of the z-coordinates
-        #     self.local_control_points[i,:,:,2] = self.local_control_points[i,:,:,2] / self.initial_scale_z
+        #     self.local_coefficients[i,:,:,2] = self.local_coefficients[i,:,:,2] / self.initial_scale_z
         expanded_origins = np.repeat(self.section_origins, self.nyp*self.nzp, axis=0).reshape((self.nxp, self.nyp, self.nzp, 3))
-        origin_shifted_local_control_points = self.control_points - expanded_origins
-        # origin_shifted_local_control_points = self.control_points - self.block_origin
+        origin_shifted_local_coefficients = self.coefficients - expanded_origins
+        # origin_shifted_local_coefficients = self.coefficients - self.block_origin
         # global_2_loc_rotmat_x = calculate_rotation_mat(xglobal, self.xprime[0, :])
         # # global_2_loc_rotmat_z = calculate_rotation_mat(zglobal, self.zprime[0, :])
 
@@ -224,17 +224,17 @@ class FFDBlock(object):
         rot_mat[2,:] = self.zprime[0,:]
         # rot_mat = rot_mat.T
         self.rotation_matrix = rot_mat
-        self.local_control_points = np.matmul(origin_shifted_local_control_points, rot_mat)
+        self.local_coefficients = np.matmul(origin_shifted_local_coefficients, rot_mat)
         # self.section_origins = np.matmul(self.section_origins, rot_mat)
 
-        self.initial_scale_y = np.max(self.local_control_points[0,:,:,1]) - np.min(self.local_control_points[0,:,:,1])
-        self.initial_scale_z = np.max(self.local_control_points[0,:,:,2]) - np.min(self.local_control_points[0,:,:,2])
+        self.initial_scale_y = np.max(self.local_coefficients[0,:,:,1]) - np.min(self.local_coefficients[0,:,:,1])
+        self.initial_scale_z = np.max(self.local_coefficients[0,:,:,2]) - np.min(self.local_coefficients[0,:,:,2])
 
         # Normalizing all of the y-coordinates
-        self.local_control_points[:,:,:,1] = self.local_control_points[:,:,:,1] / self.initial_scale_y
+        self.local_coefficients[:,:,:,1] = self.local_coefficients[:,:,:,1] / self.initial_scale_y
 
         # Normalizing all of the z-coordinates
-        self.local_control_points[:,:,:,2] = self.local_control_points[:,:,:,2] / self.initial_scale_z
+        self.local_coefficients[:,:,:,2] = self.local_coefficients[:,:,:,2] / self.initial_scale_z
 
 
     def generate_section_properties_maps(self):
@@ -284,7 +284,7 @@ class FFDBlock(object):
                 section_property_map[:,0] = 1.  # TODO make work or piecewise constant.
                 section_property_map = section_property_map.tocsc()
             else:
-                parameter_b_spline_curve = BSplineCurve(name=f'degree_{ffd_parameter.degree}_{property_name}', order_u=order, control_points=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
+                parameter_b_spline_curve = BSplineCurve(name=f'degree_{ffd_parameter.degree}_{property_name}', order_u=order, coefficients=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
                 parameter_b_spline_map = parameter_b_spline_curve.compute_eval_map_points(np.linspace(0., 1., num_sections))
                 section_property_map = parameter_b_spline_map
 
@@ -356,7 +356,7 @@ class FFDBlock(object):
                 sectional_rotation_map[:,0] = 1.  # TODO make work or piecewise constant.
                 sectional_rotation_map = sectional_rotation_map.tocsc()
             else:
-                parameter_b_spline_curve = BSplineCurve(name=f'degree_{ffd_parameter.degree}_{property_name}', order_u=order, control_points=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
+                parameter_b_spline_curve = BSplineCurve(name=f'degree_{ffd_parameter.degree}_{property_name}', order_u=order, coefficients=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
                 parameter_b_spline_map = parameter_b_spline_curve.compute_eval_map_points(np.linspace(0., 1., num_sections))
                 sectional_rotation_map = parameter_b_spline_map
 
@@ -371,44 +371,44 @@ class FFDBlock(object):
         return sectional_rotations_map
 
     
-    def generate_ffd_control_points_map(self):
-        if self.ffd_control_points_map is not None:
-            return self.ffd_control_points_map
+    def generate_ffd_coefficients_map(self):
+        if self.ffd_coefficients_map is not None:
+            return self.ffd_coefficients_map
 
         num_section_properties = self.num_sections*(self.num_affine_properties)
         num_points_per_section = self.nyp * self.nzp
 
-        initial_ffd_block_control_points = self.local_control_points.reshape((-1,3)).copy()
+        initial_ffd_block_coefficients = self.local_coefficients.reshape((-1,3)).copy()
 
         # Preallocate ffd block control points maps
-        num_ffd_block_control_points =  self.local_control_points.reshape((-1,3)).shape[0]
-        ffd_block_control_points_map = np.zeros((num_ffd_block_control_points, 3, num_section_properties))
-        ffd_block_control_points_x_map = sps.lil_array((num_ffd_block_control_points, num_section_properties))
-        ffd_block_control_points_y_map = sps.lil_array((num_ffd_block_control_points, num_section_properties))
-        ffd_block_control_points_z_map = sps.lil_array((num_ffd_block_control_points, num_section_properties))
+        num_ffd_block_coefficients =  self.local_coefficients.reshape((-1,3)).shape[0]
+        ffd_block_coefficients_map = np.zeros((num_ffd_block_coefficients, 3, num_section_properties))
+        ffd_block_coefficients_x_map = sps.lil_array((num_ffd_block_coefficients, num_section_properties))
+        ffd_block_coefficients_y_map = sps.lil_array((num_ffd_block_coefficients, num_section_properties))
+        ffd_block_coefficients_z_map = sps.lil_array((num_ffd_block_coefficients, num_section_properties))
 
         # Assemble ffd block control points maps
         for section_number in range(self.num_sections):
             start_index = section_number*num_points_per_section
             end_index = (section_number+1)*num_points_per_section
-            ffd_block_control_points_x_map[start_index:end_index, section_number] = 1.  # Translation x
-            ffd_block_control_points_y_map[start_index:end_index, self.num_sections+section_number] = 1. # Translation y
-            ffd_block_control_points_z_map[start_index:end_index, (self.num_sections*2)+section_number] = 1. # Translation z
-            ffd_block_control_points_x_map[start_index:end_index, (self.num_sections*3)+section_number] = initial_ffd_block_control_points[start_index:end_index, 0] # Scale x
-            ffd_block_control_points_y_map[start_index:end_index, (self.num_sections*4)+section_number] = initial_ffd_block_control_points[start_index:end_index, 1]*self.initial_scale_y   # Scale y
-            ffd_block_control_points_z_map[start_index:end_index, (self.num_sections*5)+section_number] = initial_ffd_block_control_points[start_index:end_index, 2]*self.initial_scale_z   # Scale z
+            ffd_block_coefficients_x_map[start_index:end_index, section_number] = 1.  # Translation x
+            ffd_block_coefficients_y_map[start_index:end_index, self.num_sections+section_number] = 1. # Translation y
+            ffd_block_coefficients_z_map[start_index:end_index, (self.num_sections*2)+section_number] = 1. # Translation z
+            ffd_block_coefficients_x_map[start_index:end_index, (self.num_sections*3)+section_number] = initial_ffd_block_coefficients[start_index:end_index, 0] # Scale x
+            ffd_block_coefficients_y_map[start_index:end_index, (self.num_sections*4)+section_number] = initial_ffd_block_coefficients[start_index:end_index, 1]*self.initial_scale_y   # Scale y
+            ffd_block_coefficients_z_map[start_index:end_index, (self.num_sections*5)+section_number] = initial_ffd_block_coefficients[start_index:end_index, 2]*self.initial_scale_z   # Scale z
 
 
-        self.ffd_control_points_x_map = ffd_block_control_points_x_map.tocsc()
-        self.ffd_control_points_y_map = ffd_block_control_points_y_map.tocsc()
-        self.ffd_control_points_z_map = ffd_block_control_points_z_map.tocsc()
+        self.ffd_coefficients_x_map = ffd_block_coefficients_x_map.tocsc()
+        self.ffd_coefficients_y_map = ffd_block_coefficients_y_map.tocsc()
+        self.ffd_coefficients_z_map = ffd_block_coefficients_z_map.tocsc()
 
-        ffd_block_control_points_map[:,0,:] = np.array(self.ffd_control_points_x_map.todense())
-        ffd_block_control_points_map[:,1,:] = np.array(self.ffd_control_points_y_map.todense())
-        ffd_block_control_points_map[:,2,:] = np.array(self.ffd_control_points_z_map.todense())
-        self.ffd_control_points_map = ffd_block_control_points_map
+        ffd_block_coefficients_map[:,0,:] = np.array(self.ffd_coefficients_x_map.todense())
+        ffd_block_coefficients_map[:,1,:] = np.array(self.ffd_coefficients_y_map.todense())
+        ffd_block_coefficients_map[:,2,:] = np.array(self.ffd_coefficients_z_map.todense())
+        self.ffd_coefficients_map = ffd_block_coefficients_map
 
-        return self.ffd_control_points_map
+        return self.ffd_coefficients_map
 
 
     def project_points_FFD(self):
@@ -548,10 +548,10 @@ class FFDBlock(object):
         for embedded_entity in self.embedded_entities_pointers:
             # print('i: ', i)
             if isinstance(embedded_entity, BSplineCurve) or isinstance(embedded_entity, BSplineSurface) or isinstance(embedded_entity, BSplineVolume):
-                # print(i.control_points.shape)
-                # print(len(i.control_points))
-                self.embedded_points.append(embedded_entity.control_points)  # Control points are given in Cartesian Coordinates
-                self.embedded_entities_indices.append(len(embedded_entity.control_points))
+                # print(i.coefficients.shape)
+                # print(len(i.coefficients))
+                self.embedded_points.append(embedded_entity.coefficients)  # Control points are given in Cartesian Coordinates
+                self.embedded_entities_indices.append(len(embedded_entity.coefficients))
             else:
                 self.embedded_points.append(embedded_entity.physical_coordinates)  # Here i is a PointSet, make sure that the PointSet is evalauted
                 self.embedded_entities_indices.append(len(embedded_entity.physical_coordinates))
@@ -577,10 +577,10 @@ class FFDBlock(object):
         vp_init.show(vps, 'Bspline Volume', axes=1, viewup="z", interactive = True)
 
 
-    def evaluate(self, control_points=None):
-        if control_points is not None:
-            self.control_points = control_points
-        embedded_points = self.evaluation_map.dot(self.control_points)
+    def evaluate(self, coefficients=None):
+        if coefficients is not None:
+            self.coefficients = coefficients
+        embedded_points = self.evaluation_map.dot(self.coefficients)
         return embedded_points
 
 
@@ -650,21 +650,21 @@ if __name__ == "__main__":
     point110 = np.array([200. ,230. ,100.])
     point111 = np.array([200. ,230. ,170.])
 
-    control_points = np.zeros((2,2,2,3))
+    coefficients = np.zeros((2,2,2,3))
     
-    control_points[0,0,0,:] = point000
-    control_points[0,0,1,:] = point001
+    coefficients[0,0,0,:] = point000
+    coefficients[0,0,1,:] = point001
 
-    control_points[0,1,0,:] = point010
-    control_points[0,1,1,:] = point011
+    coefficients[0,1,0,:] = point010
+    coefficients[0,1,1,:] = point011
     
-    control_points[1,0,0,:] = point100
-    control_points[1,0,1,:] = point101
+    coefficients[1,0,0,:] = point100
+    coefficients[1,0,1,:] = point101
     
-    control_points[1,1,0,:] = point110
-    control_points[1,1,1,:] = point111
+    coefficients[1,1,0,:] = point110
+    coefficients[1,1,1,:] = point111
 
-    ffd_control_points = create_ffd(control_points, nxp, nyp, nzp)
+    ffd_coefficients = create_ffd(coefficients, nxp, nyp, nzp)
 
     # ''' Camber surface creation script for this case '''
     # path_name = '../examples/CAD/'
@@ -684,8 +684,8 @@ if __name__ == "__main__":
 
     # local_axes = {'xprime': np.array([1,0,0]), 'yprime': np.array([0,1,0]), 'zprime': np.array([0,0,1]) }
 
-    # test_ffd = FFD('test', ffd_control_points, embedded_entities_pointers=b_spline_entities)
-    test_ffd = FFD('test', ffd_control_points)
+    # test_ffd = FFD('test', ffd_coefficients, embedded_entities_pointers=b_spline_entities)
+    test_ffd = FFD('test', ffd_coefficients)
     
     test_ffd.add_shape_parameter('rot_x', 'linear', 2, 3, False, val=1.0)
     test_ffd.add_shape_parameter('rot_x', 'quadratic', 3, 4, False, val=1.0)
@@ -719,18 +719,18 @@ if __name__ == "__main__":
 
     # print(test_ffd.embedded_entities_indices)
 
-    # print('ORIGINAL CONTROL PTS: ', test_ffd.control_points[0,:,:,:])
+    # print('ORIGINAL CONTROL PTS: ', test_ffd.coefficients[0,:,:,:])
     # print('ORIGIN: ', test_ffd.origin[0,:])
-    # print('LOCAL CONTROL PTS: ', test_ffd.control_points[0,:,:,:] - test_ffd.origin[0,:])
+    # print('LOCAL CONTROL PTS: ', test_ffd.coefficients[0,:,:,:] - test_ffd.origin[0,:])
 
-    # print(test_ffd.local_control_points)
-    # print(test_ffd.BSplineVolume.control_points)
+    # print(test_ffd.local_coefficients)
+    # print(test_ffd.BSplineVolume.coefficients)
 
     test_ffd.plot(nxp, nyp, nzp)
 
-    # test_ffd.translate_control_points(offset=np.array([10., 50., 100.]))
+    # test_ffd.translate_coefficients(offset=np.array([10., 50., 100.]))
 
-    # print(test_ffd.BSplineVolume.control_points)
+    # print(test_ffd.BSplineVolume.coefficients)
 
     # test_ffd.plot(nu, nv, nw)
 
@@ -741,10 +741,10 @@ class RectangularFFDBlock(FFDBlock):
 
 
 class TranslatingFFDBlock(RectangularFFDBlock):
-    def __init__(self, name: str, control_points, embedded_entities_pointers=[], local_axes=dict(xprime=None, yprime=None, zprime=None),
-            uvw_axis_indices=(0, 1, 2), section_origins=None, local_control_points=None, shape=None, order_u=10, order_v=10, order_w=10,
+    def __init__(self, name: str, coefficients, embedded_entities_pointers=[], local_axes=dict(xprime=None, yprime=None, zprime=None),
+            uvw_axis_indices=(0, 1, 2), section_origins=None, local_coefficients=None, shape=None, order_u=10, order_v=10, order_w=10,
             knots_u=None, knots_v=None, knots_w=None):
-        super().__init__(name, control_points, embedded_entities_pointers, local_axes, uvw_axis_indices, section_origins,
-                local_control_points, shape, order_u, order_v, order_w, knots_u, knots_v, knots_w)
+        super().__init__(name, coefficients, embedded_entities_pointers, local_axes, uvw_axis_indices, section_origins,
+                local_coefficients, shape, order_u, order_v, order_w, knots_u, knots_v, knots_w)
         
 

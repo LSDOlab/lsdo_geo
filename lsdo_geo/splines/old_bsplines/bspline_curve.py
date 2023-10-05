@@ -11,20 +11,20 @@ from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
 from lsdo_geo.primitives.b_splines.b_spline import BSpline
 
 class BSplineCurve(BSpline):
-    def __init__(self, name, control_points, order_u=4, knots_u=None):
+    def __init__(self, name, coefficients, order_u=4, knots_u=None):
         
         self.name = name
         self.order_u = order_u
-        self.shape = control_points.shape
-        self.control_points = control_points
+        self.shape = coefficients.shape
+        self.coefficients = coefficients
         self.knots_u = knots_u
         if np.isscalar(self.shape):
-            self.num_control_points = self.shape
+            self.num_coefficients = self.shape
         elif (len(self.shape) == 1):
-            self.num_control_points = self.shape[0]
+            self.num_coefficients = self.shape[0]
             self.num_physical_dimenensions = 1
         elif len(self.shape == 2):
-            self.num_control_points = self.shape[0]
+            self.num_coefficients = self.shape[0]
             self.num_physical_dimenensions = self.shape[1]
         else:
             raise Exception("Control points should have a proper shape for a curve.")
@@ -41,7 +41,7 @@ class BSplineCurve(BSpline):
         get_basis_curve_matrix(self.order_u, self.shape[0], 0, u_vec, self.knots_u, 
             len(u_vec), data, row_indices, col_indices)
 
-        basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), self.num_control_points))
+        basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), self.num_coefficients))
         
         return basis0
 
@@ -53,7 +53,7 @@ class BSplineCurve(BSpline):
         get_basis_curve_matrix(self.order_u, self.shape[0], 1, u_vec, self.knots_u, 
             len(u_vec), data, row_indices, col_indices)
 
-        basis1 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), self.num_control_points))
+        basis1 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), self.num_coefficients))
         
         return basis1
 
@@ -65,25 +65,25 @@ class BSplineCurve(BSpline):
         get_basis_curve_matrix(self.order_u, self.shape[0], 2, u_vec, self.knots_u, 
             len(u_vec), data, row_indices, col_indices)
 
-        basis2 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), self.num_control_points))
+        basis2 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), self.num_coefficients))
         
         return basis2
 
     def evaluate_points(self, u_vec):
         basis0 = self.compute_evaluation_map(u_vec)
-        points = basis0.dot(self.control_points.reshape((self.num_control_points, -1)))
+        points = basis0.dot(self.coefficients.reshape((self.num_coefficients, -1)))
 
         return points
 
     def evaluate_derivative(self, u_vec):
         basis1 = self.compute_derivative_evaluation_map(u_vec)
-        derivs1 = basis1.dot(self.control_points.reshape((self.num_control_points, -1)))
+        derivs1 = basis1.dot(self.coefficients.reshape((self.num_coefficients, -1)))
 
         return derivs1 
 
     def evaluate_second_derivative(self, u_vec):
         basis2 = self.compute_second_derivative_evaluation_map(u_vec)
-        derivs2 = basis2.dot(self.control_points.reshape((self.num_control_points, -1)))
+        derivs2 = basis2.dot(self.coefficients.reshape((self.num_coefficients, -1)))
 
         return derivs2
 
@@ -93,20 +93,20 @@ class BSplineCurve(BSpline):
     
 
         num_points = len(points)
-        num_control_points = self.shape[0]
+        num_coefficients = self.shape[0]
 
         u_vec = np.zeros((num_points,))
 
         compute_curve_projection(
-            self.order_u, num_control_points,
+            self.order_u, num_coefficients,
             num_points, max_iter,
             points, 
-            self.control_points,
+            self.coefficients,
             u_vec, grid_search_density
         )
 
         map = self.compute_evaluation_map(u_vec)
-        projected_points = am.array(input=self.control_points.reshape((num_control_points,-1)), linear_map=map, shape=points.shape)
+        projected_points = am.array(input=self.coefficients.reshape((num_coefficients,-1)), linear_map=map, shape=points.shape)
 
         if plot:
             # Plot the surfaces that are projected onto
@@ -114,8 +114,8 @@ class BSplineCurve(BSpline):
             primitive_meshes = self.plot(plot_types=['mesh'], opacity=0.25, show=False)
             # Plot 
             plotting_points = []
-            plotting_primitive_control_points = vedo.Points(projected_points.value, r=12, c='#C69214')  # TODO make this (1,3) instead of (3,)
-            plotting_points.append(plotting_primitive_control_points)
+            plotting_primitive_coefficients = vedo.Points(projected_points.value, r=12, c='#C69214')  # TODO make this (1,3) instead of (3,)
+            plotting_points.append(plotting_primitive_coefficients)
             plotter.show(primitive_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
 
         if return_parametric_coordinates:
@@ -125,7 +125,7 @@ class BSplineCurve(BSpline):
             return projected_points
 
 
-    def plot(self, plot_types:list=['mesh'], point_types:list=['evaluated_points', 'control_points'],
+    def plot(self, plot_types:list=['mesh'], point_types:list=['evaluated_points', 'coefficients'],
              opacity:float=1., color:str='#00629B',
              additional_plotting_elements:list=[], show:bool=True):
         '''
@@ -134,7 +134,7 @@ class BSplineCurve(BSpline):
         Parameters
         -----------
         points_type : list
-            The type of points to be plotted. {evaluated_points, control_points}
+            The type of points to be plotted. {evaluated_points, coefficients}
         plot_types : list
             The type of plot {mesh, wireframe, point_cloud}
         opactity : float
@@ -154,8 +154,8 @@ class BSplineCurve(BSpline):
                 points = self.evaluate_points(u_vec).reshape((-1, self.num_physical_dimenensions))
                 plotting_points = np.zeros((points.shape[0], 3))  # Vedo does 3D plotting
                 plotting_points[:,0:points.shape[1]] = points
-            elif point_type == 'control_points':
-                points = self.control_points.reshape((self.num_control_points, self.num_physical_dimenensions))
+            elif point_type == 'coefficients':
+                points = self.coefficients.reshape((self.num_coefficients, self.num_physical_dimenensions))
                 plotting_points = np.zeros((points.shape[0], 3))  # Vedo does 3D plotting
                 plotting_points[:,0:points.shape[1]] = points
 
@@ -187,15 +187,15 @@ class BSplineCurve(BSpline):
             #             fig = plt.plot(u_vec, evaluated_points, 'bo', label='Evaluated Points', title=f'{self.name}', xtitle='u', ytitle="f(u)")
             #         else:
             #             fig += plt.plot(u_vec, evaluated_points, 'bo', like=fig, label='Evaluated Points')
-            #     if 'control_points' in point_types:
-            #         u_vec = np.linspace(0, 1, self.control_points.shape[0])
+            #     if 'coefficients' in point_types:
+            #         u_vec = np.linspace(0, 1, self.coefficients.shape[0])
             #         if fig is None:
-            #             fig = plt.plot(u_vec, self.control_points, 'ro', label='Control Points', title=f'{self.name}', xtitle='u', ytitle="f(u)")
+            #             fig = plt.plot(u_vec, self.coefficients, 'ro', label='Control Points', title=f'{self.name}', xtitle='u', ytitle="f(u)")
             #         else:
-            #             fig += plt.plot(u_vec, self.control_points, 'bo', like=fig, label='Evaluated Points')
+            #             fig += plt.plot(u_vec, self.coefficients, 'bo', like=fig, label='Evaluated Points')
 
             #     # num_points = self.shape[0]*self.shape[1]
-            #     # plotting_elements.append(vedo.Points(self.control_points.reshape((num_points,-1))).opacity(opacity).color('green'))
+            #     # plotting_elements.append(vedo.Points(self.coefficients.reshape((num_points,-1))).opacity(opacity).color('green'))
 
             # if 'mesh' in plot_types or 'wireframe' in plot_types:
             #     if 'evaluated_points' in point_types:
@@ -205,12 +205,12 @@ class BSplineCurve(BSpline):
             #             fig = plt.plot(u_vec, evaluated_points, '-b', label='Evaluated Points', title=f'{self.name}', xtitle='u', ytitle="f(u)")
             #         else:
             #             fig += plt.plot(u_vec, evaluated_points, '-b', like=fig, label='Evaluated Points')
-            #     if 'control_points' in point_types:
-            #         u_vec = np.linspace(0, 1, self.control_points.shape[0])
+            #     if 'coefficients' in point_types:
+            #         u_vec = np.linspace(0, 1, self.coefficients.shape[0])
             #         if fig is None:
-            #             fig = plt.plot(u_vec, self.control_points, '-r', label='Control Points', title=f'{self.name}', xtitle='u', ytitle="f(u)")
+            #             fig = plt.plot(u_vec, self.coefficients, '-r', label='Control Points', title=f'{self.name}', xtitle='u', ytitle="f(u)")
             #         else:
-            #             fig += plt.plot(u_vec, self.control_points, '-b', like=fig, label='Evaluated Points')
+            #             fig += plt.plot(u_vec, self.coefficients, '-b', like=fig, label='Evaluated Points')
 
             # plotting_elements.append(fig)
 

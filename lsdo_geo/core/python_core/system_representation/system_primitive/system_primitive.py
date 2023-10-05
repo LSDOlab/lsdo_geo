@@ -11,7 +11,7 @@ class SystemPrimitive:
         self.name = name
         self.geometry_primitive = geometry_primitive
         self.material_primitives = material_primitives
-        self.control_points = {}  # assigned during assemble
+        self.coefficients = {}  # assigned during assemble
         self.shapes = None   # assigned during assemble
         self.assemble()
 
@@ -25,13 +25,13 @@ class SystemPrimitive:
         # row_indices = np.zeros(len(data), np.int32)
         # col_indices = np.zeros(len(data), np.int32)
 
-        # num_control_points = self.shape[0] * self.shape[1]
+        # num_coefficients = self.shape[0] * self.shape[1]
 
         # get_basis_surface_matrix(self.order_u, self.shape[0], 0, u_vec, self.knots_u, 
         #     self.order_v, self.shape[1], 0, v_vec, self.knots_v, 
         #     len(u_vec), data, row_indices, col_indices)
 
-        # basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_control_points) )
+        # basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_coefficients) )
         
         # return basis0
         pass
@@ -45,13 +45,13 @@ class SystemPrimitive:
         # row_indices = np.zeros(len(data), np.int32)
         # col_indices = np.zeros(len(data), np.int32)        
 
-        # num_control_points = self.shape[0] * self.shape[1]
+        # num_coefficients = self.shape[0] * self.shape[1]
 
-        # get_basis_surface_matrix(self.order_u, self.control_points.shape[0], 1, u_vec, self.knots_u, 
-        #     self.order_v, self.control_points.shape[1], 1, v_vec, self.knots_v, 
+        # get_basis_surface_matrix(self.order_u, self.coefficients.shape[0], 1, u_vec, self.knots_u, 
+        #     self.order_v, self.coefficients.shape[1], 1, v_vec, self.knots_v, 
         #     len(u_vec), data, row_indices, col_indices)
 
-        # basis1 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_control_points) )
+        # basis1 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_coefficients) )
         
         # return basis1
         pass
@@ -65,13 +65,13 @@ class SystemPrimitive:
         # row_indices = np.zeros(len(data), np.int32)
         # col_indices = np.zeros(len(data), np.int32)      
 
-        # num_control_points = self.shape[0] * self.shape[1]
+        # num_coefficients = self.shape[0] * self.shape[1]
         
-        # get_basis_surface_matrix(self.order_u, self.control_points.shape[0], 2, u_vec, self.knots_u, 
-        #     self.order_v, self.control_points.shape[1], 2, v_vec, self.knots_v, 
+        # get_basis_surface_matrix(self.order_u, self.coefficients.shape[0], 2, u_vec, self.knots_u, 
+        #     self.order_v, self.coefficients.shape[1], 2, v_vec, self.knots_v, 
         #     len(u_vec), data, row_indices, col_indices)
 
-        # basis2 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_control_points) )
+        # basis2 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_coefficients) )
         
         # return basis2
 
@@ -79,10 +79,10 @@ class SystemPrimitive:
         '''
         Evaluates the geometry and material properties at the parametric coordinates.
         '''
-        # num_control_points = self.shape[0] * self.shape[1]
+        # num_coefficients = self.shape[0] * self.shape[1]
         
         # basis0 = self.compute_evaluation_map(u_vec, v_vec)
-        # points = basis0.dot(self.control_points.reshape((num_control_points, 3)))
+        # points = basis0.dot(self.coefficients.reshape((num_coefficients, 3)))
 
         # return points
         pass
@@ -91,10 +91,10 @@ class SystemPrimitive:
         '''
         Evaluates the derivative of the geometry and material properties at the parametric coordinates.
         '''
-        # num_control_points = self.shape[0] * self.shape[1]
+        # num_coefficients = self.shape[0] * self.shape[1]
         
         # basis1 = self.compute_derivative_evaluation_map(u_vec, v_vec)
-        # derivs1 = basis1.dot(self.control_points.reshape((num_control_points, 3)))
+        # derivs1 = basis1.dot(self.coefficients.reshape((num_coefficients, 3)))
 
         # return derivs1 
         pass
@@ -103,10 +103,10 @@ class SystemPrimitive:
         '''
         Evaluates the second derivative of the geometry and material properties at the parametric coordinates.
         '''
-        # num_control_points = self.shape[0] * self.shape[1]
+        # num_coefficients = self.shape[0] * self.shape[1]
         
         # basis2 = self.compute_second_derivative_evaluation_map(u_vec, v_vec)
-        # derivs2 = basis2.dot(self.control_points.reshape((num_control_points, 3)))
+        # derivs2 = basis2.dot(self.coefficients.reshape((num_coefficients, 3)))
 
         # return derivs2
         pass
@@ -150,8 +150,8 @@ class SystemPrimitive:
             
             # map = primitive.compute_evaluation_map(parametric_coordinates_flattened[:,0], parametric_coordinates_flattened[:,1])
             map = primitive.compute_evaluation_map(parametric_coordinates[0], parametric_coordinates[1])
-            num_control_points = np.cumprod(primitive.control_points.shape[:-1])[-1]
-            projected_points = am.array(input=primitive.control_points.reshape((num_control_points,-1)), linear_map=map, shape=points.shape)
+            num_coefficients = np.cumprod(primitive.coefficients.shape[:-1])[-1]
+            projected_points = am.array(input=primitive.coefficients.reshape((num_coefficients,-1)), linear_map=map, shape=points.shape)
             projection_output[property] = projected_points
 
         if len(projection_output) == 1:
@@ -169,7 +169,7 @@ class SystemPrimitive:
         Parameters
         -----------
         points_type : list
-            The type of points to be plotted. {evaluated_points, control_points}
+            The type of points to be plotted. {evaluated_points, coefficients}
         plot_types : list
             The type of plot {mesh, wireframe, point_cloud}
         opactity : float
@@ -189,7 +189,7 @@ class SystemPrimitive:
         '''
         Assembles geometry and material control points into a single control points array.
         '''
-        self.control_points['geometry'] = self.geometry_primitive.control_points
+        self.coefficients['geometry'] = self.geometry_primitive.coefficients
         for material_property_primitive_name in self.material_primitives:
             material_property_primitive = self.material_primitives[material_property_primitive_name]
-            self.control_points[material_property_primitive_name] = material_property_primitive.control_points
+            self.coefficients[material_property_primitive_name] = material_property_primitive.coefficients

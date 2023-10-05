@@ -29,10 +29,10 @@ for ns in range(27,28):##27#len(bsurf)
     print(ns)
     order_u = bsurf[ns]._m1 + 1
     order_v = bsurf[ns]._m2 + 1
-    num_control_points_u = bsurf[ns]._k1 + 1 
-    num_control_points_v = bsurf[ns]._k2 + 1 
+    num_coefficients_u = bsurf[ns]._k1 + 1 
+    num_coefficients_v = bsurf[ns]._k2 + 1 
 
-    if num_control_points_u == 2 or num_control_points_v == 2:
+    if num_coefficients_u == 2 or num_coefficients_v == 2:
         cps1 = bsurf[ns]._cp[0]
         for j in range(len(bsurf[ns]._cp)):
             if j == 0:
@@ -59,39 +59,39 @@ for ns in range(27,28):##27#len(bsurf)
             else:
                 cps =  np.vstack((cps,bsurf[ns]._cp[j]))
     num1 = 5
-    cps = cps.reshape((num_control_points_u * num_control_points_v, 3)) 
-    if num_control_points_u == 2 or num_control_points_v == 2:
-        if num_control_points_u == 2:
-            interpolate_matrix = np.zeros((num1*num_control_points_v, num_control_points_u*num_control_points_v))
-            num_control_points = num_control_points_v
-            num_control_points_u = num1
+    cps = cps.reshape((num_coefficients_u * num_coefficients_v, 3)) 
+    if num_coefficients_u == 2 or num_coefficients_v == 2:
+        if num_coefficients_u == 2:
+            interpolate_matrix = np.zeros((num1*num_coefficients_v, num_coefficients_u*num_coefficients_v))
+            num_coefficients = num_coefficients_v
+            num_coefficients_u = num1
             order_u = 4 
         else:
-            interpolate_matrix = np.zeros((num1*num_control_points_u, num_control_points_u*num_control_points_v))
-            num_control_points = num_control_points_u
-            num_control_points_v = num1
+            interpolate_matrix = np.zeros((num1*num_coefficients_u, num_coefficients_u*num_coefficients_v))
+            num_coefficients = num_coefficients_u
+            num_coefficients_v = num1
             order_v = 4
         j = 0
-        for i in range(num1*num_control_points):
-            if i%5 == 0 and j<num_control_points:
+        for i in range(num1*num_coefficients):
+            if i%5 == 0 and j<num_coefficients:
                 interpolate_matrix[i,j] = np.linspace(0,1,num1)[0]
-                interpolate_matrix[i,j+num_control_points] = np.linspace(0,1,num1)[-1]
-            if i%5 == 1 and j<num_control_points:
+                interpolate_matrix[i,j+num_coefficients] = np.linspace(0,1,num1)[-1]
+            if i%5 == 1 and j<num_coefficients:
                     interpolate_matrix[i,j] = np.linspace(0,1,num1)[1]
-                    interpolate_matrix[i,j+num_control_points] = np.linspace(0,1,num1)[-2]
-            if i%5 == 2 and j<num_control_points:
+                    interpolate_matrix[i,j+num_coefficients] = np.linspace(0,1,num1)[-2]
+            if i%5 == 2 and j<num_coefficients:
                     interpolate_matrix[i,j] = np.linspace(0,1,num1)[2]
-                    interpolate_matrix[i,j+num_control_points] = np.linspace(0,1,num1)[-3]                         
-            if i%5 == 3 and j<num_control_points:
+                    interpolate_matrix[i,j+num_coefficients] = np.linspace(0,1,num1)[-3]                         
+            if i%5 == 3 and j<num_coefficients:
                     interpolate_matrix[i,j] = np.linspace(0,1,num1)[3]
-                    interpolate_matrix[i,j+num_control_points] = np.linspace(0,1,num1)[-4] 
-            if i%5 == 4 and j<num_control_points:
+                    interpolate_matrix[i,j+num_coefficients] = np.linspace(0,1,num1)[-4] 
+            if i%5 == 4 and j<num_coefficients:
                     interpolate_matrix[i,j] = np.linspace(0,1,num1)[4]
-                    interpolate_matrix[i,j+num_control_points] = np.linspace(0,1,num1)[-5]
+                    interpolate_matrix[i,j+num_coefficients] = np.linspace(0,1,num1)[-5]
                     j = j+1                             
     else:
-        interpolate_matrix = np.identity(num_control_points_u * num_control_points_v)
-        cps = cps.reshape((num_control_points_u * num_control_points_v, 3)) 
+        interpolate_matrix = np.identity(num_coefficients_u * num_coefficients_v)
+        cps = cps.reshape((num_coefficients_u * num_coefficients_v, 3)) 
     #print(interpolate_matrix)
     #print(np.shape(interpolate_matrix))
     #print(np.shape(cps))
@@ -108,11 +108,11 @@ for ns in range(27,28):##27#len(bsurf)
     u_vec = np.ones(num_points)
     v_vec = np.ones(num_points)
     compute_surface_projection(
-        order_u, num_control_points_u,
-        order_v, num_control_points_v,
+        order_u, num_coefficients_u,
+        order_v, num_coefficients_v,
         num_points, max_iter,
         points.reshape(num_points * 3), 
-        cps.reshape((num_control_points_u * num_control_points_v * 3)),
+        cps.reshape((num_coefficients_u * num_coefficients_v * 3)),
         u_vec, v_vec,100,
         axis.reshape(num_points * 3),
     )
@@ -120,18 +120,18 @@ for ns in range(27,28):##27#len(bsurf)
     data = np.zeros(nnz)
     row_indices = np.zeros(nnz, np.int32)
     col_indices = np.zeros(nnz, np.int32)
-    knot_vector_u = np.zeros(num_control_points_u+order_u)
-    knot_vector_v = np.zeros(num_control_points_v+order_v)
-    get_open_uniform(order_u, num_control_points_u, knot_vector_u)
-    get_open_uniform(order_v, num_control_points_v, knot_vector_v)
+    knot_vector_u = np.zeros(num_coefficients_u+order_u)
+    knot_vector_v = np.zeros(num_coefficients_v+order_v)
+    get_open_uniform(order_u, num_coefficients_u, knot_vector_u)
+    get_open_uniform(order_v, num_coefficients_v, knot_vector_v)
     get_basis_surface_matrix(
-        order_u, num_control_points_u, 0, u_vec, knot_vector_u, 
-        order_v, num_control_points_v, 0, v_vec, knot_vector_v,
+        order_u, num_coefficients_u, 0, u_vec, knot_vector_u, 
+        order_v, num_coefficients_v, 0, v_vec, knot_vector_v,
         num_points, data, row_indices, col_indices,
     )
     basis0 = sps.csc_matrix(
         (data, (row_indices, col_indices)), 
-        shape=(num_points, num_control_points_u * num_control_points_v),
+        shape=(num_points, num_coefficients_u * num_coefficients_v),
     )
     
 
@@ -242,8 +242,8 @@ plt.legend(["Projected points","Random test points","Control points of b-spline 
 #print(cps2)
 #np.savetxt("cps_in.txt",cps,fmt='%12.4f') 
 #print(np.shape(cps))
-#print(num_control_points_u)
-#print(num_control_points_v)
+#print(num_coefficients_u)
+#print(num_coefficients_v)
 #print(len(cps))
 #print(len(cps1))
 #print(len(cps2))

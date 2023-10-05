@@ -1,9 +1,9 @@
-ctypedef int (*get_basis_func)(int order, int num_control_points, double u, double* knot_vector, double* basis)
+ctypedef int (*get_basis_func)(int order, int num_coefficients, double u, double* knot_vector, double* basis)
 
 
 cdef get_basis_surface_matrix(
-    int order_u, int num_control_points_u, int u_der, double* u_vec, double* knot_vector_u,
-    int order_v, int num_control_points_v, int v_der, double* v_vec, double* knot_vector_v,
+    int order_u, int num_coefficients_u, int u_der, double* u_vec, double* knot_vector_u,
+    int order_v, int num_coefficients_v, int v_der, double* v_vec, double* knot_vector_v,
     int num_points, double* data, int* row_indices, int* col_indices,
 ):
     cdef int i_pt, i_order_u, i_order_v, i_start_u, i_start_v, i_nz
@@ -11,8 +11,8 @@ cdef get_basis_surface_matrix(
     cdef double *basis_u = <double *> malloc(order_u * sizeof(double))
     cdef double *basis_v = <double *> malloc(order_v * sizeof(double))
 
-    # cdef double *knot_vector_u = <double *> malloc((order_u + num_control_points_u) * sizeof(double))
-    # cdef double *knot_vector_v = <double *> malloc((order_v + num_control_points_v) * sizeof(double))
+    # cdef double *knot_vector_u = <double *> malloc((order_u + num_coefficients_u) * sizeof(double))
+    # cdef double *knot_vector_v = <double *> malloc((order_v + num_coefficients_v) * sizeof(double))
 
     cdef get_basis_func get_basis_u, get_basis_v
 
@@ -32,8 +32,8 @@ cdef get_basis_surface_matrix(
 
     i_nz = 0
     for i_pt in range(num_points):
-        i_start_u = get_basis_u(order_u, num_control_points_u, u_vec[i_pt], knot_vector_u, basis_u)
-        i_start_v = get_basis_v(order_v, num_control_points_v, v_vec[i_pt], knot_vector_v, basis_v)
+        i_start_u = get_basis_u(order_u, num_coefficients_u, u_vec[i_pt], knot_vector_u, basis_u)
+        i_start_v = get_basis_v(order_v, num_coefficients_v, v_vec[i_pt], knot_vector_v, basis_v)
 
         # print('i_start_u', i_start_u, 'i_start_v', i_start_v)
 
@@ -41,7 +41,7 @@ cdef get_basis_surface_matrix(
             for i_order_v in range(order_v):
                 data[i_nz] = basis_u[i_order_u] * basis_v[i_order_v]
                 row_indices[i_nz] = i_pt
-                col_indices[i_nz] = num_control_points_v * (i_start_u + i_order_u) + (i_start_v + i_order_v)
+                col_indices[i_nz] = num_coefficients_v * (i_start_u + i_order_u) + (i_start_v + i_order_v)
 
                 i_nz += 1
 

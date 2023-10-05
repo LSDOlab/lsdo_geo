@@ -9,27 +9,27 @@ from lsdo_geo.cython.surface_projection_py import compute_surface_projection
 from lsdo_geo.primitives.b_splines.b_spline import BSpline
 
 class BSplineSurface(BSpline):
-    def __init__(self, name:str, order_u:int, order_v:int, knots_u:np.ndarray, knots_v:np.ndarray, shape:tuple, control_points:np.ndarray):
+    def __init__(self, name:str, order_u:int, order_v:int, knots_u:np.ndarray, knots_v:np.ndarray, shape:tuple, coefficients:np.ndarray):
         self.name = name
         self.order_u = order_u
         self.order_v = order_v
         self.knots_u = knots_u
         self.knots_v = knots_v
         self.shape = shape
-        self.control_points = control_points
+        self.coefficients = coefficients
 
     def compute_evaluation_map(self, u_vec, v_vec):
         data = np.zeros(len(u_vec) * self.order_u * self.order_v)
         row_indices = np.zeros(len(data), np.int32)
         col_indices = np.zeros(len(data), np.int32)
 
-        num_control_points = self.shape[0] * self.shape[1]
+        num_coefficients = self.shape[0] * self.shape[1]
 
         get_basis_surface_matrix(self.order_u, self.shape[0], 0, u_vec, self.knots_u, 
             self.order_v, self.shape[1], 0, v_vec, self.knots_v, 
             len(u_vec), data, row_indices, col_indices)
 
-        basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_control_points) )
+        basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_coefficients) )
         
         return basis0
 
@@ -38,13 +38,13 @@ class BSplineSurface(BSpline):
         row_indices = np.zeros(len(data), np.int32)
         col_indices = np.zeros(len(data), np.int32)        
 
-        num_control_points = self.shape[0] * self.shape[1]
+        num_coefficients = self.shape[0] * self.shape[1]
 
-        get_basis_surface_matrix(self.order_u, self.control_points.shape[0], 1, u_vec, self.knots_u, 
-            self.order_v, self.control_points.shape[1], 1, v_vec, self.knots_v, 
+        get_basis_surface_matrix(self.order_u, self.coefficients.shape[0], 1, u_vec, self.knots_u, 
+            self.order_v, self.coefficients.shape[1], 1, v_vec, self.knots_v, 
             len(u_vec), data, row_indices, col_indices)
 
-        basis1 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_control_points) )
+        basis1 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_coefficients) )
         
         return basis1
 
@@ -53,37 +53,37 @@ class BSplineSurface(BSpline):
         row_indices = np.zeros(len(data), np.int32)
         col_indices = np.zeros(len(data), np.int32)      
 
-        num_control_points = self.shape[0] * self.shape[1]
+        num_coefficients = self.shape[0] * self.shape[1]
         
-        get_basis_surface_matrix(self.order_u, self.control_points.shape[0], 2, u_vec, self.knots_u, 
-            self.order_v, self.control_points.shape[1], 2, v_vec, self.knots_v, 
+        get_basis_surface_matrix(self.order_u, self.coefficients.shape[0], 2, u_vec, self.knots_u, 
+            self.order_v, self.coefficients.shape[1], 2, v_vec, self.knots_v, 
             len(u_vec), data, row_indices, col_indices)
 
-        basis2 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_control_points) )
+        basis2 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_coefficients) )
         
         return basis2
 
     def evaluate_points(self, u_vec, v_vec):       
-        num_control_points = self.shape[0] * self.shape[1]
+        num_coefficients = self.shape[0] * self.shape[1]
         
         basis0 = self.compute_evaluation_map(u_vec, v_vec)
-        points = basis0.dot(self.control_points.reshape((num_control_points, self.shape[2])))
+        points = basis0.dot(self.coefficients.reshape((num_coefficients, self.shape[2])))
 
         return points
 
     def evaluate_derivative(self, u_vec, v_vec):
-        num_control_points = self.shape[0] * self.shape[1]
+        num_coefficients = self.shape[0] * self.shape[1]
         
         basis1 = self.compute_derivative_evaluation_map(u_vec, v_vec)
-        derivs1 = basis1.dot(self.control_points.reshape((num_control_points, self.shape[2])))
+        derivs1 = basis1.dot(self.coefficients.reshape((num_coefficients, self.shape[2])))
 
         return derivs1 
 
     def evaluate_second_derivative(self, u_vec, v_vec):
-        num_control_points = self.shape[0] * self.shape[1]
+        num_coefficients = self.shape[0] * self.shape[1]
         
         basis2 = self.compute_second_derivative_evaluation_map(u_vec, v_vec)
-        derivs2 = basis2.dot(self.control_points.reshape((num_control_points, self.shape[2])))
+        derivs2 = basis2.dot(self.coefficients.reshape((num_coefficients, self.shape[2])))
 
         return derivs2
 
@@ -109,21 +109,21 @@ class BSplineSurface(BSpline):
         
         u_vec_flattened = np.zeros(num_points)
         v_vec_flattened = np.zeros(num_points)
-        num_control_points = np.cumprod(self.shape[:-1])[-1]
+        num_coefficients = np.cumprod(self.shape[:-1])[-1]
 
         compute_surface_projection(
             np.array([self.order_u]), np.array([self.shape[0]]),
             np.array([self.order_v]), np.array([self.shape[1]]),
             num_points, max_iter,
             flattened_points, 
-            self.control_points.reshape((-1,)),
+            self.coefficients.reshape((-1,)),
             self.knots_u, self.knots_v,
             u_vec_flattened, v_vec_flattened, grid_search_density,
-            direction.reshape((-1,)), np.zeros((num_points,), dtype=int), self.control_points.reshape((num_control_points, -1))
+            direction.reshape((-1,)), np.zeros((num_points,), dtype=int), self.coefficients.reshape((num_coefficients, -1))
         )
 
         map = self.compute_evaluation_map(u_vec_flattened, v_vec_flattened)
-        projected_points = am.array(input=self.control_points.reshape((num_control_points,-1)), linear_map=map, shape=input_shape)
+        projected_points = am.array(input=self.coefficients.reshape((num_coefficients,-1)), linear_map=map, shape=input_shape)
 
         if plot:
             # Plot the surfaces that are projected onto
@@ -132,8 +132,8 @@ class BSplineSurface(BSpline):
             # Plot 
             plotting_points = []
             flattened_projected_points = (projected_points.value).reshape((num_points, -1)) # last axis usually has length 3 for x,y,z
-            plotting_primitive_control_points = vedo.Points(flattened_projected_points, r=12, c='blue')  # TODO make this (1,3) instead of (3,)
-            plotting_points.append(plotting_primitive_control_points)
+            plotting_primitive_coefficients = vedo.Points(flattened_projected_points, r=12, c='blue')  # TODO make this (1,3) instead of (3,)
+            plotting_points.append(plotting_primitive_coefficients)
             plotter.show(primitive_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
 
         # u_vec = u_vec_flattened.reshape(tuple(input_shape[:-1],)+(1,))
@@ -147,7 +147,7 @@ class BSplineSurface(BSpline):
             return projected_points
 
 
-    def plot(self, point_types:list=['evaluated_points', 'control_points'], plot_types:list=['mesh'],
+    def plot(self, point_types:list=['evaluated_points', 'coefficients'], plot_types:list=['mesh'],
               opacity:float=1., color:str='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
         '''
         Plots the B-spline Surface.
@@ -155,7 +155,7 @@ class BSplineSurface(BSpline):
         Parameters
         -----------
         points_type : list
-            The type of points to be plotted. {evaluated_points, control_points}
+            The type of points to be plotted. {evaluated_points, coefficients}
         plot_types : list
             The type of plot {mesh, wireframe, point_cloud}
         opactity : float
@@ -182,10 +182,10 @@ class BSplineSurface(BSpline):
                 num_plotting_points = num_points_u * num_points_v
                 plotting_points = self.evaluate_points(u_vec=u_vec, v_vec=v_vec)
                 plotting_points_shape = (num_points_u, num_points_v, plotting_points.shape[-1])
-            elif point_type == 'control_points':
+            elif point_type == 'coefficients':
                 plotting_points_shape = self.shape
                 num_plotting_points = np.cumprod(plotting_points_shape[:-1])[-1]
-                plotting_points = self.control_points.reshape((num_plotting_points,-1))
+                plotting_points = self.coefficients.reshape((num_plotting_points,-1))
 
             if 'point_cloud' in plot_types:
                 plotting_elements.append(vedo.Points(plotting_points).opacity(opacity).color('darkred'))

@@ -5,8 +5,8 @@ from lsdo_geo.cython.surface_projection cimport compute_surface_projection
 
 
 def compute_surface_projection(
-    np.ndarray[np.int64_t] surfs_order_u, np.ndarray[np.int64_t] surfs_num_control_points_u,
-    np.ndarray[np.int64_t] surfs_order_v, np.ndarray[np.int64_t] surfs_num_control_points_v,
+    np.ndarray[np.int64_t] surfs_order_u, np.ndarray[np.int64_t] surfs_num_coefficients_u,
+    np.ndarray[np.int64_t] surfs_order_v, np.ndarray[np.int64_t] surfs_num_coefficients_v,
     int num_points, int max_iter,
     np.ndarray[double] pts,  np.ndarray[double] cps,
     np.ndarray[double] knot_vector_u, np.ndarray[double] knot_vector_v,
@@ -17,8 +17,8 @@ def compute_surface_projection(
     np.ndarray[double, ndim=2] surfs_cps,
 ):
     compute_surface_projection(
-        surfs_order_u, surfs_num_control_points_u,
-        surfs_order_v, surfs_num_control_points_v,
+        surfs_order_u, surfs_num_coefficients_u,
+        surfs_order_v, surfs_num_coefficients_v,
         num_points, max_iter,
         &pts[0], &cps[0],
         &knot_vector_u[0], &knot_vector_v[0],

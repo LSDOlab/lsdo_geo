@@ -10,7 +10,7 @@ from lsdo_geo.primitives.b_splines.b_spline import BSpline
 import vedo
 
 class BSplineVolume(BSpline):
-    def __init__(self, name, order_u, order_v, order_w, knots_u, knots_v, knots_w, shape, control_points):
+    def __init__(self, name, order_u, order_v, order_w, knots_u, knots_v, knots_w, shape, coefficients):
         self.name = name
         self.order_u = order_u
         self.knots_u = knots_u
@@ -19,8 +19,8 @@ class BSplineVolume(BSpline):
         self.order_w = order_w
         self.knots_w = knots_w
         self.shape = shape
-        self.control_points = control_points
-        self.num_control_points = shape[0] * shape[1] * shape[2]
+        self.coefficients = coefficients
+        self.num_coefficients = shape[0] * shape[1] * shape[2]
 
     def compute_evaluation_map(self, u_vec, v_vec, w_vec):
         num_points = len(u_vec) # = len(v_vec) = len(w_vec), they correspond
@@ -34,7 +34,7 @@ class BSplineVolume(BSpline):
             self.order_w, self.shape[2], 0, w_vec, self.knots_w, 
             num_points, data, row_indices, col_indices)
 
-        basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), self.num_control_points) )
+        basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), self.num_coefficients) )
         
         return basis0
 
@@ -49,7 +49,7 @@ class BSplineVolume(BSpline):
             self.order_w, self.shape[2], 1, w_vec, self.knots_w, 
             len(u_vec), data, row_indices, col_indices)
 
-        basis1 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), self.num_control_points) )
+        basis1 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), self.num_coefficients) )
         
         return basis1
 
@@ -64,7 +64,7 @@ class BSplineVolume(BSpline):
             self.order_w, self.shape[2], 2, w_vec, self.knots_w, 
             len(u_vec), data, row_indices, col_indices)
 
-        basis2 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), self.num_control_points) )
+        basis2 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), self.num_coefficients) )
         
         return basis2
 
@@ -72,7 +72,7 @@ class BSplineVolume(BSpline):
     def evaluate_points(self, u_vec, v_vec, w_vec):
 
         basis0 = self.compute_evaluation_map(u_vec, v_vec, w_vec)
-        points = basis0.dot(self.control_points.reshape((self.num_control_points, 3)))
+        points = basis0.dot(self.coefficients.reshape((self.num_coefficients, 3)))
 
         return points
 
@@ -80,14 +80,14 @@ class BSplineVolume(BSpline):
     def evaluate_derivative(self, u_vec, v_vec, w_vec):
 
         basis1 = self.compute_derivative_evaluation_map(u_vec, v_vec, w_vec)
-        derivs1 = basis1.dot(self.control_points.reshape((self.num_control_points, 3)))
+        derivs1 = basis1.dot(self.coefficients.reshape((self.num_coefficients, 3)))
 
         return derivs1
 
     def evaluate_second_derivative(self, u_vec, v_vec, w_vec):
 
         basis2 = self.compute_second_derivative_evaluation_map(u_vec, v_vec, w_vec)
-        derivs2 = basis2.dot(self.control_points.reshape((self.num_control_points, 3)))
+        derivs2 = basis2.dot(self.coefficients.reshape((self.num_coefficients, 3)))
 
         return derivs2
 
@@ -109,7 +109,7 @@ class BSplineVolume(BSpline):
         u_vec_flattened = np.zeros(num_points)
         v_vec_flattened = np.zeros(num_points)
         w_vec_flattened = np.zeros(num_points)
-        num_control_points = np.cumprod(self.shape[:-1])[-1]
+        num_coefficients = np.cumprod(self.shape[:-1])[-1]
 
         compute_volume_projection(
             self.order_u, self.shape[0],
@@ -117,13 +117,13 @@ class BSplineVolume(BSpline):
             self.order_w, self.shape[2],
             num_points, max_iter,
             flattened_points, 
-            self.control_points.reshape(self.num_control_points * 3),
+            self.coefficients.reshape(self.num_coefficients * 3),
             self.knots_u, self.knots_v, self.knots_w,
             u_vec_flattened, v_vec_flattened, w_vec_flattened, grid_search_density, direction.reshape((-1,))
         )
 
         map = self.compute_evaluation_map(u_vec_flattened, v_vec_flattened, w_vec_flattened)
-        projected_points = am.array(input=self.control_points.reshape((num_control_points,-1)), linear_map=map, shape=input_shape)
+        projected_points = am.array(input=self.coefficients.reshape((num_coefficients,-1)), linear_map=map, shape=input_shape)
 
         if plot:
             # Plot the surfaces that are projected onto
@@ -132,8 +132,8 @@ class BSplineVolume(BSpline):
             # Plot 
             plotting_points = []
             flattened_projected_points = (projected_points.value).reshape((num_points, -1)) # last axis usually has length 3 for x,y,z
-            plotting_primitive_control_points = vedo.Points(flattened_projected_points, r=12, c='blue')  # TODO make this (1,3) instead of (3,)
-            plotting_points.append(plotting_primitive_control_points)
+            plotting_primitive_coefficients = vedo.Points(flattened_projected_points, r=12, c='blue')  # TODO make this (1,3) instead of (3,)
+            plotting_points.append(plotting_primitive_coefficients)
             plotter.show(primitive_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
 
         u_vec = u_vec_flattened.reshape(tuple(input_shape[:-1],)+(1,))
@@ -165,12 +165,12 @@ class BSplineVolume(BSpline):
 
         # TODO Currently plotting 6 outer surfaces. Decide if we want to show inside as well.
         # -- The 6 outer surfaces are plotted as meshes.
-        plotting_elements = self.plot_surface(self.control_points[:,:,0], plot_types=plot_types, opacity=opacity, additional_plotting_elements=plotting_elements)
-        plotting_elements = self.plot_surface(self.control_points[:,:,-1], plot_types=plot_types, opacity=opacity, additional_plotting_elements=plotting_elements)
-        plotting_elements = self.plot_surface(self.control_points[:,0,:], plot_types=plot_types, opacity=opacity, additional_plotting_elements=plotting_elements)
-        plotting_elements = self.plot_surface(self.control_points[:,-1,:], plot_types=plot_types, opacity=opacity, additional_plotting_elements=plotting_elements)
-        plotting_elements = self.plot_surface(self.control_points[0,:,:], plot_types=plot_types, opacity=opacity, additional_plotting_elements=plotting_elements)
-        plotting_elements = self.plot_surface(self.control_points[-1,:,:], plot_types=plot_types, opacity=opacity, additional_plotting_elements=plotting_elements)
+        plotting_elements = self.plot_surface(self.coefficients[:,:,0], plot_types=plot_types, opacity=opacity, additional_plotting_elements=plotting_elements)
+        plotting_elements = self.plot_surface(self.coefficients[:,:,-1], plot_types=plot_types, opacity=opacity, additional_plotting_elements=plotting_elements)
+        plotting_elements = self.plot_surface(self.coefficients[:,0,:], plot_types=plot_types, opacity=opacity, additional_plotting_elements=plotting_elements)
+        plotting_elements = self.plot_surface(self.coefficients[:,-1,:], plot_types=plot_types, opacity=opacity, additional_plotting_elements=plotting_elements)
+        plotting_elements = self.plot_surface(self.coefficients[0,:,:], plot_types=plot_types, opacity=opacity, additional_plotting_elements=plotting_elements)
+        plotting_elements = self.plot_surface(self.coefficients[-1,:,:], plot_types=plot_types, opacity=opacity, additional_plotting_elements=plotting_elements)
 
         if show:
             plotter = vedo.Plotter()
@@ -191,20 +191,20 @@ class BSplineVolume(BSpline):
             plotting_elements.append(vedo.Points(points.reshape((num_points,-1)), r=5).opacity(point_opacity).color('darkred'))
 
         if 'mesh' in plot_types or 'wireframe' in plot_types:
-            num_control_points_u = points.shape[0]
-            num_control_points_v = points.shape[1]
+            num_coefficients_u = points.shape[0]
+            num_coefficients_v = points.shape[1]
             vertices = []
             faces = []
-            for u_index in range(num_control_points_u):
-                for v_index in range(num_control_points_v):
+            for u_index in range(num_coefficients_u):
+                for v_index in range(num_coefficients_v):
                     vertex = tuple(points[u_index, v_index, :])
                     vertices.append(vertex)
                     if u_index != 0 and v_index != 0:
                         face = tuple((
-                            (u_index-1)*num_control_points_v+(v_index-1),
-                            (u_index-1)*num_control_points_v+(v_index),
-                            (u_index)*num_control_points_v+(v_index),
-                            (u_index)*num_control_points_v+(v_index-1),
+                            (u_index-1)*num_coefficients_v+(v_index-1),
+                            (u_index-1)*num_coefficients_v+(v_index),
+                            (u_index)*num_coefficients_v+(v_index),
+                            (u_index)*num_coefficients_v+(v_index-1),
                         ))
                         faces.append(face)
 

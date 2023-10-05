@@ -39,19 +39,19 @@ for i in range(ribPoints.shape[1]-1):
     pointsba[0,:,:] = ribPoints[9,(i,i+1),:]
     pointsba[1,:,:] = ribPoints[10,(i,i+1),:]
 
-    paneltbs = bsf.fit_b_spline(pointst, num_control_points = n_cp, order=order)
+    paneltbs = bsf.fit_b_spline(pointst, num_coefficients = n_cp, order=order)
     panelt = SystemPrimitive('panel' + str(i) + 't', paneltbs)
     ms.primitives[panelt.name] = panelt
 
-    panelbbs = bsf.fit_b_spline(pointsb, num_control_points = n_cp, order=order)
+    panelbbs = bsf.fit_b_spline(pointsb, num_coefficients = n_cp, order=order)
     panelb = SystemPrimitive('panel' + str(i) + 'b', panelbbs)
     ms.primitives[panelb.name] = panelb
 
-    sparfbs = bsf.fit_b_spline(pointsf, num_control_points = (2,2), order = (2,))
+    sparfbs = bsf.fit_b_spline(pointsf, num_coefficients = (2,2), order = (2,))
     sparf = SystemPrimitive('spar' + str(i) + 'f', sparfbs)
     ms.primitives[sparf.name] = sparf
 
-    sparbbs = bsf.fit_b_spline(pointsba, num_control_points = (2,2), order = (2,))
+    sparbbs = bsf.fit_b_spline(pointsba, num_coefficients = (2,2), order = (2,))
     sparb = SystemPrimitive('spar' + str(i) + 'b', sparbbs)
     ms.primitives[sparb.name] = sparb
 
@@ -65,7 +65,7 @@ for i in range(ribPoints.shape[1]):
     #     print(points.shape)
     #     print(points)
     
-    ribbs = bsf.fit_b_spline(points, num_control_points = n_cp, order=order)
+    ribbs = bsf.fit_b_spline(points, num_coefficients = n_cp, order=order)
     rib = SystemPrimitive('rib' + str(i), ribbs)
     ms.primitives[rib.name] = rib
 

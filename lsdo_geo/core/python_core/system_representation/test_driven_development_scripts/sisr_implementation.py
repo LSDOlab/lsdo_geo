@@ -53,13 +53,13 @@ from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_func
 from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
 wing_geometry_primitives = wing.get_geometry_primitives()
-wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_coefficients=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
 wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_b_spline_volume, embedded_entities=wing_geometry_primitives)
 wing_ffd_block.add_scale_v(name='linear_taper', order=2, num_dof=3, value=np.array([0., 1., 0.]), cost_factor=1.)
 wing_ffd_block.add_rotation_u(name='twist_distribution', order=4, num_dof=10, value=-1/2*np.array([0., 0.11, 0.22, 0.33, 0.44, 0.44, 0.33, 0.22, 0.11, 0.]))
 
 horizontal_stabilizer_geometry_primitives = horizontal_stabilizer.get_geometry_primitives()
-horizontal_stabilizer_ffd_b_spline_volume = create_cartesian_enclosure_volume(horizontal_stabilizer_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+horizontal_stabilizer_ffd_b_spline_volume = create_cartesian_enclosure_volume(horizontal_stabilizer_geometry_primitives, num_coefficients=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
 horizontal_stabilizer_ffd_block = SRBGFFDBlock(name='horizontal_stabilizer_ffd_block', primitive=horizontal_stabilizer_ffd_b_spline_volume, embedded_entities=horizontal_stabilizer_geometry_primitives)
 horizontal_stabilizer_ffd_block.add_scale_v(name='horizontal_stabilizer_linear_taper', order=2, num_dof=3, value=np.array([0.5, 0.5, 0.5]), cost_factor=1.)
 horizontal_stabilizer_ffd_block.add_rotation_u(name='horizontal_stabilizer_twist_distribution', order=1, num_dof=1, value=np.array([np.pi/10]))
@@ -118,9 +118,9 @@ ffd_set.setup()
 
 affine_section_properties = ffd_set.evaluate_affine_section_properties()
 rotational_section_properties = ffd_set.evaluate_rotational_section_properties()
-affine_ffd_control_points_local_frame = ffd_set.evaluate_affine_block_deformations(plot=True)
-ffd_control_points_local_frame = ffd_set.evaluate_rotational_block_deformations(plot=True)
-ffd_control_points = ffd_set.evaluate_control_points(plot=True)
+affine_ffd_coefficients_local_frame = ffd_set.evaluate_affine_block_deformations(plot=True)
+ffd_coefficients_local_frame = ffd_set.evaluate_rotational_block_deformations(plot=True)
+ffd_coefficients = ffd_set.evaluate_coefficients(plot=True)
 updated_geometry = ffd_set.evaluate_embedded_entities(plot=True)
 updated_primitives_names = wing.primitive_names.copy()
 updated_primitives_names.extend(horizontal_stabilizer.primitive_names.copy())
@@ -132,8 +132,8 @@ print('Sample evaluation: rotational section properties: \n', rotational_section
 # Performing assembly of geometry from different parameterizations which usually happens in SystemParameterization
 spatial_rep.update(updated_geometry, updated_primitives_names)
 
-wing_camber_surface.evaluate(spatial_rep.control_points)
-horizontal_stabilizer_camber_surface.evaluate(spatial_rep.control_points)
+wing_camber_surface.evaluate(spatial_rep.coefficients)
+horizontal_stabilizer_camber_surface.evaluate(spatial_rep.coefficients)
 spatial_rep.plot_meshes([wing_camber_surface, horizontal_stabilizer_camber_surface], mesh_plot_types=['wireframe'], mesh_opacity=1.)
 
 wing_vlm_mesh = VLMMesh(meshes=[wing_camber_surface, horizontal_stabilizer_camber_surface])

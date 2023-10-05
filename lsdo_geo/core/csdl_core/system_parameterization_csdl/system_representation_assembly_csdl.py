@@ -19,8 +19,8 @@ class SystemRepresentationAssemblyCSDL(csdl.Model):
         system_parameterization = self.parameters['system_parameterization']
         system_representation = system_parameterization.system_representation
 
-        # system_representation_geometry = self.create_output('system_representation_geometry', val=system_representation.spatial_representation.control_points)
-        initial_system_representation_geometry = self.create_input('initial_system_representation_geometry', val=system_representation.spatial_representation.control_points['geometry'])
+        # system_representation_geometry = self.create_output('system_representation_geometry', val=system_representation.spatial_representation.coefficients)
+        initial_system_representation_geometry = self.create_input('initial_system_representation_geometry', val=system_representation.spatial_representation.coefficients['geometry'])
 
         geometry_parameterizations = system_parameterization.geometry_parameterizations
         for geometry_parameterization in list(geometry_parameterizations.values()):
@@ -98,7 +98,7 @@ if __name__ == "__main__":
     from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
     wing_ffd_set_primitives = wing.get_geometry_primitives()
-    wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_ffd_set_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+    wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_ffd_set_primitives, num_coefficients=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
     wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_b_spline_volume, embedded_entities=wing_ffd_set_primitives)
 
     wing_ffd_block.add_rotation_u(name='twist_distribution', order=4, num_dof=10, value=-1/2*np.array([0., 0.11, 0.22, 0.33, 0.44, 0.44, 0.33, 0.22, 0.11, 0.]))
@@ -111,10 +111,10 @@ if __name__ == "__main__":
     system_parameterization.setup()
 
     affine_section_properties = ffd_set.evaluate_affine_section_properties()
-    affine_deformed_ffd_control_points = ffd_set.evaluate_affine_block_deformations()
+    affine_deformed_ffd_coefficients = ffd_set.evaluate_affine_block_deformations()
     rotational_section_properties = ffd_set.evaluate_rotational_section_properties()
-    rotated_ffd_control_points = ffd_set.evaluate_rotational_block_deformations()
-    ffd_control_points = ffd_set.evaluate_control_points()
+    rotated_ffd_coefficients = ffd_set.evaluate_rotational_block_deformations()
+    ffd_coefficients = ffd_set.evaluate_coefficients()
     embedded_entities = ffd_set.evaluate_embedded_entities()
     # print('Python evaluation: embedded entities: \n', embedded_entities)
 
@@ -153,13 +153,13 @@ if __name__ == "__main__":
     from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
     wing_ffd_set_primitives = wing.get_geometry_primitives()
-    wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_ffd_set_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+    wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_ffd_set_primitives, num_coefficients=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
     wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_b_spline_volume, embedded_entities=wing_ffd_set_primitives)
     wing_ffd_block.add_rotation_u(name='twist_distribution', order=4, num_dof=10, value=-1/2*np.array([0., 0.11, 0.22, 0.33, 0.44, 0.44, 0.33, 0.22, 0.11, 0.]))
     wing_ffd_block.add_scale_v(name="chord_distribution_scaling", order=2, num_dof=3, value=np.array([0.5, 1.5, 0.5]))
 
     horizontal_stabilizer_ffd_set_primitives = horizontal_stabilizer.get_geometry_primitives()
-    horizontal_stabilizer_ffd_b_spline_volume = create_cartesian_enclosure_volume(horizontal_stabilizer_ffd_set_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+    horizontal_stabilizer_ffd_b_spline_volume = create_cartesian_enclosure_volume(horizontal_stabilizer_ffd_set_primitives, num_coefficients=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
     horizontal_stabilizer_ffd_block = SRBGFFDBlock(name='horizontal_stabilizer_ffd_block', primitive=horizontal_stabilizer_ffd_b_spline_volume, embedded_entities=horizontal_stabilizer_ffd_set_primitives)
     horizontal_stabilizer_ffd_block.add_rotation_u(name='horizontal_stabilizer_twist_distribution', order=1, num_dof=1, value=np.array([np.pi/10]))
     horizontal_stabilizer_ffd_block.add_scale_v(name="chord_distribution_scaling", order=2, num_dof=3, value=np.array([-0.5, 0.5, -0.5]))
@@ -171,11 +171,11 @@ if __name__ == "__main__":
     
     affine_section_properties = ffd_set.evaluate_affine_section_properties()
     rotational_section_properties = ffd_set.evaluate_rotational_section_properties()
-    affine_deformed_ffd_control_points = ffd_set.evaluate_affine_block_deformations()
-    rotated_ffd_control_points = ffd_set.evaluate_rotational_block_deformations()
-    ffd_control_points = ffd_set.evaluate_control_points()
+    affine_deformed_ffd_coefficients = ffd_set.evaluate_affine_block_deformations()
+    rotated_ffd_coefficients = ffd_set.evaluate_rotational_block_deformations()
+    ffd_coefficients = ffd_set.evaluate_coefficients()
     ffd_embedded_entities = ffd_set.evaluate_embedded_entities()
-    # print('Python evaluation: FFD embedded entities: \n', rotated_ffd_control_points)
+    # print('Python evaluation: FFD embedded entities: \n', rotated_ffd_coefficients)
 
     sim = Simulator(SystemRepresentationAssemblyCSDL(system_parameterization=system_parameterization))
     sim.run()

@@ -9,7 +9,7 @@ from lsdo_geo.primitives.b_splines.b_spline_functions import generate_open_unifo
 import numpy as np
 
 # TODO to work for 2d as well (hyper-volume or nd volume)
-def create_cartesian_enclosure_volume(enclosed_entities:list, num_control_points:tuple, order:tuple, knot_vectors:tuple=None, xyz_to_uvw_indices:tuple=(0,1,2), volume_type:str='BSplineVolume'):
+def create_cartesian_enclosure_volume(enclosed_entities:list, num_coefficients:tuple, order:tuple, knot_vectors:tuple=None, xyz_to_uvw_indices:tuple=(0,1,2), volume_type:str='BSplineVolume'):
     '''
     Creates a volume that tightly fits around a set of entities.
     '''
@@ -18,16 +18,16 @@ def create_cartesian_enclosure_volume(enclosed_entities:list, num_control_points
 
     if knot_vectors is None:
         knot_vectors=()
-        for i in range(len(num_control_points)):
-            axis_knots = generate_open_uniform_knot_vector(num_control_points[i], order[i])
+        for i in range(len(num_coefficients)):
+            axis_knots = generate_open_uniform_knot_vector(num_coefficients[i], order[i])
             knot_vectors = knot_vectors + (axis_knots,)      # append knots
 
     embedded_points = None
 
     for enclosed_entity in enclosed_entities:
         if type(enclosed_entity) is BSplineSurface:
-            entity_num_control_points = np.cumprod(enclosed_entity.shape[:-1])[-1]
-            points = enclosed_entity.control_points.reshape((entity_num_control_points, -1))
+            entity_num_coefficients = np.cumprod(enclosed_entity.shape[:-1])[-1]
+            points = enclosed_entity.coefficients.reshape((entity_num_coefficients, -1))
         elif type(enclosed_entity) is np.ndarray:
             points = enclosed_entity
         else:
@@ -62,7 +62,7 @@ def create_cartesian_enclosure_volume(enclosed_entities:list, num_control_points
         new_xyz_to_uvw_indices[swapped_xyz_index] = xyz_index
         xyz_to_uvw_indices = new_xyz_to_uvw_indices
 
-    volume = create_b_spline_from_corners(corners=points, order=order, num_control_points=num_control_points,
+    volume = create_b_spline_from_corners(corners=points, order=order, num_coefficients=num_coefficients,
             knot_vectors=knot_vectors, name=None)
 
     return volume

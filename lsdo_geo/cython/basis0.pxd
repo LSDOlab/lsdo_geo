@@ -1,1 +1,1 @@
-cdef int get_basis0(int order, int num_control_points, double u, double* knot_vector, double* basis)
+cdef int get_basis0(int order, int num_coefficients, double u, double* knot_vector, double* basis)

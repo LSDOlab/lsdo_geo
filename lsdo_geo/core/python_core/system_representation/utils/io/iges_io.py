@@ -212,7 +212,7 @@ def read_iges(geo,file_name):
                 order_u=int(parsed_info[1])+1,
                 order_v=int(parsed_info[2])+1,
                 shape=None,
-                control_points=None,
+                coefficients=None,
                 knots_u=knots_u,
                 knots_v=knots_v))
 
@@ -258,8 +258,8 @@ def read_iges(geo,file_name):
         # geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].starting_geometry_index = num_cp
         # geo.initial_input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].starting_geometry_index = num_cp
         cntrl_pts = np.reshape(cntrl_pts, (num_rows_of_cps*num_cp_per_row,3))     
-        geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points = cntrl_pts
-        geo.initial_input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points = cntrl_pts
+        geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].coefficients = cntrl_pts
+        geo.initial_input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].coefficients = cntrl_pts
         # print('Number of rows: ', num_rows_of_cps)
         # print('Number of cp per row: ', num_cp_per_row)
         # num_cp += num_rows_of_cps * num_cp_per_row
@@ -276,9 +276,9 @@ def read_iges(geo,file_name):
             if not filtered:
                 geo.remove_multiplicity(geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']])
         #exit()
-        initial_surfaces.append(np.reshape(geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points, geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].shape))
-        #print(i,geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].shape ,np.shape(geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points))
-        geo.total_cntrl_pts_vector = np.append(geo.total_cntrl_pts_vector, geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].control_points)
+        initial_surfaces.append(np.reshape(geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].coefficients, geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].shape))
+        #print(i,geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].shape ,np.shape(geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].coefficients))
+        geo.total_cntrl_pts_vector = np.append(geo.total_cntrl_pts_vector, geo.input_b_spline_entity_dict[parsed_info_dict[f'surf{i}_name']].coefficients)
         
     # nvert, nedge, ngroup, surf_ptrs, edge_ptrs, surf_group, edge_group = geo.compute_topology(initial_surfaces)
     # size, topo, b_spline = geo.compute_indices(initial_surfaces, nvert, nedge, ngroup, surf_ptrs, edge_ptrs, surf_group, edge_group)
@@ -317,7 +317,7 @@ def write_iges(geo, file_name, plot = False):
             vp_out = Plotter()
             vps = []
             for surf, color in zip(geo.output_b_spline_entity_dict.values(), colors.colors.values()):
-                vps.append(Points(surf.control_points, r=8, c = color).legend(surf.name))
+                vps.append(Points(surf.coefficients, r=8, c = color).legend(surf.name))
             #TODO legend
             #lb = LegendBox(vps, nmax=i, width = 0.2, pad = 0, pos = "top-left")
             vp_out.show(vps, 'Control points', axes=1, viewup="z", interactive = False)
@@ -385,7 +385,7 @@ def write_iges(geo, file_name, plot = False):
                 for i in range(surf.shape[0]):
                     for idim in range(3):
                         pos_counter += 1
-                        cntrl_pts = np.reshape(surf.control_points, (surf.shape[0], surf.shape[1],3))
+                        cntrl_pts = np.reshape(surf.coefficients, (surf.shape[0], surf.shape[1],3))
                         f.write("%20.12g," % (np.real(cntrl_pts[i, j, idim])))
                         if np.mod(pos_counter, 3) == 0:
                             f.write("  %7dP%7d\n" % (Pcount, counter))

@@ -1,8 +1,8 @@
 from __future__ import print_function
 cdef compute_volume_projection(
-    int order_u, int num_control_points_u,
-    int order_v, int num_control_points_v,
-    int order_w, int num_control_points_w,
+    int order_u, int num_coefficients_u,
+    int order_v, int num_coefficients_v,
+    int order_w, int num_coefficients_w,
     int num_points, int max_iter,
     double* pts, double* cps,
     double* knot_vector_u, double* knot_vector_v, double* knot_vector_w,
@@ -30,9 +30,9 @@ cdef compute_volume_projection(
     cdef double *basis_w2 = <double *> malloc(order_w * sizeof(double))
 
     # cdef double *knot_vector_u = <double *> malloc(
-    #     (order_u + num_control_points_u) * sizeof(double))
+    #     (order_u + num_coefficients_u) * sizeof(double))
     # cdef double *knot_vector_v = <double *> malloc(
-    #     (order_v + num_control_points_v) * sizeof(double))
+    #     (order_v + num_coefficients_v) * sizeof(double))
     cdef double norm_D2, dot_nA_D, dot_nA_P10, dot_nA_P01, dot_nA_P20, dot_nA_P11, dot_nA_P02, dot_D_P10, dot_D_P01 , dot_D_P20, dot_D_P11, dot_D_P02, dot_P10_P10, dot_P01_P01, dot_P01_P10                    
     cdef double ddu_normD, ddu2_normD, ddv_normD, ddv2_normD
     cdef double grad_u_numer, grad_denom, ddu_grad_u_numer, ddu_grad_denom, grad_v_numer, ddv_grad_v_numer, ddv_grad_denom, ddv_grad_u_numer
@@ -75,26 +75,26 @@ cdef compute_volume_projection(
     cdef double diag_dist_1
     cdef double diag_dist_2
                 
-    # get_open_uniform(order_u, num_control_points_u, knot_vector_u)
-    # get_open_uniform(order_v, num_control_points_v, knot_vector_v)
+    # get_open_uniform(order_u, num_coefficients_u, knot_vector_u)
+    # get_open_uniform(order_v, num_coefficients_v, knot_vector_v)
 
     # Getting normalizing factor measuring volume size
     x[0] = 0.
     x[1] = 0.
     x[2] = 0.
     i_start_u = get_basis0(
-        order_u, num_control_points_u, x[0], knot_vector_u, basis_u0)
+        order_u, num_coefficients_u, x[0], knot_vector_u, basis_u0)
     i_start_v = get_basis0(
-        order_v, num_control_points_v, x[1], knot_vector_v, basis_v0)
+        order_v, num_coefficients_v, x[1], knot_vector_v, basis_v0)
     i_start_w = get_basis0(
-        order_w, num_control_points_w, x[2], knot_vector_w, basis_w0)
+        order_w, num_coefficients_w, x[2], knot_vector_w, basis_w0)
     for k in range(3): 
         P_corner000[k] = 0.
         for i_order_u in range(order_u):
             for i_order_v in range(order_v):
                 for i_order_w in range(order_w):
-                    index = 3 * ( num_control_points_w * num_control_points_v * (i_start_u + i_order_u) \
-                        + num_control_points_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
+                    index = 3 * ( num_coefficients_w * num_coefficients_v * (i_start_u + i_order_u) \
+                        + num_coefficients_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
                     C[k] = cps[index]
 
                     P_corner000[k] = P_corner000[k] + basis_u0[i_order_u] * basis_v0[i_order_v] * basis_w0[i_order_w] * C[k]
@@ -103,18 +103,18 @@ cdef compute_volume_projection(
     x[1] = 1.
     x[2] = 1.
     i_start_u = get_basis0(
-        order_u, num_control_points_u, x[0], knot_vector_u, basis_u0)
+        order_u, num_coefficients_u, x[0], knot_vector_u, basis_u0)
     i_start_v = get_basis0(
-        order_v, num_control_points_v, x[1], knot_vector_v, basis_v0)
+        order_v, num_coefficients_v, x[1], knot_vector_v, basis_v0)
     i_start_w = get_basis0(
-        order_w, num_control_points_w, x[2], knot_vector_w, basis_w0)
+        order_w, num_coefficients_w, x[2], knot_vector_w, basis_w0)
     for k in range(3): 
         P_corner111[k] = 0.
         for i_order_u in range(order_u):
             for i_order_v in range(order_v):
                 for i_order_w in range(order_w):
-                    index = 3 * ( num_control_points_w * num_control_points_v * (i_start_u + i_order_u) \
-                        + num_control_points_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
+                    index = 3 * ( num_coefficients_w * num_coefficients_v * (i_start_u + i_order_u) \
+                        + num_coefficients_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
                     C[k] = cps[index]
 
                     P_corner111[k] = P_corner111[k] + basis_u0[i_order_u] * basis_v0[i_order_v] * basis_w0[i_order_w] * C[k]
@@ -123,18 +123,18 @@ cdef compute_volume_projection(
     x[1] = 1.
     x[2] = 1.
     i_start_u = get_basis0(
-        order_u, num_control_points_u, x[0], knot_vector_u, basis_u0)
+        order_u, num_coefficients_u, x[0], knot_vector_u, basis_u0)
     i_start_v = get_basis0(
-        order_v, num_control_points_v, x[1], knot_vector_v, basis_v0)
+        order_v, num_coefficients_v, x[1], knot_vector_v, basis_v0)
     i_start_w = get_basis0(
-        order_w, num_control_points_w, x[2], knot_vector_w, basis_w0)
+        order_w, num_coefficients_w, x[2], knot_vector_w, basis_w0)
     for k in range(3): 
         P_corner011[k] = 0.
         for i_order_u in range(order_u):
             for i_order_v in range(order_v):
                 for i_order_w in range(order_w):
-                    index = 3 * ( num_control_points_w * num_control_points_v * (i_start_u + i_order_u) \
-                        + num_control_points_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
+                    index = 3 * ( num_coefficients_w * num_coefficients_v * (i_start_u + i_order_u) \
+                        + num_coefficients_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
                     C[k] = cps[index]
 
                     P_corner011[k] = P_corner011[k] + basis_u0[i_order_u] * basis_v0[i_order_v] * basis_w0[i_order_w] * C[k]
@@ -143,18 +143,18 @@ cdef compute_volume_projection(
     x[1] = 1.
     x[2] = 0.
     i_start_u = get_basis0(
-        order_u, num_control_points_u, x[0], knot_vector_u, basis_u0)
+        order_u, num_coefficients_u, x[0], knot_vector_u, basis_u0)
     i_start_v = get_basis0(
-        order_v, num_control_points_v, x[1], knot_vector_v, basis_v0)
+        order_v, num_coefficients_v, x[1], knot_vector_v, basis_v0)
     i_start_w = get_basis0(
-        order_w, num_control_points_w, x[2], knot_vector_w, basis_w0)
+        order_w, num_coefficients_w, x[2], knot_vector_w, basis_w0)
     for k in range(3): 
         P_corner110[k] = 0.
         for i_order_u in range(order_u):
             for i_order_v in range(order_v):
                 for i_order_w in range(order_w):
-                    index = 3 * ( num_control_points_w * num_control_points_v * (i_start_u + i_order_u) \
-                        + num_control_points_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
+                    index = 3 * ( num_coefficients_w * num_coefficients_v * (i_start_u + i_order_u) \
+                        + num_coefficients_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
                     C[k] = cps[index]
 
                     P_corner110[k] = P_corner110[k] + basis_u0[i_order_u] * basis_v0[i_order_v] * basis_w0[i_order_w] * C[k]
@@ -162,18 +162,18 @@ cdef compute_volume_projection(
     x[1] = 0.
     x[2] = 1.
     i_start_u = get_basis0(
-        order_u, num_control_points_u, x[0], knot_vector_u, basis_u0)
+        order_u, num_coefficients_u, x[0], knot_vector_u, basis_u0)
     i_start_v = get_basis0(
-        order_v, num_control_points_v, x[1], knot_vector_v, basis_v0)
+        order_v, num_coefficients_v, x[1], knot_vector_v, basis_v0)
     i_start_w = get_basis0(
-        order_w, num_control_points_w, x[2], knot_vector_w, basis_w0)
+        order_w, num_coefficients_w, x[2], knot_vector_w, basis_w0)
     for k in range(3): 
         P_corner101[k] = 0.
         for i_order_u in range(order_u):
             for i_order_v in range(order_v):
                 for i_order_w in range(order_w):
-                    index = 3 * ( num_control_points_w * num_control_points_v * (i_start_u + i_order_u) \
-                        + num_control_points_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
+                    index = 3 * ( num_coefficients_w * num_coefficients_v * (i_start_u + i_order_u) \
+                        + num_coefficients_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
                     C[k] = cps[index]
 
                     P_corner101[k] = P_corner101[k] + basis_u0[i_order_u] * basis_v0[i_order_v] * basis_w0[i_order_w] * C[k]
@@ -182,18 +182,18 @@ cdef compute_volume_projection(
     x[1] = 0.
     x[2] = 1.
     i_start_u = get_basis0(
-        order_u, num_control_points_u, x[0], knot_vector_u, basis_u0)
+        order_u, num_coefficients_u, x[0], knot_vector_u, basis_u0)
     i_start_v = get_basis0(
-        order_v, num_control_points_v, x[1], knot_vector_v, basis_v0)
+        order_v, num_coefficients_v, x[1], knot_vector_v, basis_v0)
     i_start_w = get_basis0(
-        order_w, num_control_points_w, x[2], knot_vector_w, basis_w0)
+        order_w, num_coefficients_w, x[2], knot_vector_w, basis_w0)
     for k in range(3): 
         P_corner001[k] = 0.
         for i_order_u in range(order_u):
             for i_order_v in range(order_v):
                 for i_order_w in range(order_w):
-                    index = 3 * ( num_control_points_w * num_control_points_v * (i_start_u + i_order_u) \
-                        + num_control_points_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
+                    index = 3 * ( num_coefficients_w * num_coefficients_v * (i_start_u + i_order_u) \
+                        + num_coefficients_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
                     C[k] = cps[index]
 
                     P_corner001[k] = P_corner001[k] + basis_u0[i_order_u] * basis_v0[i_order_v] * basis_w0[i_order_w] * C[k]
@@ -202,18 +202,18 @@ cdef compute_volume_projection(
     x[1] = 0.
     x[2] = 0.
     i_start_u = get_basis0(
-        order_u, num_control_points_u, x[0], knot_vector_u, basis_u0)
+        order_u, num_coefficients_u, x[0], knot_vector_u, basis_u0)
     i_start_v = get_basis0(
-        order_v, num_control_points_v, x[1], knot_vector_v, basis_v0)
+        order_v, num_coefficients_v, x[1], knot_vector_v, basis_v0)
     i_start_w = get_basis0(
-        order_w, num_control_points_w, x[2], knot_vector_w, basis_w0)
+        order_w, num_coefficients_w, x[2], knot_vector_w, basis_w0)
     for k in range(3): 
         P_corner100[k] = 0.
         for i_order_u in range(order_u):
             for i_order_v in range(order_v):
                 for i_order_w in range(order_w):
-                    index = 3 * ( num_control_points_w * num_control_points_v * (i_start_u + i_order_u) \
-                        + num_control_points_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
+                    index = 3 * ( num_coefficients_w * num_coefficients_v * (i_start_u + i_order_u) \
+                        + num_coefficients_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
                     C[k] = cps[index]
 
                     P_corner100[k] = P_corner100[k] + basis_u0[i_order_u] * basis_v0[i_order_v] * basis_w0[i_order_w] * C[k]
@@ -222,18 +222,18 @@ cdef compute_volume_projection(
     x[1] = 1.
     x[2] = 0.
     i_start_u = get_basis0(
-        order_u, num_control_points_u, x[0], knot_vector_u, basis_u0)
+        order_u, num_coefficients_u, x[0], knot_vector_u, basis_u0)
     i_start_v = get_basis0(
-        order_v, num_control_points_v, x[1], knot_vector_v, basis_v0)
+        order_v, num_coefficients_v, x[1], knot_vector_v, basis_v0)
     i_start_w = get_basis0(
-        order_w, num_control_points_w, x[2], knot_vector_w, basis_w0)
+        order_w, num_coefficients_w, x[2], knot_vector_w, basis_w0)
     for k in range(3): 
         P_corner010[k] = 0.
         for i_order_u in range(order_u):
             for i_order_v in range(order_v):
                 for i_order_w in range(order_w):
-                    index = 3 * ( num_control_points_w * num_control_points_v * (i_start_u + i_order_u) \
-                        + num_control_points_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
+                    index = 3 * ( num_coefficients_w * num_coefficients_v * (i_start_u + i_order_u) \
+                        + num_coefficients_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
                     C[k] = cps[index]
 
                     P_corner010[k] = P_corner010[k] + basis_u0[i_order_u] * basis_v0[i_order_v] * basis_w0[i_order_w] * C[k]
@@ -289,11 +289,11 @@ cdef compute_volume_projection(
                         x[1] = b/(guess_grid_n - 1)
                         x[2] = c/(guess_grid_n - 1)
                         i_start_u = get_basis0(
-                            order_u, num_control_points_u, x[0], knot_vector_u, basis_u0)
+                            order_u, num_coefficients_u, x[0], knot_vector_u, basis_u0)
                         i_start_v = get_basis0(
-                            order_v, num_control_points_v, x[1], knot_vector_v, basis_v0)
+                            order_v, num_coefficients_v, x[1], knot_vector_v, basis_v0)
                         i_start_w = get_basis0(
-                            order_w, num_control_points_w, x[2], knot_vector_w, basis_w0)
+                            order_w, num_coefficients_w, x[2], knot_vector_w, basis_w0)
                         #print('x0',x[0],'x1',x[1])
                         #print('i_start_u',i_start_u,'i_start_v',i_start_v)
                         for k in range(3): 
@@ -302,8 +302,8 @@ cdef compute_volume_projection(
                                 for i_order_v in range(order_v):
                                     for i_order_w in range(order_w):
 
-                                        index = 3 * ( num_control_points_w * num_control_points_v * (i_start_u + i_order_u) \
-                                            + num_control_points_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
+                                        index = 3 * ( num_coefficients_w * num_coefficients_v * (i_start_u + i_order_u) \
+                                            + num_coefficients_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
                                         C[k] = cps[index]
 
                                         P000[k] = P000[k] + basis_u0[i_order_u] * basis_v0[i_order_v] * basis_w0[i_order_w] * C[k]
@@ -353,25 +353,25 @@ cdef compute_volume_projection(
 
         for i_iter in range(max_iter):
             i_start_u = get_basis0(
-                order_u, num_control_points_u, x[0], knot_vector_u, basis_u0)
+                order_u, num_coefficients_u, x[0], knot_vector_u, basis_u0)
             i_start_u = get_basis1(
-                order_u, num_control_points_u, x[0], knot_vector_u, basis_u1)
+                order_u, num_coefficients_u, x[0], knot_vector_u, basis_u1)
             i_start_u = get_basis2(
-                order_u, num_control_points_u, x[0], knot_vector_u, basis_u2)
+                order_u, num_coefficients_u, x[0], knot_vector_u, basis_u2)
             
             i_start_v = get_basis0(
-                order_v, num_control_points_v, x[1], knot_vector_v, basis_v0)
+                order_v, num_coefficients_v, x[1], knot_vector_v, basis_v0)
             i_start_v = get_basis1(
-                order_v, num_control_points_v, x[1], knot_vector_v, basis_v1)
+                order_v, num_coefficients_v, x[1], knot_vector_v, basis_v1)
             i_start_v = get_basis2(
-                order_v, num_control_points_v, x[1], knot_vector_v, basis_v2)
+                order_v, num_coefficients_v, x[1], knot_vector_v, basis_v2)
 
             i_start_w = get_basis0(
-                order_w, num_control_points_w, x[2], knot_vector_w, basis_w0)
+                order_w, num_coefficients_w, x[2], knot_vector_w, basis_w0)
             i_start_w = get_basis1(
-                order_w, num_control_points_w, x[2], knot_vector_w, basis_w1)
+                order_w, num_coefficients_w, x[2], knot_vector_w, basis_w1)
             i_start_w = get_basis2(
-                order_w, num_control_points_w, x[2], knot_vector_w, basis_w2)
+                order_w, num_coefficients_w, x[2], knot_vector_w, basis_w2)
 
             for k in range(3):
                 P000[k] = 0.
@@ -389,8 +389,8 @@ cdef compute_volume_projection(
                     for i_order_v in range(order_v):
                         for i_order_w in range(order_w):
 
-                            index = 3 * ( num_control_points_w * num_control_points_v * (i_start_u + i_order_u) \
-                                + num_control_points_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
+                            index = 3 * ( num_coefficients_w * num_coefficients_v * (i_start_u + i_order_u) \
+                                + num_coefficients_w * (i_start_v + i_order_v) + (i_start_w + i_order_w) ) + k  
                             C[k] = cps[index]
                             #print(i_pt, i_iter,i_order_u,i_order_v,'C',C[k])
                             #print(basis_u1[i_order_u],basis_v0[i_order_v],basis_u2[i_order_u],basis_v0[i_order_v])

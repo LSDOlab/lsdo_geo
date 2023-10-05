@@ -1,3 +1,4 @@
+from __future__ import annotations
 import m3l
 import csdl
 
@@ -72,17 +73,24 @@ class BSplineSet(m3l.Function):
     # NOTE: These are connections in physical space. We can have a "disctontinuous" B-spline. The BSplineSetSpace  has the parametric connections.
 
     def __post_init__(self):
-        self.control_points = self.coefficients
+        self.coefficients = self.coefficients
 
         self.num_coefficients = len(self.coefficients)
-        self.num_control_points = self.num_coefficients
+        self.num_coefficients = self.num_coefficients
 
         self.coefficient_indices = {}
         coefficients_counter = 0
         for b_spline_name, space_name in self.space.b_spline_to_space_dict.items():
-            b_spline_num_coefficients = self.space.spaces[space_name].num_coefficients*self.num_physical_dimensions[b_spline_name]
+            b_spline_num_coefficients = self.space.spaces[space_name].num_coefficient_elements*self.num_physical_dimensions[b_spline_name]
             self.coefficient_indices[b_spline_name] = np.arange(coefficients_counter, coefficients_counter + b_spline_num_coefficients)
             coefficients_counter += b_spline_num_coefficients
+
+        if self.num_coefficients != coefficients_counter:
+            if np.prod(self.coefficients.shape) == coefficients_counter:
+                self.coefficients = self.coefficients.reshape((coefficients_counter,))
+                self.num_coefficients = coefficients_counter
+            else:
+                raise ValueError('The number of coefficients does not match the sum of the number of coefficients of the B-splines.')
 
         # NOTE: For aggregation, see not on BSplineSetSpace (it should come later probably)
         # # Promote attributes to make this object a bit more intuitive?
@@ -98,7 +106,7 @@ class BSplineSet(m3l.Function):
         b_spline_basis = self.space.compute_evaluation_map(
             b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates, parametric_derivative_order=parametric_derivative_order)
         
-        num_control_points = self.space.spaces[self.space.b_spline_to_space_dict[b_spline_name]].num_control_points
+        num_coefficient_elements = self.space.spaces[self.space.b_spline_to_space_dict[b_spline_name]].num_coefficient_elements
         num_physical_dimensions = self.num_physical_dimensions[b_spline_name]
         
         # Do I merge b_spline name and parametric coordinates into one coordinates input to encourage the user to think of it that way?
@@ -108,16 +116,74 @@ class BSplineSet(m3l.Function):
         #       -- Hesitancy is what object would this be? Each coordinate should have [str,float,float,float] for b_spline_name, u, v, w
         # Is this even worth the effort? When would someone use this?
 
-        b_spline_control_points = self.control_points[self.coefficient_indices[b_spline_name]].reshape((num_control_points, num_physical_dimensions))
-        # points = basis0.dot(b_spline_control_points.reshape((num_control_points, self.num_physical_dimensions)))
-        points = b_spline_basis.dot(b_spline_control_points)
+        b_spline_coefficients = self.coefficients[self.coefficient_indices[b_spline_name]].reshape(
+            (num_coefficient_elements, num_physical_dimensions))
+        # points = basis0.dot(b_spline_coefficients.reshape((num_coefficients, self.num_physical_dimensions)))
+        points = b_spline_basis.dot(b_spline_coefficients)
 
         # NOTE: This should probably return a MappedArray (Actually, M3L so this is a valid M3L operation)
         return points
+    
+    def declare_sub_set(self, sub_set_name:str, b_spline_names:list[str]=None, b_spline_search_names:list[str]=None):
+        '''
+        Creates a B-spline sub-set. This object points to a sub-set of this larger B-spline set.
+
+        Parameters
+        ----------
+        sub_set_name : str
+            The name of the B-spline sub-set.
+        b_spline_names : list[str]
+            The names of the B-splines to include in the sub-set.
+        b_spline_search_names : list[str]
+            The names of the B-splines to search for. Names of B-splines will be returned for each B-spline that INCLUDES the search name.
+        '''
+        if b_spline_names is None:
+            b_spline_names_input = []
+        else:
+            b_spline_names_input = b_spline_names.copy()
+
+        if b_spline_search_names is not None:
+            b_spline_names_input += self.space.search_b_spline_names(b_spline_search_names)
+
+        from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
+        return BSplineSubSet(name=sub_set_name, b_spline_set=self, b_spline_names=b_spline_names_input)
+
+
+    def create_sub_set(self, sub_set_name:str, b_spline_names:list[str], b_spline_search_names:list[str]=None) -> BSplineSet:
+        '''
+        Creates a new B-spline set that is a sub-set of this larger B-spline set.
+
+        Parameters
+        ----------
+        sub_set_name : str
+            The name of the B-spline sub-set.
+        b_spline_names : list[str]
+            The names of the B-splines to include in the sub-set.
+        '''
+        if b_spline_names is None:
+            b_spline_names_input = []
+        else:
+            b_spline_names_input = b_spline_names.copy()
+
+        if b_spline_search_names is not None:
+            b_spline_names_input += self.space.search_b_spline_names(b_spline_search_names)
+
+        sub_set_space = self.space.create_sub_space(sub_space_name=sub_set_name + '_space', b_spline_names=b_spline_names_input)
+
+        num_physical_dimensions = {}
+        connections = {}
+        for b_spline_name in b_spline_names:
+            num_physical_dimensions[b_spline_name] = self.num_physical_dimensions[b_spline_name]
+            connections[b_spline_name] = self.connections[b_spline_name]
+        
+        sub_set = BSplineSet(name=sub_set_name, space=sub_set_space, num_physical_dimensions=num_physical_dimensions,
+                             connections=connections)
+        
+        return sub_set
 
 
     def project(self, points:np.ndarray, targets:list[str]=None, direction:np.ndarray=None,
-                grid_search_density_parameter:int=10, max_iterations=100, plot:bool=False):
+                grid_search_density_parameter:int=10, max_iterations=100, plot:bool=False) -> am.MappedArray:
         '''
         Projects points onto the B-spline set.
 
@@ -288,20 +354,17 @@ class BSplineSet(m3l.Function):
             projection_grid_search_density = int(np.ceil(projection_grid_search_density_parameter
                                                          *b_spline_length_scales_dict[close_b_spline_name]/system_length_scale
                                                          /num_parametric_dimensions
-                                                         *int(np.prod(np.array(b_spline.order)-1))))
+                                                         *int(np.prod(np.array(b_spline.space.order)-1))))
             if projection_grid_search_density == 0:
                 projection_grid_search_density = 1
             projected_point_on_b_spline = b_spline.project(points=point, direction=direction_vector, 
                                                            grid_search_density=projection_grid_search_density,max_iterations=max_iterations,
-                                                           plot=True)
+                                                           plot=False)
             
             # take map of projected point and add columns to fit whole cp vector
             point_map = sps.lil_matrix((self.num_physical_dimensions[close_b_spline_name], self.num_coefficients))
-            # Same map for all physical dimensions (like x, y, and z in 3d case).
             num_physical_dimensions = self.num_physical_dimensions[closest_b_spline_name]
-            for dimension_index in range(num_physical_dimensions):
-                point_map[dimension_index, self.coefficient_indices[closest_b_spline_name][::num_physical_dimensions] + dimension_index] = \
-                    projected_point_on_b_spline.linear_map
+            point_map[:, self.coefficient_indices[closest_b_spline_name]] = projected_point_on_b_spline.linear_map
             point_map = point_map.tocsc()
             projected_point_on_b_spline_set = am.MappedArray(input=self.coefficients, 
                                                              linear_map=point_map, shape=(1, self.num_physical_dimensions[closest_b_spline_name]))
@@ -309,8 +372,7 @@ class BSplineSet(m3l.Function):
             projected_points_list.append(projected_point_on_b_spline_set)            
 
         projected_points = am.vstack(tuple(projected_points_list))
-        projected_points.shape = points_shape
-
+        projected_points.reshape(points_shape)
 
         if plot:
             # Plot the surfaces that are projected onto
@@ -324,11 +386,11 @@ class BSplineSet(m3l.Function):
             plotting_points.append(plotting_projected_points)
             plotter.show(b_spline_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
 
-        projected_points
+        return projected_points
 
 
-    def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points', 'control_points'], plot_types:list=['mesh'],
-              opacity:float=1., color:str='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
+    def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points'], plot_types:list=['mesh'],
+              opacity:float=1., color:str | BSplineSet='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
         '''
         Plots the B-spline Surface.
 
@@ -337,13 +399,14 @@ class BSplineSet(m3l.Function):
         b_splines : list[str]
             The B-splines to be plotted. If None, all B-splines are plotted.
         points_type : list
-            The type of points to be plotted. {evaluated_points, control_points}
+            The type of points to be plotted. {evaluated_points, coefficients}
         plot_types : list
             The type of plot {mesh, wireframe, point_cloud}
         opactity : float
             The opacity of the plot. 0 is fully transparent and 1 is fully opaque.
-        color : str
-            The 6 digit color code to plot the B-spline as.
+        color : str | BSplineSet
+            The 6 digit color code to plot the B-spline as OR
+            a BSplineSet that shares a function space and has num_physical_dimensions=1.
         surface_texture : str = "" {"metallic", "glossy", ...}, optional
             The surface texture to determine how light bounces off the surface.
             See https://github.com/marcomusy/vedo/blob/master/examples/basic/lightings.py for options.
@@ -363,19 +426,27 @@ class BSplineSet(m3l.Function):
             for b_spline_name in b_splines:
                 b_spline_coefficient_indices = self.coefficient_indices[b_spline_name]
                 if point_type == 'evaluated_points':
-                        num_points_u = 25
-                        num_points_v = 25
-                        u_vec = np.einsum('i,j->ij', np.linspace(0., 1., num_points_u), np.ones(num_points_v)).reshape((-1,1))
-                        v_vec = np.einsum('i,j->ij', np.ones(num_points_u), np.linspace(0., 1., num_points_v)).reshape((-1,1))
-                        parametric_coordinates = np.hstack((u_vec, v_vec))
-                        num_plotting_points = num_points_u * num_points_v
+                    num_points_u = 25
+                    num_points_v = 25
+                    u_vec = np.einsum('i,j->ij', np.linspace(0., 1., num_points_u), np.ones(num_points_v)).reshape((-1,1))
+                    v_vec = np.einsum('i,j->ij', np.ones(num_points_u), np.linspace(0., 1., num_points_v)).reshape((-1,1))
+                    parametric_coordinates = np.hstack((u_vec, v_vec))
+                    num_plotting_points = num_points_u * num_points_v
 
-                        plotting_points = self.evaluate(b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates)
-                        plotting_points_shape = (num_points_u, num_points_v, self.num_physical_dimensions[b_spline_name])
-                elif point_type == 'control_points':
-                    plotting_points_shape = self.space.spaces[self.space.b_spline_to_space_dict[b_spline_name]].control_points_shape + (self.num_physical_dimensions[b_spline_name],)
+                    plotting_points = self.evaluate(b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates)
+                    plotting_points_shape = (num_points_u, num_points_v, self.num_physical_dimensions[b_spline_name])
+
+                    if type(color) is BSplineSet:
+                        plotting_colors = color.evaluate(b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates)
+                elif point_type == 'coefficients':
+                    plotting_points_shape = self.space.spaces[self.space.b_spline_to_space_dict[b_spline_name]].parametric_coefficients_shape + \
+                        (self.num_physical_dimensions[b_spline_name],)
                     num_plotting_points = np.prod(plotting_points_shape[:-1])
-                    plotting_points = self.control_points[b_spline_coefficient_indices].reshape((num_plotting_points,-1))
+                    plotting_points = self.coefficients[b_spline_coefficient_indices].reshape((num_plotting_points,-1))
+
+                    # if type(color) is BSplineSet:
+                    #     color_coefficient_indices = color.coefficient_indices[b_spline_name]
+                    #     plotting_colors = color.coefficients[color_coefficient_indices]
                 else:
                     raise NotImplementedError(f'Point type {point_type} is not implemented.')
 
@@ -403,7 +474,11 @@ class BSplineSet(m3l.Function):
                                 ))
                                 faces.append(face)
 
-                    mesh = vedo.Mesh([vertices, faces]).opacity(opacity).color(color).lighting(surface_texture)
+                    mesh = vedo.Mesh([vertices, faces]).opacity(opacity).lighting(surface_texture)
+                    if type(color) is str:
+                        mesh.color(color)
+                    elif type(color) is BSplineSet:
+                        mesh.cmap('jet', plotting_colors)
                 if 'mesh' in plot_types:
                     plotting_elements.append(mesh)
                 if 'wireframe' in plot_types:
@@ -463,6 +538,8 @@ class BSplineSet(m3l.Function):
 
             # If there are multiple B-splines with the current number of dimensions, find connections
             self.find_connections_with_same_num_physical_dimensions(b_spline_names=b_spline_names_with_same_dimension)
+
+            self.space.connections = self.connections
 
         return self.connections
 
@@ -597,15 +674,15 @@ if __name__ == "__main__":
 
     # ''' Creating B-spline set manually '''
 
-    # num_control_points1 = 10
+    # num_coefficients1 = 10
     # order1 = 4
-    # num_control_points2 = 5
+    # num_coefficients2 = 5
     # order2 = 3
     
     # space_of_cubic_b_spline_surfaces_with_10_cp = BSplineSpace(name='cubic_b_spline_surfaces_10_cp', order=(order1,order1),
-    #                                                           control_points_shape=(num_control_points1,num_control_points1))
+    #                                                           coefficients_shape=(num_coefficients1,num_coefficients1))
     # space_of_quadratic_b_spline_surfaces_with_5_cp = BSplineSpace(name='quadratic_b_spline_surfaces_5_cp', order=(order2,order2),
-    #                                                           control_points_shape=(num_control_points2,num_control_points2))
+    #                                                           coefficients_shape=(num_coefficients2,num_coefficients2))
     # b_spline_spaces = {space_of_cubic_b_spline_surfaces_with_10_cp.name : space_of_cubic_b_spline_surfaces_with_10_cp,
     #                    space_of_quadratic_b_spline_surfaces_with_5_cp.name : space_of_quadratic_b_spline_surfaces_with_5_cp}
     # b_spline_set_space = BSplineSetSpace(name='my_b_spline_set', spaces=b_spline_spaces, 
@@ -613,12 +690,12 @@ if __name__ == "__main__":
     #                                                              'my_b_spline_2':space_of_quadratic_b_spline_surfaces_with_5_cp.name})
 
 
-    # coefficients = np.zeros(((num_control_points1*num_control_points1 + num_control_points2*num_control_points2)*3))
-    # coefficients[:num_control_points1*num_control_points1*3] = 0.
-    # coefficients[num_control_points1*num_control_points1*3:] = 1.
+    # coefficients = np.zeros(((num_coefficients1*num_coefficients1 + num_coefficients2*num_coefficients2)*3))
+    # coefficients[:num_coefficients1*num_coefficients1*3] = 0.
+    # coefficients[num_coefficients1*num_coefficients1*3:] = 1.
 
     # # Connection
-    # # coefficients[num_control_points1*num_control_points1*3 - 1] = 1.
+    # # coefficients[num_coefficients1*num_coefficients1*3 - 1] = 1.
     # b_spline_set = BSplineSet(name='my_b_spline_set', space=b_spline_set_space, coefficients=coefficients,
     #                           num_physical_dimensions={'my_b_spline_1':3, 'my_b_spline_2':3})
 
@@ -633,11 +710,11 @@ if __name__ == "__main__":
         # b_spline.plot(plot_types=['mesh'], show=True)
     
     b_spline_set = create_b_spline_set(name='sample_wing', b_splines=b_splines)
-    b_spline_set = refit_b_spline_set(b_spline_set=b_spline_set, num_control_points=(25,10), order=(4,3))
+    b_spline_set = refit_b_spline_set(b_spline_set=b_spline_set, num_coefficients=(25,10), order=(4,3))
     b_spline_set.find_connections()
     # b_spline_set.plot()
 
-    # projected_points1 = b_spline_set.project(np.array([[0.2, 1., 10.], [0.5, 1., 1.]]), plot=True, direction=np.array([0., 0., -1.]))
+    projected_points1 = b_spline_set.project(np.array([[0.2, 1., 10.], [0.5, 1., 1.]]), plot=True, direction=np.array([0., 0., -1.]))
     projected_points2 = b_spline_set.project(np.array([[0.2, 0., 1.], [0.5, 1., 1.]]), plot=True, max_iterations=100)
 
     print('hi')

@@ -1,4 +1,4 @@
-cdef int get_basis2(int order, int num_control_points, double u, double* knot_vector, double* basis2):
+cdef int get_basis2(int order, int num_coefficients, double u, double* knot_vector, double* basis2):
     cdef int i, j1, j2, l, n
     cdef double den, b0_a, b0_b, b1_a, b1_b, b2_a, b2_b
 
@@ -7,7 +7,7 @@ cdef int get_basis2(int order, int num_control_points, double u, double* knot_ve
 
     # Find the knot interval
     cdef int i_start = -1
-    for i in range(order - 1, num_control_points):
+    for i in range(order - 1, num_coefficients):
         if (knot_vector[i] <= u) and (u < knot_vector[i + 1]):
             i_start = i - order + 1
 
@@ -18,8 +18,8 @@ cdef int get_basis2(int order, int num_control_points, double u, double* knot_ve
     basis0[order - 1] = 1.
 
     # If parameter is at the maximum of the knot vector, set the i_start appropriately
-    if abs(u - knot_vector[order + num_control_points - 1]) < 1e-14:
-        i_start = num_control_points - order
+    if abs(u - knot_vector[order + num_coefficients - 1]) < 1e-14:
+        i_start = num_coefficients - order
 
     for i in range(order):
         basis1[i] = 0.

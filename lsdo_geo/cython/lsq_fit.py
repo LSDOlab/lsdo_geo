@@ -6,7 +6,7 @@ from lsdo_geo.cython.basis_matrix_curve_py import get_basis_curve_matrix
 
 
 def get_lsq_fit(
-        pts_ndarray, num_control_points
+        pts_ndarray, num_coefficients
         ):
 
     order = 4
@@ -17,8 +17,8 @@ def get_lsq_fit(
     row_indices = np.zeros(num_points * order, np.int32)
     col_indices = np.zeros(num_points * order, np.int32)
 
-    get_basis_curve_matrix(order, num_control_points, 0, u_vec, num_points, data, row_indices, col_indices)
-    basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(num_points, num_control_points))
+    get_basis_curve_matrix(order, num_coefficients, 0, u_vec, num_points, data, row_indices, col_indices)
+    basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(num_points, num_coefficients))
 
     bTb = basis0.T.dot(basis0)
     rhs = basis0.T.dot(pts_ndarray)
@@ -93,9 +93,9 @@ if __name__ == '__main__':
         [0.94959,     -0.00352],
         [1.00000,     -0.00105],
     ])
-    num_control_points = 15
+    num_coefficients = 15
 
-    cp_array = get_lsq_fit(pts,num_control_points)
+    cp_array = get_lsq_fit(pts,num_coefficients)
     # print(cp_array)
     plt.plot(pts[:, 0], pts[:, 1], 'ok-')
     plt.plot(cp_array[:, 0], cp_array[:, 1], 'or')

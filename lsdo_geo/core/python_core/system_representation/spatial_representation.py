@@ -22,7 +22,7 @@ class SpatialRepresentation:
     def __init__(self, primitives:dict={}, primitive_indices:dict={}) -> None:
         self.primitives = primitives.copy()     # NOTE: This is one of those "I can't believe it" moments.
         self.primitive_indices = primitive_indices.copy()
-        self.control_points = None  # Will be instantiated during assemble()
+        self.coefficients = None  # Will be instantiated during assemble()
 
         self.inputs = {}
         self.outputs = {}
@@ -119,8 +119,8 @@ class SpatialRepresentation:
         else:
             num_points = np.cumprod(points.shape[:-1])[-1]
         flattened_surface_indices = closest_surfaces_indices.flatten()
-        # num_control_points = np.cumprod(self.control_points.shape[:-1])[-1]
-        # linear_map = sps.lil_array((num_points, num_control_points))
+        # num_coefficients = np.cumprod(self.coefficients.shape[:-1])[-1]
+        # linear_map = sps.lil_array((num_points, num_coefficients))
         projection_receiving_primitives = []
         projection_outputs = {}
         # for i in range(num_points): # for each point, assign the closest the projection result
@@ -139,8 +139,8 @@ class SpatialRepresentation:
         #         projection_receiving_primitives.append(receiving_target)
 
         for property in properties:
-            num_control_points = np.cumprod(self.control_points[property].shape[:-1])[-1]
-            linear_map = sps.lil_array((num_points, num_control_points))
+            num_coefficients = np.cumprod(self.coefficients[property].shape[:-1])[-1]
+            linear_map = sps.lil_array((num_points, num_coefficients))
 
             for i in range(num_points):
                 target_index = flattened_surface_indices[i]
@@ -155,14 +155,14 @@ class SpatialRepresentation:
                                                                                         v_vec=np.array([point_parametric_coordinates[1][i]]))
                 linear_map[i, receiving_target_control_point_indices] = point_map_on_receiving_target
 
-            property_shape = points.shape[:-1] + (self.control_points[property].shape[-1],)
-            property_mapped_array = am.array(self.control_points[property], linear_map=linear_map.tocsc(), offset=offset, shape=property_shape)
+            property_shape = points.shape[:-1] + (self.coefficients[property].shape[-1],)
+            property_mapped_array = am.array(self.coefficients[property], linear_map=linear_map.tocsc(), offset=offset, shape=property_shape)
             projection_outputs[property] = property_mapped_array
 
         projection_receiving_primitives = list(targets)
 
         # linear_map = linear_map.tocsc()
-        # projected_points = am.array(self.control_points, linear_map=linear_map, offset=offset, shape=points.shape)
+        # projected_points = am.array(self.coefficients, linear_map=linear_map, offset=offset, shape=points.shape)
 
         if plot:
             # Plot the surfaces that are projected onto
@@ -172,8 +172,8 @@ class SpatialRepresentation:
             plotting_points = []
             # TODO This will break if geometry is not one of the properties. Fix this.
             flattened_projected_points = (projection_outputs['geometry'].value).reshape((num_points, -1)) # last axis usually has length 3 for x,y,z
-            plotting_primitive_control_points = vedo.Points(flattened_projected_points, r=12, c='#00C6D7')  # TODO make this (1,3) instead of (3,)
-            plotting_points.append(plotting_primitive_control_points)
+            plotting_primitive_coefficients = vedo.Points(flattened_projected_points, r=12, c='#00C6D7')  # TODO make this (1,3) instead of (3,)
+            plotting_points.append(plotting_primitive_coefficients)
             plotter.show(primitive_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
 
         if len(projection_outputs) == 1:
@@ -208,10 +208,10 @@ class SpatialRepresentation:
         '''
         fn = os.path.basename(file_name)
         fn_wo_ext = fn[:fn.rindex('.')]
-        control_points = IMPORTS_FILES_FOLDER / f'{fn_wo_ext}_control_points.pickle'
+        coefficients = IMPORTS_FILES_FOLDER / f'{fn_wo_ext}_coefficients.pickle'
         primitive_indices = IMPORTS_FILES_FOLDER / f'{fn_wo_ext}_primitive_indices.pickle'
         primitives = IMPORTS_FILES_FOLDER / f'{fn_wo_ext}_primitives.pickle'
-        my_file = Path(control_points) 
+        my_file = Path(coefficients) 
         if my_file.is_file():
             with open(primitives, 'rb') as f:
                 self.primitives = pickle.load(f)
@@ -219,8 +219,8 @@ class SpatialRepresentation:
             with open(primitive_indices, 'rb') as f:
                 self.primitive_indices = pickle.load(f)
 
-            with open(control_points, 'rb') as f:
-                self.control_points = pickle.load(f)
+            with open(coefficients, 'rb') as f:
+                self.coefficients = pickle.load(f)
 
         else:
             file_name = str(file_name)
@@ -239,24 +239,24 @@ class SpatialRepresentation:
             self.assemble()
             save_file_name = os.path.basename(file_name)
             filename_without_ext = save_file_name[:save_file_name.rindex('.')]
-            with open(f'imports/{filename_without_ext}_control_points.pickle', 'wb+') as handle:
-                pickle.dump(self.control_points, handle, protocol=pickle.HIGHEST_PROTOCOL)
-                # np.save(f, self.control_points)
+            with open(f'imports/{filename_without_ext}_coefficients.pickle', 'wb+') as handle:
+                pickle.dump(self.coefficients, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                # np.save(f, self.coefficients)
             with open(f'imports/{filename_without_ext}_primitive_indices.pickle', 'wb+') as handle:
                 pickle.dump(self.primitive_indices, handle, protocol=pickle.HIGHEST_PROTOCOL)
             with open(f'imports/{filename_without_ext}_primitives.pickle', 'wb+') as handle:
                 pickle.dump(self.primitives, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    def refit_geometry(self, num_control_points:int=25, fit_resolution:int=50, only_non_differentiable:bool=False, file_name=None):
+    def refit_geometry(self, num_coefficients:int=25, fit_resolution:int=50, only_non_differentiable:bool=False, file_name=None):
         import lsdo_geo.primitives.b_splines.b_spline_functions as mfd  # lsdo_manifolds
 
         if file_name is not None:
             fn = os.path.basename(file_name)
             fn_wo_ext = fn[:fn.rindex('.')]
-            control_points = IMPORTS_FILES_FOLDER / f'{fn_wo_ext}_control_points_{num_control_points}_{fit_resolution}.pickle'
-            primitive_indices = IMPORTS_FILES_FOLDER / f'{fn_wo_ext}_primitive_indices_{num_control_points}_{fit_resolution}.pickle'
-            primitives = IMPORTS_FILES_FOLDER / f'{fn_wo_ext}_primitives_{num_control_points}_{fit_resolution}.pickle'
-            my_file = Path(control_points) 
+            coefficients = IMPORTS_FILES_FOLDER / f'{fn_wo_ext}_coefficients_{num_coefficients}_{fit_resolution}.pickle'
+            primitive_indices = IMPORTS_FILES_FOLDER / f'{fn_wo_ext}_primitive_indices_{num_coefficients}_{fit_resolution}.pickle'
+            primitives = IMPORTS_FILES_FOLDER / f'{fn_wo_ext}_primitives_{num_coefficients}_{fit_resolution}.pickle'
+            my_file = Path(coefficients) 
         if file_name is not None and my_file.is_file():
             with open(primitives, 'rb') as f:
                 self.primitives = pickle.load(f)
@@ -264,8 +264,8 @@ class SpatialRepresentation:
             with open(primitive_indices, 'rb') as f:
                 self.primitive_indices = pickle.load(f)
 
-            with open(control_points, 'rb') as f:
-                self.control_points = pickle.load(f)
+            with open(coefficients, 'rb') as f:
+                self.coefficients = pickle.load(f)
 
         else:
             for primitive_name, primitive in self.primitives.items():
@@ -277,18 +277,18 @@ class SpatialRepresentation:
                 if i_should_refit:
                     self.primitives[primitive_name].geometry_primitive = \
                         mfd.refit_b_spline(b_spline=primitive.geometry_primitive, name=primitive_name, \
-                                        num_control_points=(num_control_points,), fit_resolution=(fit_resolution,))
+                                        num_coefficients=(num_coefficients,), fit_resolution=(fit_resolution,))
                     self.primitives[primitive_name].assemble()
             self.assemble()
             if file_name is not None:
                 save_file_name = os.path.basename(file_name)
                 filename_without_ext = save_file_name[:save_file_name.rindex('.')]
-                with open(f'imports/{filename_without_ext}_control_points_{num_control_points}_{fit_resolution}.pickle', 'wb+') as handle:
-                    pickle.dump(self.control_points, handle, protocol=pickle.HIGHEST_PROTOCOL)
-                    # np.save(f, self.control_points)
-                with open(f'imports/{filename_without_ext}_primitive_indices_{num_control_points}_{fit_resolution}.pickle', 'wb+') as handle:
+                with open(f'imports/{filename_without_ext}_coefficients_{num_coefficients}_{fit_resolution}.pickle', 'wb+') as handle:
+                    pickle.dump(self.coefficients, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                    # np.save(f, self.coefficients)
+                with open(f'imports/{filename_without_ext}_primitive_indices_{num_coefficients}_{fit_resolution}.pickle', 'wb+') as handle:
                     pickle.dump(self.primitive_indices, handle, protocol=pickle.HIGHEST_PROTOCOL)
-                with open(f'imports/{filename_without_ext}_primitives_{num_control_points}_{fit_resolution}.pickle', 'wb+') as handle:
+                with open(f'imports/{filename_without_ext}_primitives_{num_coefficients}_{fit_resolution}.pickle', 'wb+') as handle:
                     pickle.dump(self.primitives, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     def read_openvsp_stp(self, file_name):
@@ -316,50 +316,50 @@ class SpatialRepresentation:
     Collects the primitives into a collectivized format.
     '''
     def assemble(self):
-        self.control_points = {}
+        self.coefficients = {}
         starting_indices = {}
 
         for primitive in list(self.primitives.values()):
             # Adding indices for properties that don't already have starting indices to avoid KeyError
-            for property_type in list(primitive.control_points.keys()):
+            for property_type in list(primitive.coefficients.keys()):
                 if property_type not in starting_indices:
                     starting_indices[property_type] = 0
 
             self.primitive_indices[primitive.name] = {}
 
             # Adding primitive control points to mechanical structure control points
-            for property_type in list(primitive.control_points.keys()):
-                primitive_property_control_points = primitive.control_points[property_type]
-                primitive_num_control_points = np.cumprod(primitive_property_control_points.shape[:-1])[-1] 
+            for property_type in list(primitive.coefficients.keys()):
+                primitive_property_coefficients = primitive.coefficients[property_type]
+                primitive_num_coefficients = np.cumprod(primitive_property_coefficients.shape[:-1])[-1] 
                 #NOTE: control points should always be (np,ndim)
-                ending_index = starting_indices[property_type] + primitive_num_control_points
+                ending_index = starting_indices[property_type] + primitive_num_coefficients
                 self.primitive_indices[primitive.name][property_type] = np.arange(starting_indices[property_type], ending_index)
                 starting_indices[property_type] = ending_index
-                if property_type in self.control_points:
-                    self.control_points[property_type] = np.vstack((self.control_points[property_type], 
-                                                                    primitive_property_control_points.reshape((primitive_num_control_points,-1))))
+                if property_type in self.coefficients:
+                    self.coefficients[property_type] = np.vstack((self.coefficients[property_type], 
+                                                                    primitive_property_coefficients.reshape((primitive_num_coefficients,-1))))
                 else:
-                    self.control_points[property_type] = primitive_property_control_points.reshape((primitive_num_control_points, -1))
+                    self.coefficients[property_type] = primitive_property_coefficients.reshape((primitive_num_coefficients, -1))
 
         # starting_index = 0
         # for primitive in list(self.primitives.values()):
-        #     primitive_control_points = primitive.control_points
-        #     primitive_num_control_points = np.cumprod(primitive_control_points.shape[:-1])[-1]    # control points should always be (np,ndim)
-        #     ending_index = starting_index + primitive_num_control_points
+        #     primitive_coefficients = primitive.coefficients
+        #     primitive_num_coefficients = np.cumprod(primitive_coefficients.shape[:-1])[-1]    # control points should always be (np,ndim)
+        #     ending_index = starting_index + primitive_num_coefficients
         #     self.primitive_indices[primitive.name] = np.arange(starting_index, ending_index)
         #     starting_index = ending_index
-        #     if self.control_points is None:
-        #         self.control_points = primitive_control_points.reshape((primitive_num_control_points, -1))
+        #     if self.coefficients is None:
+        #         self.coefficients = primitive_coefficients.reshape((primitive_num_coefficients, -1))
         #     else:
-        #         self.control_points = np.vstack((self.control_points, primitive_control_points.reshape((primitive_num_control_points, -1))))
+        #         self.coefficients = np.vstack((self.coefficients, primitive_coefficients.reshape((primitive_num_coefficients, -1))))
 
-    def update(self, updated_control_points:np.ndarray, primitive_names:list=['all']):
+    def update(self, updated_coefficients:np.ndarray, primitive_names:list=['all']):
         '''
         Updates the control points of the mechanical structure or a portion of the mechanical structure.
 
         Parameters
         -----------
-        updated_control_points : {np.ndarray, dict}
+        updated_coefficients : {np.ndarray, dict}
             The array or dictionary of new control points for the mechanical structure.
             An array updates geometric control points while a dictionary of the form
             {property_name:array_of_values} can be used to update any general set of properties.
@@ -369,36 +369,36 @@ class SpatialRepresentation:
         if primitive_names == ['all']:
             primitive_names = list(self.primitives.keys())
         
-        if type(updated_control_points) is np.ndarray or \
-            type(updated_control_points) is am.MappedArray:
+        if type(updated_coefficients) is np.ndarray or \
+            type(updated_coefficients) is am.MappedArray:
             starting_index = 0
             for primitive_name in primitive_names:
                 primitive = self.primitives[primitive_name]
                 property_name = 'geometry'
                 indices = self.primitive_indices[primitive_name][property_name]
                 ending_index = starting_index + len(indices)
-                self.control_points[property_name][indices] = updated_control_points[starting_index:ending_index]
+                self.coefficients[property_name][indices] = updated_coefficients[starting_index:ending_index]
 
-                self.primitives[primitive_name].geometry_primitive.control_points = \
-                    updated_control_points[starting_index:ending_index]
+                self.primitives[primitive_name].geometry_primitive.coefficients = \
+                    updated_coefficients[starting_index:ending_index]
 
                 starting_index = ending_index
-        elif type(updated_control_points) is dict:
+        elif type(updated_coefficients) is dict:
             starting_indices = {}
             for primitive_name in primitive_names:
                 primitive = self.primitives[primitive_name]
-                for property_name in list(updated_control_points.keys()):
+                for property_name in list(updated_coefficients.keys()):
                     indices = self.primitive_indices[primitive_name][property_name]
                     ending_index = starting_indices[property_name] + len(indices)
-                    self.control_points[property_name][indices] = \
-                        updated_control_points[property_name][starting_indices[property_name]:ending_index]
+                    self.coefficients[property_name][indices] = \
+                        updated_coefficients[property_name][starting_indices[property_name]:ending_index]
 
                     if property_name == 'geometry':
-                        self.primitives[primitive_name].geometry_primitive.control_points = \
-                            updated_control_points[property_name][starting_indices[property_name]:ending_index]
+                        self.primitives[primitive_name].geometry_primitive.coefficients = \
+                            updated_coefficients[property_name][starting_indices[property_name]:ending_index]
                     else:
-                        self.primitives[primitive_name].material_primitives[property_name].control_points = \
-                            updated_control_points[property_name][starting_indices[property_name]:ending_index]
+                        self.primitives[primitive_name].material_primitives[property_name].coefficients = \
+                            updated_coefficients[property_name][starting_indices[property_name]:ending_index]
 
                     starting_indices[property_name] = ending_index
         else:
@@ -523,7 +523,7 @@ class SpatialRepresentation:
         primitives : list
             The list of primitives to be plotted. This can be the primitive names or the objects themselves.
         points_type : list
-            The type of points to be plotted. {evaluated_points, control_points}
+            The type of points to be plotted. {evaluated_points, coefficients}
         plot_types : list
             The type of plot {mesh, wireframe, point_cloud}
         opactity : float

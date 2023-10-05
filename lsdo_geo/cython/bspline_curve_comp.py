@@ -10,19 +10,19 @@ class BSplineCurveComp(ExplicitComponent):
     def initialize(self):
         self.options.declare('n_points', types = int)
         self.options.declare('order', types = int)
-        self.options.declare('n_control_points', types = int)
+        self.options.declare('n_coefficients', types = int)
         self.options.declare('n_t', types = int)
 
     def setup(self):
         n_points = self.options['n_points']
         order = self.options['order']
-        n_control_points = self.options['n_control_points']
+        n_coefficients = self.options['n_coefficients']
         n_t = self.options['n_t']
 
         self.ctrl_pts = ctrl_pts = 'ctrl_pts'
         self.pts = pts = 'pts'
 
-        self.add_input(ctrl_pts, shape = (n_control_points, n_t))
+        self.add_input(ctrl_pts, shape = (n_coefficients, n_t))
         self.add_output(pts, shape = (n_points, n_t))
 
         u_vec = np.linspace(0., 1., n_points)
@@ -31,14 +31,14 @@ class BSplineCurveComp(ExplicitComponent):
         row_indices = np.zeros(n_points * order, np.int32)
         col_indices = np.zeros(n_points * order, np.int32)
 
-        get_basis_curve_matrix(order, n_control_points, 0, u_vec, n_points, data, row_indices, col_indices)
-        self.basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(n_points, n_control_points))
+        get_basis_curve_matrix(order, n_coefficients, 0, u_vec, n_points, data, row_indices, col_indices)
+        self.basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(n_points, n_coefficients))
 
         val = np.outer(data, np.ones(n_t)).flatten()
         rows = np.outer(n_t * row_indices, np.ones(n_t, np.int32)).flatten() + np.outer(np.ones(n_points * order, np.int32), np.arange(n_t)).flatten()
         cols = np.outer(n_t * col_indices, np.ones(n_t, np.int32)).flatten() + np.outer(np.ones(n_points * order, np.int32), np.arange(n_t)).flatten()
 
-        basis0 = sps.csc_matrix((val, (rows, cols)), shape=(n_t*n_points, n_t*n_control_points))
+        basis0 = sps.csc_matrix((val, (rows, cols)), shape=(n_t*n_points, n_t*n_coefficients))
 
         self.declare_partials(pts, ctrl_pts, val=basis0)
         # self.declare_partials(pts, ctrl_pts, val=val, rows=rows, cols=cols)
@@ -78,7 +78,7 @@ if __name__ == '__main__':
 
     prob.model.add_subsystem('inputs_comp', comp, promotes=['*'])
     prob.model.add_subsystem('b_spline_curve', BSplineCurveComp(
-        n_points = n_points, order = order, n_control_points = cp_array.shape[0], n_t = cp_array.shape[1]),
+        n_points = n_points, order = order, n_coefficients = cp_array.shape[0], n_t = cp_array.shape[1]),
         promotes=['*']
     )
 

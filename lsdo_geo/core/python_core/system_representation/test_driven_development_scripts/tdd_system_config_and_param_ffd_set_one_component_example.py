@@ -65,7 +65,7 @@ from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_func
 from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
 wing_geometry_primitives = wing.get_geometry_primitives()
-wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_coefficients=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
 
 wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_b_spline_volume, embedded_entities=wing_geometry_primitives)
 wing_ffd_block.add_scale_v(name='linear_taper', order=2, num_dof=3, value=np.array([0., 1., 0.]), cost_factor=1.)
@@ -109,9 +109,9 @@ ffd_set.setup()
 
 affine_section_properties = ffd_set.evaluate_affine_section_properties()
 rotational_section_properties = ffd_set.evaluate_rotational_section_properties()
-affine_ffd_control_points_local_frame = ffd_set.evaluate_affine_block_deformations(plot=True)
-ffd_control_points_local_frame = ffd_set.evaluate_rotational_block_deformations(plot=True)
-ffd_control_points = ffd_set.evaluate_control_points(plot=True)
+affine_ffd_coefficients_local_frame = ffd_set.evaluate_affine_block_deformations(plot=True)
+ffd_coefficients_local_frame = ffd_set.evaluate_rotational_block_deformations(plot=True)
+ffd_coefficients = ffd_set.evaluate_coefficients(plot=True)
 updated_wing = ffd_set.evaluate_embedded_entities(plot=True)
 
 print('Sample evaluation: affine section properties: \n', affine_section_properties)

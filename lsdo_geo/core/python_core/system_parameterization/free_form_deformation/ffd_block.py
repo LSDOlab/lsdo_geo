@@ -56,9 +56,9 @@ class FFDBlock:
         self.primitives = primitives.copy()
         self.embedded_entities = embedded_entities.copy()
 
-        self.control_points = None  # nodes and control points are generalized to control points
+        self.coefficients = None  # nodes and control points are generalized to control points
         self.map = None
-        self.embedded_points = None # This will be a MappedArray that has self.control_points as input and self.map as map
+        self.embedded_points = None # This will be a MappedArray that has self.coefficients as input and self.map as map
 
 
 # class SectionedRectangularBSplineGeometricFFDBlock(FFDBlock):
@@ -75,7 +75,7 @@ class SRBGFFDBlock(FFDBlock):
 
         # attributes that define the FFD block's initial properties for use in transformations
         self.section_origins = None
-        self.control_points_section_frame = None
+        self.coefficients_section_frame = None
         self.initial_scale_v = None
         self.initial_scale_w = None
 
@@ -83,7 +83,7 @@ class SRBGFFDBlock(FFDBlock):
         self.free_affine_section_properties_map = None
         self.prescribed_section_properties_map = None
         self.rotational_section_properties_map = None
-        self.control_points_affine_map = None
+        self.coefficients_affine_map = None
         self.embedded_entities_map = None
         self.cost_matrix = None
 
@@ -96,9 +96,9 @@ class SRBGFFDBlock(FFDBlock):
         self.num_affine_properties = len(self.affine_property_names)
         self.num_scaling_properties = 3
 
-        self.num_control_points = np.cumprod(primitive.shape[:-1])[-1]
+        self.num_coefficients = np.cumprod(primitive.shape[:-1])[-1]
         self.num_sections = self.primitive.shape[0]
-        self.num_control_points_per_section = np.cumprod(primitive.shape[1:-1])[-1]
+        self.num_coefficients_per_section = np.cumprod(primitive.shape[1:-1])[-1]
         self.num_affine_dof = 0
         self.num_affine_free_dof = 0
         self.num_affine_prescribed_dof = 0
@@ -106,7 +106,7 @@ class SRBGFFDBlock(FFDBlock):
         self.num_dof = 0
         self.num_affine_section_properties = self.num_sections*self.num_affine_properties
         self.num_rotational_section_properties = self.num_sections*self.num_rotational_properties
-        self.num_affine_free_control_points = 0
+        self.num_affine_free_coefficients = 0
 
         # attributes for storing current states
         self.free_affine_dof = None
@@ -115,9 +115,9 @@ class SRBGFFDBlock(FFDBlock):
         self.affine_section_properties = None
         self.translations = None
         self.rotational_section_properties = None
-        self.affine_deformed_control_points = None
-        self.rotated_control_points_local_frame = None
-        self.control_points = self.primitive.control_points.reshape((self.num_control_points, -1))
+        self.affine_deformed_coefficients = None
+        self.rotated_coefficients_local_frame = None
+        self.coefficients = self.primitive.coefficients.reshape((self.num_coefficients, -1))
 
     
     def embed_entity(self, name:str, entity):
@@ -149,8 +149,8 @@ class SRBGFFDBlock(FFDBlock):
                 self.num_affine_prescribed_dof += parameter.num_dof
             else:
                 self.num_affine_free_dof += parameter.num_dof
-                if self.num_affine_free_control_points == 0:
-                    self.num_affine_free_control_points = self.num_control_points
+                if self.num_affine_free_coefficients == 0:
+                    self.num_affine_free_coefficients = self.num_coefficients
                 
         else:
             raise Exception("When adding ffd parameter, please pass in specific FFDParameter object.")
@@ -250,7 +250,7 @@ class SRBGFFDBlock(FFDBlock):
                 section_property_map[:,0] = 1.  # TODO make work or piecewise constant.
                 section_property_map = section_property_map.tocsc()
             else:
-                parameter_b_spline_curve = BSplineCurve(name=f'order_{parameter.order}_{parameter.property_type}', order_u=order, control_points=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
+                parameter_b_spline_curve = BSplineCurve(name=f'order_{parameter.order}_{parameter.property_type}', order_u=order, coefficients=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
                 parameter_b_spline_map = parameter_b_spline_curve.compute_evaluation_map(np.linspace(0., 1., num_sections))
                 section_property_map = parameter_b_spline_map
 
@@ -323,7 +323,7 @@ class SRBGFFDBlock(FFDBlock):
                 sectional_rotation_map[:,0] = 1.  # TODO make work or piecewise constant.
                 sectional_rotation_map = sectional_rotation_map.tocsc()
             else:
-                parameter_b_spline_curve = BSplineCurve(name=f'order_{order}_{parameter.property_type}', order_u=order, control_points=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
+                parameter_b_spline_curve = BSplineCurve(name=f'order_{order}_{parameter.property_type}', order_u=order, coefficients=np.zeros((parameter_num_dof,)))   # control points are in CSDL, so only using this to generate map
                 parameter_b_spline_map = parameter_b_spline_curve.compute_evaluation_map(np.linspace(0., 1., num_sections))
                 sectional_rotation_map = parameter_b_spline_map
 
@@ -342,10 +342,10 @@ class SRBGFFDBlock(FFDBlock):
         '''
         Assembles the properties and control points in the local frame so that transformations can be applied as intented.
         '''
-        control_points_reshaped = self.control_points.reshape((self.primitive.shape))
+        coefficients_reshaped = self.coefficients.reshape((self.primitive.shape))
 
         # get section origins
-        parametric_coordinates = self.primitive.project(control_points_reshaped[:,0,0,:], return_parametric_coordinates=True, plot=False)
+        parametric_coordinates = self.primitive.project(coefficients_reshaped[:,0,0,:], return_parametric_coordinates=True, plot=False)
         u_sections = parametric_coordinates[:,0]
         # u_sections = np.linspace(0., 1., self.num_sections)
         section_origins_v = np.ones((self.num_sections,))*0.5
@@ -353,9 +353,9 @@ class SRBGFFDBlock(FFDBlock):
         self.section_origins = self.primitive.evaluate_points(u_sections.copy(), section_origins_v, section_origins_w)
         # get uvw basis
         # -- identifies w axis then v axis since they should be easier to identify (sections should be parallel/normal to the cartesian axes)
-        w_axis_vectors = (control_points_reshaped[:,:,1:,:] - control_points_reshaped[:,:,:-1,:]).reshape((-1,3))
+        w_axis_vectors = (coefficients_reshaped[:,:,1:,:] - coefficients_reshaped[:,:,:-1,:]).reshape((-1,3))
         w_axis_vectors_greatest_change_axis = np.argmax(np.linalg.norm(w_axis_vectors, axis=0))
-        v_axis_vectors = control_points_reshaped[:,1:,:,:] - control_points_reshaped[:,:-1,:,:]
+        v_axis_vectors = coefficients_reshaped[:,1:,:,:] - coefficients_reshaped[:,:-1,:,:]
         v_axis_vectors_greatest_change_axis = np.argmax(np.linalg.norm(v_axis_vectors, axis=0))
         identity_matrix = np.eye(3)
         uvw_basis = np.zeros((3,3))
@@ -363,17 +363,17 @@ class SRBGFFDBlock(FFDBlock):
         uvw_basis[:,1] = identity_matrix[v_axis_vectors_greatest_change_axis,:]
         uvw_basis[:,0] = np.cross(uvw_basis[:,1], uvw_basis[:,2])
 
-        # get control_points_section_frame
-        self.local_to_global_translations = np.repeat(self.section_origins, self.num_control_points_per_section, axis=0).reshape((self.primitive.shape))
-        # control_points_reshaped_section_frame = (uvw_basis.T.dot((control_points_reshaped - self.local_to_global_translations).T)).T
+        # get coefficients_section_frame
+        self.local_to_global_translations = np.repeat(self.section_origins, self.num_coefficients_per_section, axis=0).reshape((self.primitive.shape))
+        # coefficients_reshaped_section_frame = (uvw_basis.T.dot((coefficients_reshaped - self.local_to_global_translations).T)).T
         self.local_to_global_rotation = uvw_basis
-        self.control_points_section_frame = (control_points_reshaped - self.local_to_global_translations).dot(self.local_to_global_rotation)
+        self.coefficients_section_frame = (coefficients_reshaped - self.local_to_global_translations).dot(self.local_to_global_rotation)
 
         # normalize the section scaling
-        self.initial_scale_v = np.max(self.control_points_section_frame[0,:,:,1]) - np.min(self.control_points_section_frame[0,:,:,1])
-        self.initial_scale_w = np.max(self.control_points_section_frame[0,:,:,2]) - np.min(self.control_points_section_frame[0,:,:,2])
-        self.control_points_section_frame[:,:,:,1] /= self.initial_scale_v
-        self.control_points_section_frame[:,:,:,2] /= self.initial_scale_w
+        self.initial_scale_v = np.max(self.coefficients_section_frame[0,:,:,1]) - np.min(self.coefficients_section_frame[0,:,:,1])
+        self.initial_scale_w = np.max(self.coefficients_section_frame[0,:,:,2]) - np.min(self.coefficients_section_frame[0,:,:,2])
+        self.coefficients_section_frame[:,:,:,1] /= self.initial_scale_v
+        self.coefficients_section_frame[:,:,:,2] /= self.initial_scale_w
 
 
     def assemble_affine_block_deformations_map(self):
@@ -381,47 +381,47 @@ class SRBGFFDBlock(FFDBlock):
         Assembles the local control points map.
         The control points map maps affine section properties --> local FFD control points
         '''
-        if self.control_points_affine_map is not None:
-            return self.control_points_affine_map
+        if self.coefficients_affine_map is not None:
+            return self.coefficients_affine_map
 
         num_section_properties = self.num_sections*(self.num_affine_properties)
         num_points_per_section = np.cumprod(self.primitive.shape[1:-1])[-1]
 
-        initial_control_points = self.control_points_section_frame.reshape((-1,3)).copy()
+        initial_coefficients = self.coefficients_section_frame.reshape((-1,3)).copy()
 
         # Preallocate ffd block control points maps
-        num_control_points =  self.control_points_section_frame.reshape((-1,3)).shape[0]
-        control_points_affine_map = np.zeros((num_control_points, 3, num_section_properties))
-        control_points_u_map = sps.lil_array((num_control_points, num_section_properties))
-        control_points_v_map = sps.lil_array((num_control_points, num_section_properties))
-        control_points_w_map = sps.lil_array((num_control_points, num_section_properties))
+        num_coefficients =  self.coefficients_section_frame.reshape((-1,3)).shape[0]
+        coefficients_affine_map = np.zeros((num_coefficients, 3, num_section_properties))
+        coefficients_u_map = sps.lil_array((num_coefficients, num_section_properties))
+        coefficients_v_map = sps.lil_array((num_coefficients, num_section_properties))
+        coefficients_w_map = sps.lil_array((num_coefficients, num_section_properties))
 
         # Assemble ffd block control points maps
         for section_number in range(self.num_sections):
             start_index = section_number*num_points_per_section
             end_index = (section_number+1)*num_points_per_section
-            control_points_u_map[start_index:end_index, section_number] = 1.  # Translation x
-            control_points_v_map[start_index:end_index, self.num_sections+section_number] = 1. # Translation y
-            control_points_w_map[start_index:end_index, (self.num_sections*2)+section_number] = 1. # Translation z
-            control_points_u_map[start_index:end_index, (self.num_sections*3)+section_number] = initial_control_points[start_index:end_index, 0] # Scale x
-            control_points_v_map[start_index:end_index, (self.num_sections*4)+section_number] = initial_control_points[start_index:end_index, 1]*self.initial_scale_v   # Scale y
-            control_points_w_map[start_index:end_index, (self.num_sections*5)+section_number] = initial_control_points[start_index:end_index, 2]*self.initial_scale_w   # Scale z
+            coefficients_u_map[start_index:end_index, section_number] = 1.  # Translation x
+            coefficients_v_map[start_index:end_index, self.num_sections+section_number] = 1. # Translation y
+            coefficients_w_map[start_index:end_index, (self.num_sections*2)+section_number] = 1. # Translation z
+            coefficients_u_map[start_index:end_index, (self.num_sections*3)+section_number] = initial_coefficients[start_index:end_index, 0] # Scale x
+            coefficients_v_map[start_index:end_index, (self.num_sections*4)+section_number] = initial_coefficients[start_index:end_index, 1]*self.initial_scale_v   # Scale y
+            coefficients_w_map[start_index:end_index, (self.num_sections*5)+section_number] = initial_coefficients[start_index:end_index, 2]*self.initial_scale_w   # Scale z
 
 
-        self.control_points_u_map = control_points_u_map.tocsc()
-        self.control_points_v_map = control_points_v_map.tocsc()
-        self.control_points_w_map = control_points_w_map.tocsc()
+        self.coefficients_u_map = coefficients_u_map.tocsc()
+        self.coefficients_v_map = coefficients_v_map.tocsc()
+        self.coefficients_w_map = coefficients_w_map.tocsc()
 
         # Only converting to tensor to make construction easier (less reshaping). If this slows down assembly, then use reshaping instead.
-        control_points_affine_map[:,0,:] = np.array(self.control_points_u_map.todense())
-        control_points_affine_map[:,1,:] = np.array(self.control_points_v_map.todense())
-        control_points_affine_map[:,2,:] = np.array(self.control_points_w_map.todense())
+        coefficients_affine_map[:,0,:] = np.array(self.coefficients_u_map.todense())
+        coefficients_affine_map[:,1,:] = np.array(self.coefficients_v_map.todense())
+        coefficients_affine_map[:,2,:] = np.array(self.coefficients_w_map.todense())
         NUM_PARAMETRIC_DIMENSIONS = 3      # This type of FFD block has 3 parametric dimensions
-        control_points_affine_map_matrix = control_points_affine_map.reshape((num_control_points*NUM_PARAMETRIC_DIMENSIONS, num_section_properties))
-        affine_block_deformations_map = sps.csc_array(control_points_affine_map_matrix)
+        coefficients_affine_map_matrix = coefficients_affine_map.reshape((num_coefficients*NUM_PARAMETRIC_DIMENSIONS, num_section_properties))
+        affine_block_deformations_map = sps.csc_array(coefficients_affine_map_matrix)
 
         # Start of alternative method with reshaping along different axes.
-        # affine_block_deformations_map = sps.vstack((self.control_points_u_map, self.control_points_v_map, self.control_points_w_map))
+        # affine_block_deformations_map = sps.vstack((self.coefficients_u_map, self.coefficients_v_map, self.coefficients_w_map))
         self.affine_block_deformations_map = affine_block_deformations_map
 
         return self.affine_block_deformations_map
@@ -498,13 +498,13 @@ class SRBGFFDBlock(FFDBlock):
         else:
             return plotting_elements
 
-    def plot_sections(self, control_points:np.ndarray=None, offset_sections:bool=False, plot_embedded_entities:bool=True, \
+    def plot_sections(self, coefficients:np.ndarray=None, offset_sections:bool=False, plot_embedded_entities:bool=True, \
                             plot_types:list=['mesh','point_cloud'], opacity:float=0.3, additional_plotting_elements:list=[], show:bool=True):
         
         plotting_elements = additional_plotting_elements.copy()
 
-        if control_points is None:
-            control_points = self.primitive.control_points
+        if coefficients is None:
+            coefficients = self.primitive.coefficients
 
         if plot_embedded_entities:
             for embedded_entity in list(self.embedded_entities.values()):
@@ -512,13 +512,13 @@ class SRBGFFDBlock(FFDBlock):
 
         surface_shape = self.primitive.shape[1:]
         for i in range(self.num_sections):
-            if len(control_points.shape) == 2:
-                points = control_points[i*self.num_control_points_per_section:(i+1)*self.num_control_points_per_section].copy()
+            if len(coefficients.shape) == 2:
+                points = coefficients[i*self.num_coefficients_per_section:(i+1)*self.num_coefficients_per_section].copy()
                 if offset_sections:
                     points[:,0] += i    # separating surfaces for visualization
                 points = points.reshape(surface_shape)
             else:
-                points = control_points[i,:,:,:].copy()
+                points = coefficients[i,:,:,:].copy()
                 if offset_sections:
                     points[:,:,0] += i    # separating surfaces for visualization
             
@@ -531,7 +531,7 @@ class SRBGFFDBlock(FFDBlock):
         else:
             return plotting_elements
         
-    def plot_parameter_curves(self, control_points, evaluated_points, show:bool=True):
+    def plot_parameter_curves(self, coefficients, evaluated_points, show:bool=True):
         plotting_elements = []
 
         # Plot evaluated poitns
@@ -561,17 +561,17 @@ class SRBGFFDBlock(FFDBlock):
 
         # Add control points?
         # fig += vedo.pyplot.plot(
-        #     np.linspace(0,1.,control_points.shape[0]), control_points[control_points.shape[0]:2*self.num_sections],
+        #     np.linspace(0,1.,coefficients.shape[0]), coefficients[coefficients.shape[0]:2*self.num_sections],
         #     "ob",           # markers: *,o,p,h,D,d,v,^,s,x,a
         #     like=fig,
         # )
         # fig += vedo.pyplot.plot(
-        #     np.linspace(0,1.,control_points.shape[0]), control_points[2*self.num_sections:],
+        #     np.linspace(0,1.,coefficients.shape[0]), coefficients[2*self.num_sections:],
         #     "og",           # markers: *,o,p,h,D,d,v,^,s,x,a
         #     like=fig,
         # )
         # fig += vedo.pyplot.plot(
-        #     np.linspace(0,1.,control_points.shape[0]), control_points[self.num_sections:2*self.num_sections],
+        #     np.linspace(0,1.,coefficients.shape[0]), coefficients[self.num_sections:2*self.num_sections],
         #     "or",           # markers: *,o,p,h,D,d,v,^,s,x,a
         #     like=fig,
         # )
@@ -676,10 +676,10 @@ class SRBGFFDBlock(FFDBlock):
         self.rotational_section_properties = np.zeros((self.num_rotational_section_properties))
 
         # default affine tranformed control points in local frame (each section in its section frame)
-        self.affine_deformed_control_points = self.control_points_section_frame.reshape((-1,3)) # 3 parametric dimensions
+        self.affine_deformed_coefficients = self.coefficients_section_frame.reshape((-1,3)) # 3 parametric dimensions
 
         # default rotated control points local frame (each section in its section frame)
-        self.rotated_control_points_local_frame = self.control_points_section_frame.reshape((-1,3)) # 3 parametric dimensions
+        self.rotated_coefficients_local_frame = self.coefficients_section_frame.reshape((-1,3)) # 3 parametric dimensions
 
         # default control points is done in constructor
 
@@ -690,7 +690,7 @@ class SRBGFFDBlock(FFDBlock):
             if type(entity) is BSplineCurve or \
                     type(entity) is BSplineSurface or \
                     type(entity) is BSplineVolume:
-                points = entity.control_points
+                points = entity.coefficients
             elif type(entity) is np.ndarray:
                 points = entity
             elif type(entity) is am.MappedArray:
@@ -781,30 +781,30 @@ class SRBGFFDBlock(FFDBlock):
         if affine_section_properties is None:
             affine_section_properties = self.affine_section_properties
 
-        affine_control_points_local_frame_flattened = self.affine_block_deformations_map.dot(affine_section_properties)
+        affine_coefficients_local_frame_flattened = self.affine_block_deformations_map.dot(affine_section_properties)
         NUM_PARAMETRIC_DIMENSIONS = 3       # This type of FFD block has 3 parametric dimensions by definition.
-        affine_deformed_control_points = affine_control_points_local_frame_flattened.reshape(
-                                                        (self.num_control_points, NUM_PARAMETRIC_DIMENSIONS))
-        self.affine_deformed_control_points = affine_deformed_control_points
+        affine_deformed_coefficients = affine_coefficients_local_frame_flattened.reshape(
+                                                        (self.num_coefficients, NUM_PARAMETRIC_DIMENSIONS))
+        self.affine_deformed_coefficients = affine_deformed_coefficients
 
         if plot:
-            self.plot_sections(control_points=affine_deformed_control_points, offset_sections=True, 
+            self.plot_sections(coefficients=affine_deformed_coefficients, offset_sections=True, 
                                 plot_embedded_entities=False, opacity=0.75, show=True)
 
-        return affine_deformed_control_points
+        return affine_deformed_coefficients
 
 
-    def evaluate_rotational_block_deformations(self, affine_deformed_control_points=None, translations=None, \
+    def evaluate_rotational_block_deformations(self, affine_deformed_coefficients=None, translations=None, \
                                                                             rotational_section_properties=None, plot=False):
         '''
         Evaluates the control points of the FFD block in original coordinate frame by applying the rotational section properties (section rotations).
         '''
 
         # Processing inputs
-        if affine_deformed_control_points is None:
-            affine_deformed_control_points = self.affine_deformed_control_points
+        if affine_deformed_coefficients is None:
+            affine_deformed_coefficients = self.affine_deformed_coefficients
         else:
-            self.affine_deformed_control_points = affine_deformed_control_points
+            self.affine_deformed_coefficients = affine_deformed_coefficients
         if translations is None:
             translations_flattened = self.translations
             NUM_PARAMETRIC_DIMENSIONS = 3       # Really, num_translational_properties, but num_translational_props = num_parametric_dims
@@ -817,16 +817,16 @@ class SRBGFFDBlock(FFDBlock):
             self.rotational_section_properties = rotational_section_properties
 
         if len(rotational_section_properties) == 0:
-            self.rotated_control_points_local_frame = affine_deformed_control_points
+            self.rotated_coefficients_local_frame = affine_deformed_coefficients
             if plot:
-                self.plot_sections(control_points=rotated_control_points_local_frame, offset_sections=True, plot_embedded_entities=False, opacity=0.75, show=True)
-            return affine_deformed_control_points
+                self.plot_sections(coefficients=rotated_coefficients_local_frame, offset_sections=True, plot_embedded_entities=False, opacity=0.75, show=True)
+            return affine_deformed_coefficients
 
         # Undo translations so section origin is at origin
-        affine_control_points_local_frame_reshaped = affine_deformed_control_points.reshape(self.primitive.shape)
-        affine_control_points_local_frame_reshaped_axis_moved = np.moveaxis(affine_control_points_local_frame_reshaped, 0, 2)   # so subtraction is properly casted
-        affine_control_points_local_frame_without_translations_axis_moved = affine_control_points_local_frame_reshaped_axis_moved - translations
-        affine_control_points_local_frame_without_translations = np.moveaxis(affine_control_points_local_frame_without_translations_axis_moved, 2, 0)
+        affine_coefficients_local_frame_reshaped = affine_deformed_coefficients.reshape(self.primitive.shape)
+        affine_coefficients_local_frame_reshaped_axis_moved = np.moveaxis(affine_coefficients_local_frame_reshaped, 0, 2)   # so subtraction is properly casted
+        affine_coefficients_local_frame_without_translations_axis_moved = affine_coefficients_local_frame_reshaped_axis_moved - translations
+        affine_coefficients_local_frame_without_translations = np.moveaxis(affine_coefficients_local_frame_without_translations_axis_moved, 2, 0)
 
         # Calculate rotation matrices (rotation_matrices_u, rotation_matrices_v, rotation_matrices_w), each (num_section,3,3)
         rotation_u = rotational_section_properties[:self.num_sections]
@@ -870,70 +870,70 @@ class SRBGFFDBlock(FFDBlock):
 
         # rotation_tensor = np.tensordot(rotation_tensor_u, np.tensordot(rotation_tensor_v, rotation_tensor_w, axes=([3],[2])), axes=([3],[2]))
         # rotation_matrix = rotation_matrix_u.dot(rotation_matrix_v).dot(rotation_matrix_w)
-        rotated_control_points_local_frame_without_translations = np.zeros_like(affine_control_points_local_frame_without_translations)
+        rotated_coefficients_local_frame_without_translations = np.zeros_like(affine_coefficients_local_frame_without_translations)
         for i in range(self.num_sections):
             # Combine x,y,z rotation maps
             rotation_tensor[i,:,:] = rotation_tensor_u[i].dot(rotation_tensor_v[i]).dot(rotation_tensor_w[i])
             # Apply rotation to section
-            rotated_points = np.tensordot(rotation_tensor[i,:,:], affine_control_points_local_frame_without_translations[i,:,:,:], axes=([-1],[-1]))
-            rotated_control_points_local_frame_without_translations[i,:,:,:] = np.moveaxis(rotated_points, 0, -1)
+            rotated_points = np.tensordot(rotation_tensor[i,:,:], affine_coefficients_local_frame_without_translations[i,:,:,:], axes=([-1],[-1]))
+            rotated_coefficients_local_frame_without_translations[i,:,:,:] = np.moveaxis(rotated_points, 0, -1)
 
 
         # # Apply rotation matrices to each section
-        # rotated_control_points_local_frame_without_translations = rotation_tensor.dot(affine_control_points_local_frame_without_translations)
+        # rotated_coefficients_local_frame_without_translations = rotation_tensor.dot(affine_coefficients_local_frame_without_translations)
 
         # Add back on translations from the affine transformation
-        rotated_control_points_local_frame_without_translations = np.moveaxis(rotated_control_points_local_frame_without_translations, 0, 2)
-        rotated_control_points_local_frame_axis_moved = rotated_control_points_local_frame_without_translations + translations
-        rotated_control_points_local_frame_reshaped = np.moveaxis(rotated_control_points_local_frame_axis_moved, 2, 0)
-        rotated_control_points_local_frame = rotated_control_points_local_frame_reshaped.reshape((self.num_control_points,NUM_PARAMETRIC_DIMENSIONS))
-        self.rotated_control_points_local_frame = rotated_control_points_local_frame
+        rotated_coefficients_local_frame_without_translations = np.moveaxis(rotated_coefficients_local_frame_without_translations, 0, 2)
+        rotated_coefficients_local_frame_axis_moved = rotated_coefficients_local_frame_without_translations + translations
+        rotated_coefficients_local_frame_reshaped = np.moveaxis(rotated_coefficients_local_frame_axis_moved, 2, 0)
+        rotated_coefficients_local_frame = rotated_coefficients_local_frame_reshaped.reshape((self.num_coefficients,NUM_PARAMETRIC_DIMENSIONS))
+        self.rotated_coefficients_local_frame = rotated_coefficients_local_frame
 
         if plot:
-            self.plot_sections(control_points=rotated_control_points_local_frame, offset_sections=True, plot_embedded_entities=False, opacity=0.75, show=True)
+            self.plot_sections(coefficients=rotated_coefficients_local_frame, offset_sections=True, plot_embedded_entities=False, opacity=0.75, show=True)
 
-        return rotated_control_points_local_frame
+        return rotated_coefficients_local_frame
 
         # Next model will perform rotation back to global frame
 
-    def evaluate_control_points(self, rotated_control_points_local_frame:np.ndarray=None, plot:bool=False):
+    def evaluate_coefficients(self, rotated_coefficients_local_frame:np.ndarray=None, plot:bool=False):
         '''
         Evaluates the control points of the FFD block in original coordinate frame by applying 
         bulk rotation and translation back to original coordinate frame.
         '''
-        if rotated_control_points_local_frame is None:
-            rotated_control_points_local_frame = self.rotated_control_points_local_frame
+        if rotated_coefficients_local_frame is None:
+            rotated_coefficients_local_frame = self.rotated_coefficients_local_frame
         else:
-            self.rotated_control_points_local_frame = rotated_control_points_local_frame
+            self.rotated_coefficients_local_frame = rotated_coefficients_local_frame
         
         NUM_PARAMETRIC_DIMENSIONS = 3
-        control_points_rotated_back_wrong_axis = np.tensordot(self.local_to_global_rotation, rotated_control_points_local_frame, axes=([-1],[-1]))
-        control_points_rotated_back = np.moveaxis(control_points_rotated_back_wrong_axis, 0, 1)
-        control_points_rotated_back_reshaped = control_points_rotated_back.reshape(self.primitive.shape)
+        coefficients_rotated_back_wrong_axis = np.tensordot(self.local_to_global_rotation, rotated_coefficients_local_frame, axes=([-1],[-1]))
+        coefficients_rotated_back = np.moveaxis(coefficients_rotated_back_wrong_axis, 0, 1)
+        coefficients_rotated_back_reshaped = coefficients_rotated_back.reshape(self.primitive.shape)
 
-        control_points_reshaped = control_points_rotated_back_reshaped + self.local_to_global_translations
-        control_points = control_points_reshaped.reshape((self.num_control_points, NUM_PARAMETRIC_DIMENSIONS))
-        self.control_points = control_points
+        coefficients_reshaped = coefficients_rotated_back_reshaped + self.local_to_global_translations
+        coefficients = coefficients_reshaped.reshape((self.num_coefficients, NUM_PARAMETRIC_DIMENSIONS))
+        self.coefficients = coefficients
 
         if plot:
-            self.plot_sections(control_points=control_points, offset_sections=False, plot_embedded_entities=False, opacity=0.75, show=True)
+            self.plot_sections(coefficients=coefficients, offset_sections=False, plot_embedded_entities=False, opacity=0.75, show=True)
 
-        return control_points
+        return coefficients
 
 
-    def evaluate_embedded_entities(self, control_points=None, plot=False):
+    def evaluate_embedded_entities(self, coefficients=None, plot=False):
         '''
         Evaluates the entities embedded within the FFD block from an input of the FFD control points.
         '''
-        if control_points is None:
-            control_points = self.control_points
+        if coefficients is None:
+            coefficients = self.coefficients
 
-        embedded_entities = self.embedded_entities_map.dot(control_points)
+        embedded_entities = self.embedded_entities_map.dot(coefficients)
 
         embedded_entity_starting_index = 0
         for embedded_entity in list(self.embedded_entities.values()):
             embedded_entity_ending_index = embedded_entity_starting_index + np.cumprod(embedded_entity.shape[:-1])[-1]
-            embedded_entity.control_points = embedded_entities[embedded_entity_starting_index:embedded_entity_ending_index]
+            embedded_entity.coefficients = embedded_entities[embedded_entity_starting_index:embedded_entity_ending_index]
             embedded_entity_starting_index = embedded_entity_ending_index
 
         if plot:
@@ -942,7 +942,7 @@ class SRBGFFDBlock(FFDBlock):
             for embedded_entity in list(self.embedded_entities.values()):
                 plotting_elements = embedded_entity.plot(plot_types=['mesh'], opacity=0.5, additional_plotting_elements=plotting_elements, show=False)
             plotting_elements.append(vedo.Points(embedded_entities, r=5).color('green'))
-            self.plot_sections(control_points=control_points, offset_sections=False, plot_embedded_entities=False, opacity=0.3, 
+            self.plot_sections(coefficients=coefficients, offset_sections=False, plot_embedded_entities=False, opacity=0.3, 
                     additional_plotting_elements=plotting_elements, show=True)
 
         return embedded_entities

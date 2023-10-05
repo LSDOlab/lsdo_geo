@@ -50,10 +50,10 @@ class LSPrimitive:
         '''
         Evaluates the derivative of the level set function at the parametric coordinates.
         '''
-        # num_control_points = self.shape[0] * self.shape[1]
+        # num_coefficients = self.shape[0] * self.shape[1]
         
         # basis1 = self.compute_derivative_evaluation_map(u_vec, v_vec)
-        # derivs1 = basis1.dot(self.control_points.reshape((num_control_points, 3)))
+        # derivs1 = basis1.dot(self.coefficients.reshape((num_coefficients, 3)))
 
         # return derivs1 
         pass
@@ -62,10 +62,10 @@ class LSPrimitive:
         '''
         Evaluates the second derivative of the level set function at the parametric coordinates.
         '''
-        # num_control_points = self.shape[0] * self.shape[1]
+        # num_coefficients = self.shape[0] * self.shape[1]
         
         # basis2 = self.compute_second_derivative_evaluation_map(u_vec, v_vec)
-        # derivs2 = basis2.dot(self.control_points.reshape((num_control_points, 3)))
+        # derivs2 = basis2.dot(self.coefficients.reshape((num_coefficients, 3)))
 
         # return derivs2
         pass

@@ -20,27 +20,33 @@ class BSpline(m3l.Function):
     '''
     B-spline class
     '''
-    space : BSplineSpace
+    space : BSplineSpace    # Just overwriting the type hint for the space attribute
     num_physical_dimensions : int
 
     def __post_init__(self):
-        self.num_coefficients = len(self.coefficients)
+        self.coefficients_shape = self.space.parametric_coefficients_shape + (self.num_physical_dimensions,)
+        self.num_coefficients = np.prod(self.coefficients_shape)
+        self.num_coefficient_elements = self.space.num_coefficient_elements
 
-        # self.coefficients = self.control_points
-        self.control_points = self.coefficients
-
-        self.control_points_shape = self.space.control_points_shape
+        if len(self.coefficients) != self.num_coefficients:
+            if np.prod(self.coefficients.shape) == np.prod(self.coefficients_shape):
+                self.coefficients = self.coefficients.reshape((-1,))
+            else:
+                raise Exception("Coefficients size doesn't match the function space's coefficients shape.")
 
         # Promote attributes to make this object a bit more intuitive
-        self.order = self.space.order
-        self.knots = self.space.knots
-        self.num_control_points = self.space.num_control_points
-        self.num_parametric_dimensions = self.space.num_parametric_dimensions
+        # Not doing this for now to make objects more lightweight
+        # self.order = self.space.order
+        # self.knots = self.space.knots
+        # self.num_coefficients = self.space.num_coefficients
+        # self.num_parametric_dimensions = self.space.num_parametric_dimensions
 
     
     def evaluate(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> am.MappedArray:
         basis_matrix = self.space.compute_evaluation_map(parametric_coordinates, parametric_derivative_order)
-        output = basis_matrix.dot(self.control_points.reshape((self.num_control_points, self.num_physical_dimensions)))
+        num_physical_dimensions = self.num_physical_dimensions
+        num_coefficient_elements = np.prod(self.space.parametric_coefficients_shape)
+        output = basis_matrix.dot(self.coefficients.reshape((num_coefficient_elements, num_physical_dimensions)))
 
         return output
 
@@ -66,22 +72,22 @@ class BSpline(m3l.Function):
         
         u_vec_flattened = np.zeros(num_points)
         v_vec_flattened = np.zeros(num_points)
-        num_control_points = self.num_control_points
+        num_coefficients = self.num_coefficients
 
         compute_surface_projection(
-            np.array([self.order[0]]), np.array([self.control_points_shape[0]]),
-            np.array([self.order[1]]), np.array([self.control_points_shape[1]]),
+            np.array([self.space.order[0]]), np.array([self.coefficients_shape[0]]),
+            np.array([self.space.order[1]]), np.array([self.coefficients_shape[1]]),
             num_points, max_iterations,
             flattened_points, 
-            self.control_points.reshape((-1,)),
-            self.knots[self.space.knot_indices[0]].copy(), self.knots[self.space.knot_indices[1]].copy(),
+            self.coefficients.reshape((-1,)),
+            self.space.knots[self.space.knot_indices[0]].copy(), self.space.knots[self.space.knot_indices[1]].copy(),
             u_vec_flattened, v_vec_flattened, grid_search_density,
-            direction.reshape((-1,)), np.zeros((num_points,), dtype=int), self.control_points.reshape((1, -1))
+            direction.reshape((-1,)), np.zeros((num_points,), dtype=int), self.coefficients.reshape((1, -1))
         )
 
-        parametric_coordinates = np.hstack((u_vec_flattened.reshape((1,-1)), v_vec_flattened.reshape((1,-1))))
-        map = self.space.compute_evaluation_map(parametric_coordinates)
-        projected_points = am.array(input=self.control_points.reshape((num_control_points,-1)), linear_map=map, shape=input_shape)
+        parametric_coordinates = np.hstack((u_vec_flattened.reshape((-1,1)), v_vec_flattened.reshape((-1,1))))
+        map = self.space.compute_evaluation_map(parametric_coordinates, expansion_factor=self.num_physical_dimensions)
+        projected_points = am.array(input=self.coefficients, linear_map=map, shape=input_shape)
 
         if plot:
             # Plot the surfaces that are projected onto
@@ -90,8 +96,8 @@ class BSpline(m3l.Function):
             # Plot 
             plotting_points = []
             flattened_projected_points = (projected_points.value).reshape((num_points, -1)) # last axis usually has length 3 for x,y,z
-            plotting_primitive_control_points = vedo.Points(flattened_projected_points, r=12, c='blue')  # TODO make this (1,3) instead of (3,)
-            plotting_points.append(plotting_primitive_control_points)
+            plotting_primitive_coefficients = vedo.Points(flattened_projected_points, r=12, c='blue')  # TODO make this (1,3) instead of (3,)
+            plotting_points.append(plotting_primitive_coefficients)
             plotter.show(primitive_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
 
         # u_vec = u_vec_flattened.reshape(tuple(input_shape[:-1],)+(1,))
@@ -105,7 +111,7 @@ class BSpline(m3l.Function):
             return projected_points
 
 
-    def plot(self, point_types:list=['evaluated_points', 'control_points'], plot_types:list=['mesh'],
+    def plot(self, point_types:list=['evaluated_points', 'coefficients'], plot_types:list=['mesh'],
               opacity:float=1., color:str='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
         '''
         Plots the B-spline Surface.
@@ -113,7 +119,7 @@ class BSpline(m3l.Function):
         Parameters
         -----------
         points_type : list
-            The type of points to be plotted. {evaluated_points, control_points}
+            The type of points to be plotted. {evaluated_points, coefficients}
         plot_types : list
             The type of plot {mesh, wireframe, point_cloud}
         opactity : float
@@ -131,6 +137,8 @@ class BSpline(m3l.Function):
         
         plotting_elements = additional_plotting_elements.copy()
 
+        num_physical_dimensions = self.num_physical_dimensions
+
         for point_type in point_types:
             if point_type == 'evaluated_points':
                 num_points_u = 25
@@ -140,11 +148,11 @@ class BSpline(m3l.Function):
                 parametric_coordinates = np.hstack((u_vec, v_vec))
                 num_plotting_points = num_points_u * num_points_v
                 plotting_points = self.evaluate(parametric_coordinates=parametric_coordinates)
-                plotting_points_shape = (num_points_u, num_points_v, self.num_physical_dimensions)
-            elif point_type == 'control_points':
-                plotting_points_shape = self.control_points_shape + (self.num_physical_dimensions,)
+                plotting_points_shape = (num_points_u, num_points_v, num_physical_dimensions)
+            elif point_type == 'coefficients':
+                plotting_points_shape = self.coefficients_shape
                 # num_plotting_points = np.cumprod(plotting_points_shape[:-1])[-1]
-                plotting_points = self.control_points.reshape((-1,self.num_physical_dimensions))
+                plotting_points = self.coefficients.reshape((-1,num_physical_dimensions))
 
             if 'point_cloud' in plot_types:
                 plotting_elements.append(vedo.Points(plotting_points).opacity(opacity).color('darkred'))
@@ -178,7 +186,7 @@ class BSpline(m3l.Function):
 
         if show:
             plotter = vedo.Plotter()
-            from vedo import Light
+            # from vedo import Light
             # light = Light([-1,0,0], c='w', intensity=1)
             # plotter = vedo.Plotter(size=(3200,1000))
             # plotter.show(plotting_elements, light, f'B-spline Surface: {self.name}', axes=1, viewup="z", interactive=True)
@@ -191,16 +199,18 @@ class BSpline(m3l.Function):
 if __name__ == "__main__":
     from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
 
-    num_control_points = 10
+    num_coefficients = 10
+    num_physical_dimensions = 3
     order = 4
     space_of_cubic_b_spline_surfaces_with_10_cp = BSplineSpace(name='cubic_b_spline_surfaces_10_cp', order=(order,order),
-                                                              control_points_shape=(num_control_points,num_control_points))
+                                                              parametric_coefficients_shape=(num_coefficients,num_coefficients))
 
-    control_points_line = np.linspace(0., 1., num_control_points)
-    control_points_x, control_points_y = np.meshgrid(control_points_line,control_points_line)
-    control_points = np.stack((control_points_x, control_points_y, 0.1*np.random.rand(10,10)), axis=-1)
+    coefficients_line = np.linspace(0., 1., num_coefficients)
+    coefficients_x, coefficients_y = np.meshgrid(coefficients_line,coefficients_line)
+    coefficients = np.stack((coefficients_x, coefficients_y, 0.1*np.random.rand(10,10)), axis=-1)
 
-    b_spline = BSpline(name='test_b_spline', space=space_of_cubic_b_spline_surfaces_with_10_cp, coefficients=control_points, num_physical_dimensions=3)
+    b_spline = BSpline(name='test_b_spline', space=space_of_cubic_b_spline_surfaces_with_10_cp, coefficients=coefficients,
+                        num_physical_dimensions=num_physical_dimensions)
 
     plotting_elements = b_spline.plot(point_types=['evaluated_points'], plot_types=['mesh'])
 

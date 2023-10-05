@@ -13,32 +13,32 @@ class LocalToGlobalCSDL(csdl.Model):
     def define(self):
         ffd_set = self.parameters['ffd_set']
 
-        rotated_ffd_control_points = self.declare_variable('rotated_ffd_control_points', val=ffd_set.rotated_control_points_local_frame)
+        rotated_ffd_coefficients = self.declare_variable('rotated_ffd_coefficients', val=ffd_set.rotated_coefficients_local_frame)
 
         # Not vectorized for now for simplicity and to avoid storage of very large tensors
         NUM_PARAMETRIC_DIMENSIONS = 3
         if ffd_set.num_dof != 0:
-            control_points = self.create_output('ffd_control_points', shape=(ffd_set.num_control_points,NUM_PARAMETRIC_DIMENSIONS))
+            coefficients = self.create_output('ffd_coefficients', shape=(ffd_set.num_coefficients,NUM_PARAMETRIC_DIMENSIONS))
         else:   # Purely so CSDL doesn't throw an error for the model not doing anything
             self.create_input('dummy_input_local_to_global', val=0.)
         starting_index = 0
         for ffd_block in list(ffd_set.active_ffd_blocks.values()):
-            ending_index = starting_index + ffd_block.num_control_points
+            ending_index = starting_index + ffd_block.num_coefficients
 
-            ffd_block_rotated_control_points = rotated_ffd_control_points[starting_index:ending_index,:]
+            ffd_block_rotated_coefficients = rotated_ffd_coefficients[starting_index:ending_index,:]
 
             # make mapping a csdl variable in order to use it for matmat
             global_to_local_rotation = self.create_input(f'{ffd_block.name}_local_to_global_rotation', ffd_block.local_to_global_rotation.T)
             # Apply rotation to global frame
-            control_points_rotated_global_frame = csdl.matmat(ffd_block_rotated_control_points, global_to_local_rotation)
-            # control_points_rotated_back = csdl.reorder_axes(control_points_rotated_back_wrong_axis, 'ij->ji')
-            control_points_rotated_back_reshaped = csdl.reshape(control_points_rotated_global_frame, ffd_block.primitive.shape)
+            coefficients_rotated_global_frame = csdl.matmat(ffd_block_rotated_coefficients, global_to_local_rotation)
+            # coefficients_rotated_back = csdl.reorder_axes(coefficients_rotated_back_wrong_axis, 'ij->ji')
+            coefficients_rotated_back_reshaped = csdl.reshape(coefficients_rotated_global_frame, ffd_block.primitive.shape)
 
             # Apply translation to global frame
-            control_points_reshaped = control_points_rotated_back_reshaped + ffd_block.local_to_global_translations
-            ffd_block_control_points = csdl.reshape(control_points_reshaped, (ffd_block.num_control_points, NUM_PARAMETRIC_DIMENSIONS))
+            coefficients_reshaped = coefficients_rotated_back_reshaped + ffd_block.local_to_global_translations
+            ffd_block_coefficients = csdl.reshape(coefficients_reshaped, (ffd_block.num_coefficients, NUM_PARAMETRIC_DIMENSIONS))
 
-            control_points[starting_index:ending_index,:] = ffd_block_control_points
+            coefficients[starting_index:ending_index,:] = ffd_block_coefficients
             starting_index = ending_index
 
 
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
     wing_geometry_primitives = wing.get_geometry_primitives()
-    wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+    wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_coefficients=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
     wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_b_spline_volume, embedded_entities=wing_geometry_primitives)
 
     wing_ffd_block.add_rotation_u(name='twist_distribution', order=4, num_dof=10, value=-1/2*np.array([0., 0.11, 0.22, 0.33, 0.44, 0.44, 0.33, 0.22, 0.11, 0.]))
@@ -86,22 +86,22 @@ if __name__ == "__main__":
 
     ffd_set.setup(project_embedded_entities=False)
     affine_section_properties = ffd_set.evaluate_affine_section_properties()
-    affine_deformed_ffd_control_points = ffd_set.evaluate_affine_block_deformations()
+    affine_deformed_ffd_coefficients = ffd_set.evaluate_affine_block_deformations()
     rotational_section_properties = ffd_set.evaluate_rotational_section_properties()
-    rotated_ffd_control_points = ffd_set.evaluate_rotational_block_deformations()
-    ffd_control_points = ffd_set.evaluate_control_points()
-    # print('Python evaluation: FFD control_points: \n', rotated_ffd_control_points)
+    rotated_ffd_coefficients = ffd_set.evaluate_rotational_block_deformations()
+    ffd_coefficients = ffd_set.evaluate_coefficients()
+    # print('Python evaluation: FFD coefficients: \n', rotated_ffd_coefficients)
 
     sim = Simulator(LocalToGlobalCSDL(ffd_set=ffd_set))
     sim.run()
     # sim.visualize_implementation()        # Only csdl_om can do this
 
-    # print('CSDL evaluation: FFD control_points: \n', sim['ffd_control_points'])
-    print("Python and CSDL difference", np.linalg.norm(sim['ffd_control_points'] - ffd_control_points))
+    # print('CSDL evaluation: FFD coefficients: \n', sim['ffd_coefficients'])
+    print("Python and CSDL difference", np.linalg.norm(sim['ffd_coefficients'] - ffd_coefficients))
 
-    wing_ffd_block.plot_sections(control_points=sim['ffd_control_points'].reshape(wing_ffd_b_spline_volume.shape), plot_embedded_entities=False, opacity=0.75, show=True)
-    wing_ffd_block.plot_sections(control_points=ffd_control_points.reshape(wing_ffd_b_spline_volume.shape), plot_embedded_entities=False, opacity=0.75, show=True)
-    # wing_ffd_b_spline_volume.control_points = sim['rotated_ffd_control_points'].reshape(wing_ffd_b_spline_volume.shape)
+    wing_ffd_block.plot_sections(coefficients=sim['ffd_coefficients'].reshape(wing_ffd_b_spline_volume.shape), plot_embedded_entities=False, opacity=0.75, show=True)
+    wing_ffd_block.plot_sections(coefficients=ffd_coefficients.reshape(wing_ffd_b_spline_volume.shape), plot_embedded_entities=False, opacity=0.75, show=True)
+    # wing_ffd_b_spline_volume.coefficients = sim['rotated_ffd_coefficients'].reshape(wing_ffd_b_spline_volume.shape)
     # wing_ffd_b_spline_volume.plot()
     
 
@@ -125,12 +125,12 @@ if __name__ == "__main__":
     from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
     wing_geometry_primitives = wing.get_geometry_primitives()
-    wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+    wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing_geometry_primitives, num_coefficients=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
     wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_b_spline_volume, embedded_entities=wing_geometry_primitives)
     wing_ffd_block.add_rotation_u(name='twist_distribution', order=4, num_dof=10, value=-1/2*np.array([0., 0.11, 0.22, 0.33, 0.44, 0.44, 0.33, 0.22, 0.11, 0.]))
 
     horizontal_stabilizer_geometry_primitives = horizontal_stabilizer.get_geometry_primitives()
-    horizontal_stabilizer_ffd_b_spline_volume = create_cartesian_enclosure_volume(horizontal_stabilizer_geometry_primitives, num_control_points=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
+    horizontal_stabilizer_ffd_b_spline_volume = create_cartesian_enclosure_volume(horizontal_stabilizer_geometry_primitives, num_coefficients=(11, 2, 2), order=(4,2,2), xyz_to_uvw_indices=(1,0,2))
     horizontal_stabilizer_ffd_block = SRBGFFDBlock(name='horizontal_stabilizer_ffd_block', primitive=horizontal_stabilizer_ffd_b_spline_volume, embedded_entities=horizontal_stabilizer_geometry_primitives)
     horizontal_stabilizer_ffd_block.add_rotation_u(name='horizontal_stabilizer_twist_distribution', order=1, num_dof=1, value=np.array([np.pi/10]))
 
@@ -144,23 +144,23 @@ if __name__ == "__main__":
     ffd_set.setup(project_embedded_entities=False)
     affine_section_properties = ffd_set.evaluate_affine_section_properties()
     rotational_section_properties = ffd_set.evaluate_rotational_section_properties()
-    affine_deformed_ffd_control_points = ffd_set.evaluate_affine_block_deformations()
-    rotated_ffd_control_points = ffd_set.evaluate_rotational_block_deformations()
-    ffd_control_points = ffd_set.evaluate_control_points()
-    # print('Python evaluation: FFD control points: \n', rotated_ffd_control_points)
+    affine_deformed_ffd_coefficients = ffd_set.evaluate_affine_block_deformations()
+    rotated_ffd_coefficients = ffd_set.evaluate_rotational_block_deformations()
+    ffd_coefficients = ffd_set.evaluate_coefficients()
+    # print('Python evaluation: FFD control points: \n', rotated_ffd_coefficients)
 
     sim = Simulator(LocalToGlobalCSDL(ffd_set=ffd_set))
     sim.run()
     # sim.visualize_implementation()    $ Only usable with csdl_om
 
-    # print('CSDL evaluation: FFD control_points: \n', sim['ffd_control_points'])
-    print("Python and CSDL difference", np.linalg.norm(sim['ffd_control_points'] - ffd_control_points))
+    # print('CSDL evaluation: FFD coefficients: \n', sim['ffd_coefficients'])
+    print("Python and CSDL difference", np.linalg.norm(sim['ffd_coefficients'] - ffd_coefficients))
 
-    wing_ffd_block.plot_sections(control_points=(sim['ffd_control_points'][0:11*2*2,:]).reshape(wing_ffd_b_spline_volume.shape), plot_embedded_entities=False, opacity=0.75, show=True)
-    horizontal_stabilizer_ffd_block.plot_sections(control_points=(sim['ffd_control_points'][11*2*2:,:]).reshape(horizontal_stabilizer_ffd_b_spline_volume.shape), plot_embedded_entities=False, opacity=0.75, show=True)
+    wing_ffd_block.plot_sections(coefficients=(sim['ffd_coefficients'][0:11*2*2,:]).reshape(wing_ffd_b_spline_volume.shape), plot_embedded_entities=False, opacity=0.75, show=True)
+    horizontal_stabilizer_ffd_block.plot_sections(coefficients=(sim['ffd_coefficients'][11*2*2:,:]).reshape(horizontal_stabilizer_ffd_b_spline_volume.shape), plot_embedded_entities=False, opacity=0.75, show=True)
 
 
-    # wing_ffd_b_spline_volume.control_points = (sim['rotated_ffd_control_points'][0:11*2*2,:]).reshape(wing_ffd_b_spline_volume.shape)
+    # wing_ffd_b_spline_volume.coefficients = (sim['rotated_ffd_coefficients'][0:11*2*2,:]).reshape(wing_ffd_b_spline_volume.shape)
     # wing_ffd_b_spline_volume.plot()
-    # horizontal_stabilizer_ffd_b_spline_volume.control_points = (sim['rotated_ffd_control_points'][11*2*2:,:]).reshape(horizontal_stabilizer_ffd_b_spline_volume.shape)
+    # horizontal_stabilizer_ffd_b_spline_volume.coefficients = (sim['rotated_ffd_coefficients'][11*2*2:,:]).reshape(horizontal_stabilizer_ffd_b_spline_volume.shape)
     # horizontal_stabilizer_ffd_b_spline_volume.plot()

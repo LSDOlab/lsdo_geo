@@ -104,7 +104,7 @@ geo.plot_meshes(plotting_points, mesh_plot_types=['point_cloud'], primitives_opa
 from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_functions import create_cartesian_enclosure_volume
 from lsdo_geo.caddee_core.system_parameterization.free_form_deformation.ffd_block import SRBGFFDBlock
 
-wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing.geometry_primitives, num_control_points=(2, 10, 2), order=(2,4,2))
+wing_ffd_b_spline_volume = create_cartesian_enclosure_volume(wing.geometry_primitives, num_coefficients=(2, 10, 2), order=(2,4,2))
 wing_ffd_block = SRBGFFDBlock(name='wing_ffd_block', primitive=wing_ffd_b_spline_volume, embedded_entities=wing.geometry_primitives)
 wing_ffd_block.plot(plot_embedded_entites=True)
 

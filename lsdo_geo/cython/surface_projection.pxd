@@ -8,8 +8,8 @@ from lsdo_geo.cython.basis_matrix_surface cimport get_basis_surface_matrix
 
 
 cdef compute_surface_projection(
-    long[:] surfs_order_u, long[:] surfs_num_control_points_u,
-    long[:] surfs_order_v, long[:] surfs_num_control_points_v,
+    long[:] surfs_order_u, long[:] surfs_num_coefficients_u,
+    long[:] surfs_order_v, long[:] surfs_num_coefficients_v,
     int num_points, int max_iter,
     double* pts, double* cps,
     double* knot_vector_u, double* knot_vector_v,

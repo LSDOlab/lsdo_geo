@@ -8,7 +8,7 @@ from lsdo_geo.cython.basis_matrix_curve cimport get_basis_curve_matrix
 
 
 cdef compute_curve_projection(
-    int order_u, int num_control_points_u,
+    int order_u, int num_coefficients_u,
     int num_points, int max_iter,
     double* pts, double* cps,
     double* u_vec, double* knot_vector,

@@ -8,7 +8,7 @@ from get_open_uniform_py import get_open_uniform
 
 
 order = 4
-num_control_points = 6
+num_coefficients = 6
 num_points = 10
 
 nnz = num_points * order
@@ -18,23 +18,23 @@ col_indices = np.zeros(nnz, np.int32)
 
 u_vec = np.linspace(0., 1., num_points)
 
-knot_vector = np.zeros(num_control_points+order)
-get_open_uniform(order, num_control_points, knot_vector)
+knot_vector = np.zeros(num_coefficients+order)
+get_open_uniform(order, num_coefficients, knot_vector)
 
 get_basis_curve_matrix(
-    order, num_control_points, 0, u_vec, knot_vector,
+    order, num_coefficients, 0, u_vec, knot_vector,
     num_points, data, row_indices, col_indices,
 )
 
 basis0 = sps.csc_matrix(
     (data, (row_indices, col_indices)), 
-    shape=(num_points, num_control_points),
+    shape=(num_points, num_coefficients),
 )
 
-cps = np.zeros((num_control_points, 3))
-cps[:, 0] = np.linspace(0., 1., num_control_points)
-cps[:, 1] = np.linspace(0., 1., num_control_points)
-cps = cps.reshape((num_control_points, 3))
+cps = np.zeros((num_coefficients, 3))
+cps[:, 0] = np.linspace(0., 1., num_coefficients)
+cps[:, 1] = np.linspace(0., 1., num_coefficients)
+cps = cps.reshape((num_coefficients, 3))
 
 pts = basis0.dot(cps)
 
@@ -50,10 +50,10 @@ points = np.random.rand(num_points, 3)
 u_vec = 0.5 * np.ones(num_points)
 
 compute_curve_projection(
-    order, num_control_points,
+    order, num_coefficients,
     num_points, max_iter,
     points.reshape(num_points * 3), 
-    cps.reshape(num_control_points * 3),
+    cps.reshape(num_coefficients * 3),
     u_vec, knot_vector, 50
 )
 
@@ -64,15 +64,15 @@ col_indices = np.zeros(nnz, np.int32)
 
 
 get_basis_curve_matrix(
-    order, num_control_points, 0, u_vec, knot_vector,
+    order, num_coefficients, 0, u_vec, knot_vector,
     num_points, data, row_indices, col_indices,
 )
 basis0 = sps.csc_matrix(
     (data, (row_indices, col_indices)), 
-    shape=(num_points, num_control_points),
+    shape=(num_points, num_coefficients),
 )
 
-cps = cps.reshape((num_control_points, 3))
+cps = cps.reshape((num_coefficients, 3))
 
 pts = basis0.dot(cps)
 

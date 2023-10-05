@@ -9,7 +9,7 @@
 
 
 cdef compute_curve_projection(
-    int order_u, int num_control_points_u,
+    int order_u, int num_coefficients_u,
     int num_points, int max_iter,
     double* pts, double* cps,
     double* u_vec, double* knot_vector,
@@ -27,7 +27,7 @@ cdef compute_curve_projection(
     cdef double *basis_u2 = <double *> malloc(order_u * sizeof(double))
 
     #cdef double *knot_vector = <double *> malloc(
-    #    (order_u + num_control_points_u) * sizeof(double))
+    #    (order_u + num_coefficients_u) * sizeof(double))
 
 
 
@@ -38,7 +38,7 @@ cdef compute_curve_projection(
 
 
 
-    # get_open_uniform(order_u, num_control_points_u, knot_vector)
+    # get_open_uniform(order_u, num_coefficients_u, knot_vector)
 
 
     #tom's initial guess implementation
@@ -55,7 +55,7 @@ cdef compute_curve_projection(
             x = a/n_guesses
 
             i_start_u = get_basis0(
-                order_u, num_control_points_u, x, knot_vector, basis_u0)
+                order_u, num_coefficients_u, x, knot_vector, basis_u0)
 
             for k in range(3): 
                 P00[k] = 0.
@@ -88,11 +88,11 @@ cdef compute_curve_projection(
         for i_iter in range(max_iter):
 
             i_start_u = get_basis0(
-                order_u, num_control_points_u, x, knot_vector, basis_u0)
+                order_u, num_coefficients_u, x, knot_vector, basis_u0)
             i_start_u = get_basis1(
-                order_u, num_control_points_u, x, knot_vector, basis_u1)
+                order_u, num_coefficients_u, x, knot_vector, basis_u1)
             i_start_u = get_basis2(
-                order_u, num_control_points_u, x, knot_vector, basis_u2)
+                order_u, num_coefficients_u, x, knot_vector, basis_u2)
 
             for k in range(3):
                 P00[k] = 0.
