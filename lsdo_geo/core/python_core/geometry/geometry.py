@@ -196,10 +196,10 @@ if __name__ == "__main__":
     
     left_wing.plot(color=left_wing_pressure_function)
 
-    # IMPLEMENT LINSPACE IN M3L
-    # DO "MESH EVALUATION(?)" -Project should return coordinates (not M3L), then
-    #                                  evaluate geometry with coordinates after parameterization has been evaluated.
     # DO ACTUATIONS NEXT
+    # -- Should be able to actuate meshes/control/points/FFD, whatever. It should just take in points and rotate them around an axis.
+    # ---- Considering this, it seems like actuate should be a general function (geometry_functions.py)
+    # -- Do I want to create the framework of creating actuators, etc. or just rotate around / translate across an arbitrary axis?
     # THEN DO PYTHON FFD, PYTHON FFD SECTIONAL PARAMETERIZATION, THEN PYTHON FFD B-SPLINE SECTIONAL PARAMETERIZATION
     # NOTE: THE B-SPLINE SECTIONAL PARAMETERIZATION SHOULD JUST BE A STRAIGHT B-SPLINE PARAMETERIZATION, NOTHING SPECIFIC TO FFD
     # THEN DO INNER OPTIMIZATION
