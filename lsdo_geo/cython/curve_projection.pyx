@@ -120,6 +120,13 @@ cdef compute_curve_projection(
                 G = 0.
                 H = 1.
 
+            # print('x', x)
+            # print('P00', P00)
+            # print('P10', P10)
+            # print('P20', P20)
+            # print('G', G)
+            # print('H', H)
+
             N = 1/H
 
             # matvec(1, 1, N, G, dx)

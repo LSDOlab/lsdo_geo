@@ -80,7 +80,7 @@ class BSplineSet(m3l.Function):
 
         self.coefficient_indices = {}
         coefficients_counter = 0
-        for b_spline_name, space_name in self.space.b_spline_to_space_dict.items():
+        for b_spline_name, space_name in self.space.b_spline_to_space.items():
             b_spline_num_coefficients = self.space.spaces[space_name].num_coefficient_elements*self.num_physical_dimensions[b_spline_name]
             self.coefficient_indices[b_spline_name] = np.arange(coefficients_counter, coefficients_counter + b_spline_num_coefficients)
             coefficients_counter += b_spline_num_coefficients
@@ -102,28 +102,262 @@ class BSplineSet(m3l.Function):
 
 
 
-    def evaluate(self, b_spline_name:str, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> am.MappedArray:
-        b_spline_basis = self.space.compute_evaluation_map(
-            b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates, parametric_derivative_order=parametric_derivative_order)
+    # def evaluate(self, b_spline_name:str, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> am.MappedArray:
+    #     b_spline_basis = self.space.compute_evaluation_map(
+    #         b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates, parametric_derivative_order=parametric_derivative_order)
         
-        num_coefficient_elements = self.space.spaces[self.space.b_spline_to_space_dict[b_spline_name]].num_coefficient_elements
-        num_physical_dimensions = self.num_physical_dimensions[b_spline_name]
+    #     num_coefficient_elements = self.space.spaces[self.space.b_spline_to_space[b_spline_name]].num_coefficient_elements
+    #     num_physical_dimensions = self.num_physical_dimensions[b_spline_name]
         
-        # Do I merge b_spline name and parametric coordinates into one coordinates input to encourage the user to think of it that way?
-        #   -- Seems a bit inconvenient to work with, but working with sets like this is not easy anyway.
-        #   -- Doing this would allow to have one dictionary/list/? of coordinates instead of one for each B-spline.
-        #   -- My reaction right now is this is fairly intuitive.
-        #       -- Hesitancy is what object would this be? Each coordinate should have [str,float,float,float] for b_spline_name, u, v, w
-        # Is this even worth the effort? When would someone use this?
+    #     # Do I merge b_spline name and parametric coordinates into one coordinates input to encourage the user to think of it that way?
+    #     #   -- Seems a bit inconvenient to work with, but working with sets like this is not easy anyway.
+    #     #   -- Doing this would allow to have one dictionary/list/? of coordinates instead of one for each B-spline.
+    #     #   -- My reaction right now is this is fairly intuitive.
+    #     #       -- Hesitancy is what object would this be? Each coordinate should have [str,float,float,float] for b_spline_name, u, v, w
+    #     # Is this even worth the effort? When would someone use this?
 
-        b_spline_coefficients = self.coefficients[self.coefficient_indices[b_spline_name]].reshape(
-            (num_coefficient_elements, num_physical_dimensions))
-        # points = basis0.dot(b_spline_coefficients.reshape((num_coefficients, self.num_physical_dimensions)))
-        points = b_spline_basis.dot(b_spline_coefficients)
+    #     b_spline_coefficients = self.coefficients[self.coefficient_indices[b_spline_name]].reshape(
+    #         (num_coefficient_elements, num_physical_dimensions))
+    #     # points = basis0.dot(b_spline_coefficients.reshape((num_coefficients, self.num_physical_dimensions)))
+    #     points = b_spline_basis.dot(b_spline_coefficients)
 
-        # NOTE: This should probably return a MappedArray (Actually, M3L so this is a valid M3L operation)
-        return points
+    #     # NOTE: This should probably return a MappedArray (Actually, M3L so this is a valid M3L operation)
+    #     return points
+
+    def evaluate(self, parametric_coordinates:list[tuple[str, np.ndarray]], parametric_derivative_order:tuple=None,
+                 plot:bool=False) -> m3l.Variable:
+        '''
+        Evaluates the B-spline set at the given parametric coordinates.
+
+        Parameters
+        ----------
+        parametric_coordinates : list[tuple[str, np.ndarray]]
+            A list of tuples of B-spline names and parametric coordinates to evaluate the B-spline set at.
+        parametric_derivative_order : tuple, optional
+            The order of the parametric derivative to evaluate the B-spline set at.
+        '''
+        evaluation_map = self.compute_evaluation_map(parametric_coordinates=parametric_coordinates,
+                                                     parametric_derivative_order=parametric_derivative_order)
+        
+        evaluation_map = m3l.Variable(name='evaluation_map', shape=evaluation_map.shape, operation=None, 
+            value=evaluation_map)
+
+        if type(self.coefficients) is np.ndarray:
+            coefficients = m3l.Variable(name='b_spline_set_coefficients', shape=self.coefficients.shape, operation=None, 
+                                             value=self.coefficients)
+        else:
+            coefficients = self.coefficients
+
+        matvec_operation = m3l.MatVec()
+        output = matvec_operation.evaluate(evaluation_map, coefficients)
+
+        if plot:
+            # Plot the surfaces that are projected onto
+            # b_splines_to_plot = []
+            # for coordinate in parametric_coordinates:
+            #     if coordinate[0] not in b_splines_to_plot:
+            #         b_splines_to_plot.append(coordinate[0])
+            b_splines_to_plot = self.coefficient_indices.keys()
+
+            plotter = vedo.Plotter()
+            b_spline_meshes = self.plot(b_splines=b_splines_to_plot, opacity=0.25, show=False)
+            # Plot 
+            plotting_points = []
+            # TODO This will break if geometry is not one of the properties. Fix this.
+            flattened_projected_points = (output.value).reshape((-1, 3)) # last axis usually has length 3 for x,y,z
+            plotting_projected_points = vedo.Points(flattened_projected_points, r=12, c='#00C6D7')  # TODO make this (1,3) instead of (3,)
+            plotting_points.append(plotting_projected_points)
+            plotter.show(b_spline_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
+
+        return output
+
+
+    def compute_evaluation_map(self, parametric_coordinates:list[tuple(str,np.ndarray)], parametric_derivative_order:tuple[int]=None,
+                               expand_map_for_physical:bool=True) -> sps.csc_matrix:
+        '''
+        Computes the B-spline set evaluation map at a given parametric coordinates.
+
+        Parameters
+        ----------
+        parametric_coordinates : list[tuple[str, np.ndarray]]
+            A list of tuples of B-spline names and parametric coordinates to evaluate the B-spline set at.
+            list indices correspond to points, tuple str is the B-spline name, and tuple np.ndarray is the parametric coordinates for that point.
+        parametric_derivative_order : tuple, optional
+            The order of the parametric derivative to evaluate the B-spline set at.
+        '''
+        from lsdo_geo.splines.b_splines.b_spline_functions import compute_evaluation_map
+
+        import time
+
+        # Rearrange evaluation into per B-spline instead of per-point to vectorize and make computationally feasible
+        output_size = 0
+        points_for_each_b_spline = {}
+        point_indices = {}
+        for b_spline_name in self.space.b_spline_to_space.keys():
+            b_spline_space = self.space.spaces[self.space.b_spline_to_space[b_spline_name]]
+            points_for_each_b_spline[b_spline_name] = []
+            point_indices[b_spline_name] = []
+
+        for coordinate in parametric_coordinates:
+            b_spline_name = coordinate[0]
+            points_for_each_b_spline[b_spline_name].append(coordinate[1])
+            point_indices[b_spline_name].append(np.arange(output_size, output_size + self.num_physical_dimensions[b_spline_name]))
+
+            output_size += self.num_physical_dimensions[b_spline_name]
+
+        for b_spline_name in self.space.b_spline_to_space.keys():
+            if len(points_for_each_b_spline[b_spline_name]) == 0:
+                continue
+            points_for_each_b_spline[b_spline_name] = np.vstack(points_for_each_b_spline[b_spline_name])
+            point_indices[b_spline_name] = np.hstack(point_indices[b_spline_name])
+
+        # Loop over B-splines, compute the evaluation map, and insert them into the correct location
+        evaluation_map = sps.lil_matrix((output_size, self.num_coefficients))
+        for b_spline_name in self.space.b_spline_to_space.keys():
+            if len(points_for_each_b_spline[b_spline_name]) == 0:
+                continue
+            b_spline_space = self.space.spaces[self.space.b_spline_to_space[b_spline_name]]
+            b_spline_parametric_coordinates = points_for_each_b_spline[b_spline_name]
+
+            if expand_map_for_physical:
+                b_spline_evaluation_map = compute_evaluation_map(parametric_coordinates=b_spline_parametric_coordinates,
+                                                                order=b_spline_space.order,
+                                                                parametric_coefficients_shape=b_spline_space.parametric_coefficients_shape,
+                                                                knots=b_spline_space.knots,
+                                                                parametric_derivative_order=parametric_derivative_order,
+                                                                expansion_factor=self.num_physical_dimensions[b_spline_name])
+            else:
+                b_spline_evaluation_map = compute_evaluation_map(parametric_coordinates=b_spline_parametric_coordinates,
+                                                                order=b_spline_space.order,
+                                                                parametric_coefficients_shape=b_spline_space.parametric_coefficients_shape,
+                                                                knots=b_spline_space.knots,
+                                                                parametric_derivative_order=parametric_derivative_order)
+            evaluation_map[np.ix_(point_indices[b_spline_name], self.coefficient_indices[b_spline_name])] = b_spline_evaluation_map
+
+        # # Loop over points method
+        # evaluation_map = sps.lil_matrix((output_size, self.num_coefficients))
+        # row_counter = 0
+        # import time
+        # # t1 = time.time()
+        # for coordinate in parametric_coordinates:
+        #     t11 = time.time()
+        #     b_spline_name = coordinate[0]
+        #     if b_spline_name not in self.coefficient_indices.keys():
+        #         raise ValueError(f'The B-spline {b_spline_name} is not in this B-spline set.')
+            
+        #     b_spline_parametric_coordinate = coordinate[1]
+
+        #     b_spline_space = self.space.spaces[self.space.b_spline_to_space[b_spline_name]]
+
+            
+        #     t12 = time.time()
+        #     from lsdo_geo.splines.b_splines.b_spline_functions import compute_evaluation_map
+        #     b_spline_evaluation_map = compute_evaluation_map(parametric_coordinates=b_spline_parametric_coordinate,
+        #                                                      order=b_spline_space.order,
+        #                                                      parametric_coefficients_shape=b_spline_space.parametric_coefficients_shape,
+        #                                                      knots=b_spline_space.knots,
+        #                                                      parametric_derivative_order=parametric_derivative_order,
+        #                                                      expansion_factor=self.num_physical_dimensions[b_spline_name]
+        #                                                      )
+            
+        #     t13 = time.time()
+        #     # eval_map_set_input = sps.lil_matrix((b_spline_evaluation_map.shape[0], self.num_coefficients))
+        #     evaluation_map[row_counter:row_counter + self.num_physical_dimensions[b_spline_name], self.coefficient_indices[b_spline_name]] = \
+        #         b_spline_evaluation_map
+        #     # eval_map_set_input = eval_map_set_input.tocsc()
+        #     row_counter += self.num_physical_dimensions[b_spline_name]
+        #     t14 = time.time()
+        #     # point_eval_maps.append(eval_map_set_input)
+        evaluation_map = evaluation_map.tocsc()
+ 
+        return evaluation_map
     
+    def evaluate_grid(self, b_spline_names:list[str]=None, grid_resolution:tuple[int]|dict[str,tuple[int]]|int=(100,),
+                      parametric_derivative_order:tuple=None, return_flattened:bool=True) -> np.ndarray:
+        '''
+        Evaluates the B-spline set at a grid of parametric coordinates.
+
+        Parameters
+        ----------
+        b_spline_names : list[str], optional
+            The names of the B-splines to evaluate the B-spline set at.
+        grid_resolution : tuple[int] | dict, optional
+            The number of points to evaluate in each direction. if dict, the keys are the B-spline names and the values are the grid resolutions.
+        parametric_derivative_order : tuple, optional
+            The order of the parametric derivative to evaluate the B-spline set at.
+        '''
+        from lsdo_geo.splines.b_splines.b_spline_functions import compute_evaluation_map
+
+        if b_spline_names is None:
+            b_spline_names = list(self.space.b_spline_to_space.keys())
+
+        if type(grid_resolution) is dict:
+            if len(grid_resolution.keys()) != len(b_spline_names):
+                raise ValueError('The number of B-spline names does not match the number of grid resolutions.')
+        elif isinstance(grid_resolution, int):
+            grid_resolution = {b_spline_name:grid_resolution for b_spline_name in b_spline_names}
+        elif isinstance(grid_resolution, tuple):
+            grid_resolution = {b_spline_name:grid_resolution for b_spline_name in b_spline_names}
+        else:
+            raise ValueError('Invalid type for grid_resolution.')
+        
+        grid_points = []
+        b_spline_grid_indices = {}
+        b_spline_index = 0
+        for b_spline_name in b_spline_names:
+            if b_spline_name not in self.space.b_spline_to_space.keys():
+                raise ValueError(f'The B-spline {b_spline_name} is not in this B-spline set.')
+            
+            b_spline_space = self.space.spaces[self.space.b_spline_to_space[b_spline_name]]
+            num_parametric_dimensions = len(b_spline_space.order)
+            b_spline_grid_resolution = grid_resolution[b_spline_name]
+
+            if isinstance(b_spline_grid_resolution, int):
+                b_spline_grid_resolution = (b_spline_grid_resolution,)*num_parametric_dimensions
+            if len(b_spline_grid_resolution) != num_parametric_dimensions and len(b_spline_grid_resolution) != 1:
+                raise ValueError(f'The grid resolution {b_spline_grid_resolution} does not match the number of parametric dimensions' + \
+                                 f' {num_parametric_dimensions}.')
+            
+            if len(b_spline_grid_resolution) == 1:
+                b_spline_grid_resolution = (b_spline_grid_resolution[0],)*num_parametric_dimensions
+
+            mesh_grid_input = []
+            for dimension_index in range(num_parametric_dimensions):
+                mesh_grid_input.append(np.linspace(0., 1., b_spline_grid_resolution[dimension_index]))
+
+            parametric_coordinates_tuple = np.meshgrid(*mesh_grid_input, indexing='ij')
+            for dimensions_index in range(num_parametric_dimensions):
+                parametric_coordinates_tuple[dimensions_index] = parametric_coordinates_tuple[dimensions_index].reshape((-1,1))
+
+            parametric_coordinates = np.hstack(parametric_coordinates_tuple)
+            evaluation_map = compute_evaluation_map(parametric_coordinates=parametric_coordinates,
+                                                    order=b_spline_space.order,
+                                                    parametric_coefficients_shape=b_spline_space.parametric_coefficients_shape,
+                                                    knots=b_spline_space.knots,
+                                                    parametric_derivative_order=parametric_derivative_order,
+                                                    expansion_factor=1
+                                                    )
+            b_spline_coefficients = self.coefficients[self.coefficient_indices[b_spline_name]].reshape(
+                (b_spline_space.num_coefficient_elements, self.num_physical_dimensions[b_spline_name]))
+            b_spline_grid_points = evaluation_map.dot(b_spline_coefficients)
+
+
+            if return_flattened:
+                grid_points.append(b_spline_grid_points.reshape((-1,)))
+                b_spline_grid_indices[b_spline_name] = np.arange(b_spline_index, b_spline_index + len(b_spline_grid_points))
+                b_spline_index += len(b_spline_grid_points)
+            else:
+                grid_points.append(b_spline_grid_points)
+                b_spline_grid_indices[b_spline_name] = np.arange(b_spline_index, b_spline_index + b_spline_grid_points.shape[0])
+                b_spline_index += b_spline_grid_points.shape[0]
+
+        if return_flattened:
+            grid_points = np.hstack(grid_points)
+        else:
+            grid_points = np.vstack(grid_points)
+            
+        return grid_points, b_spline_grid_indices
+
     def declare_sub_set(self, sub_set_name:str, b_spline_names:list[str]=None, b_spline_search_names:list[str]=None):
         '''
         Creates a B-spline sub-set. This object points to a sub-set of this larger B-spline set.
@@ -204,7 +438,7 @@ class BSplineSet(m3l.Function):
         '''
         # NOTE/TODO: Consider changing the algorithm to use the connection information to reduce the number of dense grid-searches and
         #   individual projection Newton optimizations.
-        #  TODO Consider parallelizing using Numba, or using the FFD method or in Cython.
+        # TODO: Make this M3L operation and allow for returning parametric coordinates
 
         # steps:
         # 1. Evaluates a coarse grid on every B-spline to find potentially close B-splines for each point
@@ -230,6 +464,9 @@ class BSplineSet(m3l.Function):
 
         if targets is None:
             targets = list(self.coefficient_indices.keys())
+        
+        if len(targets) == 0:
+            raise Exception("No geometry to project on to.")
 
         if type(direction) is am.MappedArray:
             direction = direction.value
@@ -239,26 +476,31 @@ class BSplineSet(m3l.Function):
             direction = np.tile(direction, (points.shape[0], 1))
         
         # Evaluate a coarse grid on every B-spline
-        coarse_grid_points_indices = {}
-        coarse_grid_points = np.zeros((0, num_physical_dimensions))
-        i = 0
-        for b_spline_name in targets:
-            num_parametric_dimensions = self.space.spaces[self.space.b_spline_to_space_dict[b_spline_name]].num_parametric_dimensions
-            dimension_linspace = np.linspace(0., 1., coarse_grid_search_density_parameter)
+        # -- Will manually perform Python evaluation to make it faster
+        # coarse_grid_points_indices = {}
+        # coarse_grid_points = np.zeros((0, num_physical_dimensions))
+        # i = 0
+        # for b_spline_name in targets:
+        #     num_parametric_dimensions = self.space.spaces[self.space.b_spline_to_space[b_spline_name]].num_parametric_dimensions
+        #     dimension_linspace = np.linspace(0., 1., coarse_grid_search_density_parameter)
 
-            mesh_grid_input = []
-            for dimension_index in range(num_parametric_dimensions):
-                mesh_grid_input.append(dimension_linspace)
+        #     mesh_grid_input = []
+        #     for dimension_index in range(num_parametric_dimensions):
+        #         mesh_grid_input.append(dimension_linspace)
 
-            parametric_coordinates_tuple = np.meshgrid(*mesh_grid_input, indexing='ij')
-            for dimensions_index in range(num_parametric_dimensions):
-                parametric_coordinates_tuple[dimensions_index] = parametric_coordinates_tuple[dimensions_index].reshape((-1,1))
+        #     parametric_coordinates_tuple = np.meshgrid(*mesh_grid_input, indexing='ij')
+        #     for dimensions_index in range(num_parametric_dimensions):
+        #         parametric_coordinates_tuple[dimensions_index] = parametric_coordinates_tuple[dimensions_index].reshape((-1,1))
 
-            parametric_coordinates = np.hstack(parametric_coordinates_tuple)
-            b_spline_grid_points = self.evaluate(b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates)
-            coarse_grid_points = np.vstack((coarse_grid_points, b_spline_grid_points))
-            coarse_grid_points_indices[b_spline_name] = np.arange(coarse_grid_search_density_parameter**num_parametric_dimensions) + i
-            i += coarse_grid_search_density_parameter**num_parametric_dimensions
+        #     parametric_coordinates = np.hstack(parametric_coordinates_tuple)
+        #     b_spline_grid_points = self.evaluate(b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates)
+        #     coarse_grid_points = np.vstack((coarse_grid_points, b_spline_grid_points))
+        #     coarse_grid_points_indices[b_spline_name] = np.arange(coarse_grid_search_density_parameter**num_parametric_dimensions) + i
+        #     i += coarse_grid_search_density_parameter**num_parametric_dimensions
+        coarse_grid_points, coarse_grid_points_indices = self.evaluate_grid(b_spline_names=targets,
+                                                                            grid_resolution=(coarse_grid_search_density_parameter,),
+                                                                            parametric_derivative_order=None,
+                                                                            return_flattened=False)
 
         # Get a length scale parameter to determine a tolerance for each point
         points_expanded_coarse = np.repeat(points[:,np.newaxis,:], coarse_grid_points.shape[0], axis=1)
@@ -290,35 +532,40 @@ class BSplineSet(m3l.Function):
                 close_targets_for_this_point[point_index].append(close_b_spline_name)
 
         # Evaluate a fine grid on every B-spline that is close to at least one point
-        fine_grid_points_indices = {}
-        fine_grid_points = np.zeros((0, num_physical_dimensions))
+        # fine_grid_points_indices = {}
+        # fine_grid_points = np.zeros((0, num_physical_dimensions))
         b_spline_length_scales_dict = {}
+        fine_grid_search_density = {}
         i = 0
         for b_spline_name in close_targets:
-            num_parametric_dimensions = self.space.spaces[self.space.b_spline_to_space_dict[b_spline_name]].num_parametric_dimensions
+            num_parametric_dimensions = self.space.spaces[self.space.b_spline_to_space[b_spline_name]].num_parametric_dimensions
             b_spline_length_scales = np.zeros((3,))
             for j in range(3):
                 b_spline_length_scales[j] = np.max(coarse_grid_points[coarse_grid_points_indices[b_spline_name],j]) \
                     - np.min(coarse_grid_points[coarse_grid_points_indices[b_spline_name],j])
             b_spline_length_scale = np.linalg.norm(b_spline_length_scales)
             b_spline_length_scales_dict[b_spline_name] = b_spline_length_scale
-            fine_grid_search_density = int(np.ceil(fine_grid_search_density_parameter*b_spline_length_scale/system_length_scale
+            fine_grid_search_density[b_spline_name] = int(np.ceil(fine_grid_search_density_parameter*b_spline_length_scale/system_length_scale
                                                /num_parametric_dimensions))
-            dimension_linspace = np.linspace(0., 1., fine_grid_search_density)
+            # dimension_linspace = np.linspace(0., 1., fine_grid_search_density)
 
-            mesh_grid_input = []
-            for dimension_index in range(num_parametric_dimensions):
-                mesh_grid_input.append(dimension_linspace)
+            # mesh_grid_input = []
+            # for dimension_index in range(num_parametric_dimensions):
+            #     mesh_grid_input.append(dimension_linspace)
 
-            parametric_coordinates_tuple = np.meshgrid(*mesh_grid_input, indexing='ij')
-            for dimensions_index in range(num_parametric_dimensions):
-                parametric_coordinates_tuple[dimensions_index] = parametric_coordinates_tuple[dimensions_index].reshape((-1,1))
+            # parametric_coordinates_tuple = np.meshgrid(*mesh_grid_input, indexing='ij')
+            # for dimensions_index in range(num_parametric_dimensions):
+            #     parametric_coordinates_tuple[dimensions_index] = parametric_coordinates_tuple[dimensions_index].reshape((-1,1))
 
-            parametric_coordinates = np.hstack(parametric_coordinates_tuple)
-            b_spline_grid_points = self.evaluate(b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates)
-            fine_grid_points = np.vstack((fine_grid_points, b_spline_grid_points))
-            fine_grid_points_indices[b_spline_name] = np.arange(fine_grid_search_density**num_parametric_dimensions) + i
-            i += fine_grid_search_density**num_parametric_dimensions
+            # parametric_coordinates = np.hstack(parametric_coordinates_tuple)
+            # b_spline_grid_points = self.evaluate(b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates)
+            # fine_grid_points = np.vstack((fine_grid_points, b_spline_grid_points))
+            # fine_grid_points_indices[b_spline_name] = np.arange(fine_grid_search_density**num_parametric_dimensions) + i
+            # i += fine_grid_search_density**num_parametric_dimensions
+        fine_grid_points, fine_grid_points_indices = self.evaluate_grid(b_spline_names=close_targets,
+                                                                        grid_resolution=fine_grid_search_density,
+                                                                        parametric_derivative_order=None,
+                                                                        return_flattened=False)
 
         # Find the closest fine grid point to each point
         points_expanded_fine = np.repeat(points[:,np.newaxis,:], fine_grid_points.shape[0], axis=1)
@@ -339,11 +586,11 @@ class BSplineSet(m3l.Function):
         # -- -- If the objective goes down, the branch is followed / logic is repeeated until there are no more branches.
         closest_b_splines = {}
         for i in closest_fine_grid_point_b_spline_names:    # This is a bit tacky, but create B-spline objects to make projections easier
-            b_spline = BSpline(name=i, space=self.space.spaces[self.space.b_spline_to_space_dict[i]], 
+            b_spline = BSpline(name=i, space=self.space.spaces[self.space.b_spline_to_space[i]], 
                                coefficients=self.coefficients[self.coefficient_indices[i]], num_physical_dimensions=self.num_physical_dimensions[i])
             closest_b_splines[i] = b_spline
 
-        projected_points_list = []
+        parametric_coordinates = []
         # TODO: Insert boundary checking and projection onto connected B-splines
         for i in range(num_points):
             point = points[i]
@@ -357,36 +604,27 @@ class BSplineSet(m3l.Function):
                                                          *int(np.prod(np.array(b_spline.space.order)-1))))
             if projection_grid_search_density == 0:
                 projection_grid_search_density = 1
-            projected_point_on_b_spline = b_spline.project(points=point, direction=direction_vector, 
+            projected_point_on_b_spline_parametric_coordinates = b_spline.project(points=point, direction=direction_vector, 
                                                            grid_search_density=projection_grid_search_density,max_iterations=max_iterations,
-                                                           plot=False)
-            
-            # take map of projected point and add columns to fit whole cp vector
-            point_map = sps.lil_matrix((self.num_physical_dimensions[close_b_spline_name], self.num_coefficients))
-            num_physical_dimensions = self.num_physical_dimensions[closest_b_spline_name]
-            point_map[:, self.coefficient_indices[closest_b_spline_name]] = projected_point_on_b_spline.linear_map
-            point_map = point_map.tocsc()
-            projected_point_on_b_spline_set = am.MappedArray(input=self.coefficients, 
-                                                             linear_map=point_map, shape=(1, self.num_physical_dimensions[closest_b_spline_name]))
-            
-            projected_points_list.append(projected_point_on_b_spline_set)            
+                                                           plot=False, return_parametric_coordinates=True)
+            parametric_coordinates.append((closest_b_spline_name, projected_point_on_b_spline_parametric_coordinates))
 
-        projected_points = am.vstack(tuple(projected_points_list))
-        projected_points.reshape(points_shape)
+        # projected_points = self.evaluate(parametric_coordinates=parametric_coordinates)
 
         if plot:
             # Plot the surfaces that are projected onto
             plotter = vedo.Plotter()
             b_spline_meshes = self.plot(b_splines=list(closest_b_splines.keys()), opacity=0.25, show=False)
+            # b_spline_meshes = self.plot(b_splines=list(self.coefficient_indices.keys()), opacity=0.25, show=False)
             # Plot 
             plotting_points = []
-            # TODO This will break if geometry is not one of the properties. Fix this.
+            projected_points = self.evaluate(parametric_coordinates=parametric_coordinates)
             flattened_projected_points = (projected_points.value).reshape((num_points, -1)) # last axis usually has length 3 for x,y,z
             plotting_projected_points = vedo.Points(flattened_projected_points, r=12, c='#00C6D7')  # TODO make this (1,3) instead of (3,)
             plotting_points.append(plotting_projected_points)
             plotter.show(b_spline_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
 
-        return projected_points
+        return parametric_coordinates
 
 
     def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points'], plot_types:list=['mesh'],
@@ -433,13 +671,19 @@ class BSplineSet(m3l.Function):
                     parametric_coordinates = np.hstack((u_vec, v_vec))
                     num_plotting_points = num_points_u * num_points_v
 
-                    plotting_points = self.evaluate(b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates)
+                    set_parametric_coordinates = []
+                    for i in range(num_plotting_points):
+                        set_parametric_coordinates.append((b_spline_name, parametric_coordinates[i,:]))
+
+                    plotting_points, _ = self.evaluate_grid(b_spline_names=[b_spline_name], grid_resolution=(num_points_u, num_points_v),
+                                                         parametric_derivative_order=None, return_flattened=True)
                     plotting_points_shape = (num_points_u, num_points_v, self.num_physical_dimensions[b_spline_name])
 
                     if type(color) is BSplineSet:
-                        plotting_colors = color.evaluate(b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates)
+                        plotting_colors, _ = color.evaluate_grid(b_spline_names=[b_spline_name], grid_resolution=(num_points_u, num_points_v),
+                                                                parametric_derivative_order=None, return_flattened=True)
                 elif point_type == 'coefficients':
-                    plotting_points_shape = self.space.spaces[self.space.b_spline_to_space_dict[b_spline_name]].parametric_coefficients_shape + \
+                    plotting_points_shape = self.space.spaces[self.space.b_spline_to_space[b_spline_name]].parametric_coefficients_shape + \
                         (self.num_physical_dimensions[b_spline_name],)
                     num_plotting_points = np.prod(plotting_points_shape[:-1])
                     plotting_points = self.coefficients[b_spline_coefficient_indices].reshape((num_plotting_points,-1))
@@ -512,7 +756,7 @@ class BSplineSet(m3l.Function):
         '''
         if self.connections is None:
             self.connections = {}
-            for b_spline_name in self.space.b_spline_to_space_dict.keys():
+            for b_spline_name in self.space.b_spline_to_space.keys():
                 self.connections[b_spline_name] = []
 
         if b_spline_names is None:
@@ -524,7 +768,7 @@ class BSplineSet(m3l.Function):
         for num_physical_dimensions in range(min_num_physical_dimensions, max_num_physical_dimensions+1):
             # Get a list of B-splines with the current number of dimensions
             b_spline_names_with_same_dimension = []
-            for b_spline_name, space_name in self.space.b_spline_to_space_dict.items():
+            for b_spline_name, space_name in self.space.b_spline_to_space.items():
                 if self.num_physical_dimensions[b_spline_name] == num_physical_dimensions:
                     b_spline_names_with_same_dimension.append(b_spline_name)
 
@@ -568,15 +812,18 @@ class BSplineSet(m3l.Function):
             num_points_v = 5
             u_vec = np.einsum('i,j->ij', np.linspace(0., 1., num_points_u), np.ones(num_points_v)).reshape((-1,1))
             v_vec = np.einsum('i,j->ij', np.ones(num_points_u), np.linspace(0., 1., num_points_v)).reshape((-1,1))
-            parametric_coordinates = np.hstack((u_vec, v_vec))
-            b_spline_grid_points = self.evaluate(b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates)
+            b_spline_parametric_coordinates = np.hstack((u_vec, v_vec))
+            parametric_coordinates = []
+            for i in range(len(u_vec)):
+                parametric_coordinates.append((b_spline_name, b_spline_parametric_coordinates[i,:]))
+            b_spline_grid_points = self.evaluate(parametric_coordinates=parametric_coordinates).value.reshape((-1,num_physical_dimensions))
             coarse_grid_points = np.vstack((coarse_grid_points, b_spline_grid_points))
             coarse_grid_points_indices[b_spline_name] = np.arange(num_points_u*num_points_v) + i
             i += num_points_u*num_points_v
 
         # Get a length scale parameter to determine a large tolerance and small tolerance
-        length_scales = np.zeros((3,))
-        for i in range(3):
+        length_scales = np.zeros((num_physical_dimensions,))
+        for i in range(num_physical_dimensions):
             length_scales[i] = np.max(coarse_grid_points[:,i]) - np.min(coarse_grid_points[:,i])
         length_scale = np.linalg.norm(length_scales)
         large_tolerance = 0.1*length_scale
@@ -641,11 +888,11 @@ class BSplineSet(m3l.Function):
         num_physical_dimensions = self.num_physical_dimensions[player_1]
         if type(player_1) is str:
             # player_1 = self.b_splines[player_1]   # Not storing B-spline objects in this set.
-            player_1_space = self.space.spaces[self.space.b_spline_to_space_dict[player_1]]
+            player_1_space = self.space.spaces[self.space.b_spline_to_space[player_1]]
             player_1 = BSpline(name=player_1, space=player_1_space, coefficients=self.coefficients[self.coefficient_indices[player_1]],
                                num_physical_dimensions=num_physical_dimensions)
         if type(player_2) is str:
-            player_2_space = self.space.spaces[self.space.b_spline_to_space_dict[player_2]]
+            player_2_space = self.space.spaces[self.space.b_spline_to_space[player_2]]
             player_2 = BSpline(name=player_2, space=player_2_space, coefficients=self.coefficients[self.coefficient_indices[player_2]],
                                num_physical_dimensions=num_physical_dimensions)
 
@@ -686,7 +933,7 @@ if __name__ == "__main__":
     # b_spline_spaces = {space_of_cubic_b_spline_surfaces_with_10_cp.name : space_of_cubic_b_spline_surfaces_with_10_cp,
     #                    space_of_quadratic_b_spline_surfaces_with_5_cp.name : space_of_quadratic_b_spline_surfaces_with_5_cp}
     # b_spline_set_space = BSplineSetSpace(name='my_b_spline_set', spaces=b_spline_spaces, 
-    #                                      b_spline_to_space_dict={'my_b_spline_1':space_of_cubic_b_spline_surfaces_with_10_cp.name,
+    #                                      b_spline_to_space={'my_b_spline_1':space_of_cubic_b_spline_surfaces_with_10_cp.name,
     #                                                              'my_b_spline_2':space_of_quadratic_b_spline_surfaces_with_5_cp.name})
 
 
@@ -713,6 +960,17 @@ if __name__ == "__main__":
     b_spline_set = refit_b_spline_set(b_spline_set=b_spline_set, num_coefficients=(25,10), order=(4,3))
     b_spline_set.find_connections()
     # b_spline_set.plot()
+
+    parametric_coordinates = [
+        ('WingGeom, 0, 3', np.array([[0.2, 0.5, 0.5]])),
+        ('WingGeom, 0, 4', np.array([[0.2, 0.5, 0.5]])),
+    ]
+    points = b_spline_set.evaluate()
+    b_splines = b_spline_set.plot(b_splines=['WingGeom, 0, 3', 'WingGeom, 0, 4'], point_types=['evaluated_points'], plot_types=['mesh'], show=False)
+    import vedo
+    plotter = vedo.Plotter()
+    points = vedo.Points(points, r=12, c='#00C6D7')
+    plotter.show(b_splines, points, 'B-spline Set Evaluation', axes=1, viewup="z", interactive=True)
 
     projected_points1 = b_spline_set.project(np.array([[0.2, 1., 10.], [0.5, 1., 1.]]), plot=True, direction=np.array([0., 0., -1.]))
     projected_points2 = b_spline_set.project(np.array([[0.2, 0., 1.], [0.5, 1., 1.]]), plot=True, max_iterations=100)

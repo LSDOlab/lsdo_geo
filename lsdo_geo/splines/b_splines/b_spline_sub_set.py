@@ -116,7 +116,7 @@ if __name__ == "__main__":
     # b_spline_spaces = {space_of_cubic_b_spline_surfaces_with_10_cp.name : space_of_cubic_b_spline_surfaces_with_10_cp,
     #                    space_of_quadratic_b_spline_surfaces_with_5_cp.name : space_of_quadratic_b_spline_surfaces_with_5_cp}
     # b_spline_set_space = BSplineSetSpace(name='my_b_spline_set', spaces=b_spline_spaces, 
-    #                                      b_spline_to_space_dict={'my_b_spline_1':space_of_cubic_b_spline_surfaces_with_10_cp.name,
+    #                                      b_spline_to_space={'my_b_spline_1':space_of_cubic_b_spline_surfaces_with_10_cp.name,
     #                                                              'my_b_spline_2':space_of_quadratic_b_spline_surfaces_with_5_cp.name})
 
 

@@ -16,7 +16,7 @@ from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
 '''
 Solves P = B*C for C 
 '''
-def fit_b_spline(fitting_points:np.ndarray, paramatric_coordinates=None, 
+def fit_b_spline(fitting_points:np.ndarray, parametric_coordinates=None, 
         order:tuple = (4,), num_coefficients:tuple = (10,), knot_vectors = None, name:str = None):
     if len(fitting_points.shape[:-1]) == 1:     # If B-spline curve
         raise Exception("Function not implemented yet for B-spline curves.")
@@ -40,12 +40,12 @@ def fit_b_spline(fitting_points:np.ndarray, paramatric_coordinates=None,
             num_coefficients_u = num_coefficients[0]
             num_coefficients_v = num_coefficients[1]
 
-        if paramatric_coordinates is None:
+        if parametric_coordinates is None:
             u_vec = np.einsum('i,j->ij', np.linspace(0., 1., num_points_u), np.ones(num_points_v)).flatten()
             v_vec = np.einsum('i,j->ij', np.ones(num_points_u), np.linspace(0., 1., num_points_v)).flatten()
         else:
-            u_vec = paramatric_coordinates[0]
-            v_vec = paramatric_coordinates[1]
+            u_vec = parametric_coordinates[0]
+            v_vec = parametric_coordinates[1]
 
         if knot_vectors is None:
             knot_vector_u = np.zeros(num_coefficients_u+order_u)
@@ -127,7 +127,7 @@ def refit_b_spline(b_spline, order : tuple = (4,), num_coefficients : tuple = (1
         points_vector = b_spline.evaluate_points(u_vec, v_vec)
         points = points_vector.reshape((num_points_u, num_points_v, num_dimensions))
         
-        b_spline = fit_b_spline(fitting_points=points, paramatric_coordinates=(u_vec, v_vec), 
+        b_spline = fit_b_spline(fitting_points=points, parametric_coordinates=(u_vec, v_vec), 
             order=(order_u,order_v), num_coefficients=(num_coefficients_u,num_coefficients_v),
             knot_vectors=None, name=name)
 

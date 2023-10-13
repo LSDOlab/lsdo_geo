@@ -29,7 +29,7 @@ class BSplineSetSpace(m3l.FunctionSpace):
         The name of the B-spline set space.
     spaces : dict[str, BSplineSpace]
         A dictionary of B-spline spaces. The keys are the names of the B-spline spaces.
-    b_spline_to_space_dict : dict[str, str]
+    b_spline_to_space : dict[str, str]
         A dictionary of B-spline to space mappings. The keys are the names of the B-splines. The values are the names of the B-spline spaces.
     connections : dict[str, str] = None
         A dictionary of connections. The keys are the names of the B-spline spaces. The values are the names of the connected B-spline spaces.
@@ -40,7 +40,7 @@ class BSplineSetSpace(m3l.FunctionSpace):
     '''
     name : str
     spaces : dict[str, BSplineSpace]
-    b_spline_to_space_dict : dict[str, str]
+    b_spline_to_space : dict[str, str]
     # connections : dict[str, dict[str, Connection]] = None  # Outer dict has key of B-spline name, inner dict has key of connected B-spline name
     # -- This dictionary nesting lends towards having every B-spline have a topological B-spline for every other (2 per connection).
     # -- This is in contrast to having one for every connection. One B-spline per connection can't do parametric topology though.
@@ -51,6 +51,7 @@ class BSplineSetSpace(m3l.FunctionSpace):
     # -- For now, just use string for discrete whether or not these manifolds are connected.
     knots : np.ndarray = None   # Doesn't support different dimensions unless if all the knots_u,v,w are flattened into one vector
     knot_indices : dict[str, list[np.ndarray]] = None   # list index = dimension index
+    b_spline_index_to_name : dict[int, str] = None
 
     def __post_init__(self):
         self.knots = []
@@ -58,7 +59,8 @@ class BSplineSetSpace(m3l.FunctionSpace):
 
         # self.num_coefficients = 0
         self.num_knots = 0
-        for b_spline_name, space_name in self.b_spline_to_space_dict.items():
+        b_spline_index = 0
+        for b_spline_name, space_name in self.b_spline_to_space.items():
             space = self.spaces[space_name]
             self.knot_indices[b_spline_name] = []
             for i in range(space.num_parametric_dimensions):
@@ -68,34 +70,98 @@ class BSplineSetSpace(m3l.FunctionSpace):
                 self.num_knots += dimension_num_knots
 
             # self.num_coefficients += space.num_coefficients
+            # self.b_spline_index_to_name[b_spline_index] = b_spline_name
+            b_spline_index += 1
 
         # self.num_coefficients = self.num_coefficients
         self.knots = np.hstack(self.knots)
         
 
-    def compute_evaluation_map(self, b_spline_name:str, parametric_coordinates:np.ndarray,
-                               parametric_derivative_order:tuple[int]=None, expansion_factor:int=0) -> sps.csc_matrix:
-        '''
-        Computes the evaluation map for a B-spline in the B-spline set space.
+    # def compute_evaluation_map(self, b_spline_name:str, parametric_coordinates:np.ndarray,
+    #                            parametric_derivative_order:tuple[int]=None, expansion_factor:int=0) -> sps.csc_matrix:
+    #     '''
+    #     Computes the evaluation map for a B-spline in the B-spline set space.
 
-        Parameters
-        ----------
-        b_spline_name : str
-            The name of the B-spline.
+    #     Parameters
+    #     ----------
+    #     b_spline_name : str
+    #         The name of the B-spline.
 
-        parametric_coordinates : np.ndarray
-            The parametric coordinates at which to evaluate the B-spline.
+    #     parametric_coordinates : np.ndarray
+    #         The parametric coordinates at which to evaluate the B-spline.
 
-        parametric_derivative_order : tuple[int]
-            The order of the parametric derivative to evaluate. The length of the tuple is the number of parametric dimensions.
-        '''
-        space_name = self.b_spline_to_space_dict[b_spline_name]
-        return self.spaces[space_name].compute_evaluation_map(
-            parametric_coordinates=parametric_coordinates, parametric_derivative_order=parametric_derivative_order,
-            expansion_factor=expansion_factor)
+    #     parametric_derivative_order : tuple[int]
+    #         The order of the parametric derivative to evaluate. The length of the tuple is the number of parametric dimensions.
+    #     '''
+    #     space_name = self.b_spline_to_space[b_spline_name]
+    #     return self.spaces[space_name].compute_evaluation_map(
+    #         parametric_coordinates=parametric_coordinates, parametric_derivative_order=parametric_derivative_order,
+    #         expansion_factor=expansion_factor)
     
 
-    def create_function(self, name:str, coefficients:np.ndarray=None, num_physical_dimensions:dict[str,int]=3) -> m3l.Function:
+    # def compute_evaluation_map(self, parametric_coordinates:list[tuple[str, np.ndarray]], parametric_derivative_order:tuple[int]=None,
+    #                            expansion_factor:int=1) -> sps.csc_matrix:
+    #     '''
+    #     Computes the evaluation map for parametric coordinates in the B-spline set space.
+
+    #     Parameters
+    #     ----------
+    #     parametric_coordinates : list[tuple[str, np.ndarray]]
+    #         A list of tuples. The first element of the tuple is the name of the B-spline. 
+    #         The second element of the tuple is the parametric coordinates at which to evaluate the B-spline.
+    #     parametric_derivative_order : tuple[int] = None
+    #         The order of the parametric derivative to evaluate. The length of the tuple is the number of parametric dimensions.
+    #     expansion_factor : int = 1
+    #         The expansion factor for the evaluation map. This is used to create a map that takes in input where the physical
+    #         dimensions are flattened in the input vector. The output of the map is a vector where the physical dimensions are
+    #         also flattened in the output vector.
+
+    #     Returns
+    #     -------
+    #     sps.csc_matrix
+    #         The evaluation map.
+
+    #     '''
+    #     for coordinate in parametric_coordinates:
+    #         space_name = self.b_spline_to_space[coordinate[0]]
+    #         if space_name not in self.spaces:
+    #             raise ValueError('The B-spline space {} is not in the B-spline set space.'.format(space_name))
+            
+    #     if expansion_factor < 1:
+    #         raise ValueError('The expansion factor must be greater than or equal to 1.')
+            
+    #     num_parametric_coordinates = len(parametric_coordinates)
+
+    #     eval_maps_set_input = []
+
+    #     for i, coordinate in enumerate(parametric_coordinates):
+    #         space_name = self.b_spline_to_space[coordinate[0]]
+    #         space = self.spaces[space_name]
+    #         parametric_coordinates = coordinate[1]
+
+    #         evaluation_map = space.compute_evaluation_map(parametric_coordinates=parametric_coordinates,
+    #                                                       parametric_derivative_order=parametric_derivative_order,
+    #                                                       expansion_factor=expansion_factor)
+
+    #         eval_map_set_input = sps.lil_matrix((evaluation_map.shape[0], space.num_coefficient_elements*expansion_factor))
+    #         b_spline_coefficient_indices = space.
+    #         eval_map_set_input[:, i*space.num_coefficient_elements*expansion_factor:(i+1)*space.num_coefficient_elements*expansion_factor] = evaluation_map
+
+    #         for j in range(num_physical_dimensions):
+    #             rows.append(np.arange(i * num_physical_dimensions + j, (i + 1) * num_physical_dimensions))
+    #             columns.append(np.arange(j, num_columns, num_physical_dimensions))
+    #             data.append(evaluation_map.data)
+
+    #     rows = np.hstack(rows)
+    #     columns = np.hstack(columns)
+    #     data = np.hstack(data)
+
+    #     evaluation_map = sps.csc_matrix((data, (rows, columns)), shape=(num_rows, num_columns))
+
+    #     return evaluation_map
+    
+
+    def create_function(self, name:str, coefficients:np.ndarray=None, num_physical_dimensions:dict[str,int]|int=None) -> m3l.Function:
         '''
         Creates a function in the B-spline set space.
 
@@ -105,20 +171,42 @@ class BSplineSetSpace(m3l.FunctionSpace):
             The name of the function.
         coefficients : np.ndarray
             The coefficients of the function.
-        coefficient_indices : np.ndarray, optional
-            The indices of the coefficients. If not provided, the coefficients will be flattened into one vector.
+        num_physical_dimensions : {dict[str,int], int}
+            The number of physical dimensions for each B-spline in the set.
         '''
+        if num_physical_dimensions is None:
+            set_num_coefficient_elements = 0
+            for b_spline_name in self.b_spline_to_space:
+                b_spline_space = self.spaces[b_spline_name]
+                b_spline_num_coefficient_elements = b_spline_space.num_coefficient_elements
+                set_num_coefficient_elements += b_spline_num_coefficient_elements
+
+            if len(coefficients.shape) == 1:
+                if np.mod(len(coefficients), set_num_coefficient_elements) != 0:
+                    raise ValueError('Invalid number of coefficients.')
+                num_physical_dimensions = int(len(coefficients) / set_num_coefficient_elements)
+            elif len(coefficients.shape) == 2:
+                if coefficients.shape[0] != set_num_coefficient_elements:
+                    raise ValueError('Invalid number or shape of coefficients.')
+                num_physical_dimensions = coefficients.shape[1]
+            else:
+                raise ValueError('Invalid shape of coefficients without passing in num_physical dimensions.' + 
+                                 'Please pass in a shape of (num_coeffs,) or (-1,num_physical_dimesions).' + \
+                                  'If number of physical dimensions changes across B-splines, please pass in the dictionary argument.')
+             
+
+
         from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
         num_physical_dimensions_dict = {}
         if type(num_physical_dimensions) is int:
-            for b_spline_name in self.b_spline_to_space_dict:
+            for b_spline_name in self.b_spline_to_space:
                 num_physical_dimensions_dict[b_spline_name] = num_physical_dimensions
             num_physical_dimensions = num_physical_dimensions_dict
 
         if coefficients is None:
             coefficients = np.zeros((0,))
-            for b_spline_name in self.b_spline_to_space_dict:
-                b_spline_num_coefficients = self.spaces[self.b_spline_to_space_dict[b_spline_name]].num_coefficient_elements \
+            for b_spline_name in self.b_spline_to_space:
+                b_spline_num_coefficients = self.spaces[self.b_spline_to_space[b_spline_name]].num_coefficient_elements \
                     * num_physical_dimensions[b_spline_name]
                 coefficients = np.hstack((coefficients, np.zeros((b_spline_num_coefficients))))
 
@@ -136,7 +224,7 @@ class BSplineSetSpace(m3l.FunctionSpace):
             The names of the B-splines to search for. Names of B-splines will be returned for each B-spline that INCLUDES the search name.
         '''
         returned_b_spline_names = []
-        for b_spline_name in self.b_spline_to_space_dict:
+        for b_spline_name in self.b_spline_to_space:
             for b_spline_search_name in b_spline_search_names:
                 if b_spline_search_name in b_spline_name:
                     returned_b_spline_names.append(b_spline_name)
@@ -196,21 +284,25 @@ class BSplineSetSpace(m3l.FunctionSpace):
             b_spline_names_input += self.search_b_spline_names(b_spline_search_names)
 
         spaces = {}
-        b_spline_to_space_dict = {}
-        connections = {}
+        b_spline_to_space = {}
+        if self.connections is not None:
+            connections = {}
+        else:
+            connections = None
         knots = []
         knot_indices = {}
         for b_spline_name in b_spline_names_input:
-            space_name = self.b_spline_to_space_dict[b_spline_name]
+            space_name = self.b_spline_to_space[b_spline_name]
             spaces[space_name] = self.spaces[space_name]
-            b_spline_to_space_dict[b_spline_name] = space_name
-            connections[b_spline_name] = self.connections[b_spline_name]
+            b_spline_to_space[b_spline_name] = space_name
+            if self.connections is not None:
+                connections[b_spline_name] = self.connections[b_spline_name]
             for i in range(self.spaces[space_name].num_parametric_dimensions):
                 knot_indices[b_spline_name] = self.knot_indices[b_spline_name]
                 knots.append(self.spaces[space_name].knots[i])
 
         knots = np.hstack(knots)
-        sub_space = BSplineSetSpace(name=sub_space_name, spaces=spaces, b_spline_to_space_dict=b_spline_to_space_dict,
+        sub_space = BSplineSetSpace(name=sub_space_name, spaces=spaces, b_spline_to_space=b_spline_to_space,
                                     connections=connections, knots=knots, knot_indices=knot_indices)
         
         return sub_space
@@ -219,40 +311,33 @@ class BSplineSetSpace(m3l.FunctionSpace):
 if __name__ == "__main__":
     from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
 
-    num_coefficients = 10
-    order = 4
+    num_coefficients1 = 10
+    num_coefficients2 = 5
+    order1 = 4
+    order2 = 3
     
-    space_of_cubic_b_spline_surfaces_with_10_cp = BSplineSpace(name='cubic_b_spline_surfaces_10_cp', order=(order,order),
-                                                              parametric_coefficients_shape=(num_coefficients,num_coefficients))
-    space_of_quadratic_b_spline_surfaces_with_5_cp = BSplineSpace(name='quadratic_b_spline_surfaces_5_cp', order=(3,3),
-                                                              parametric_coefficients_shape=(5,5))
+    space_of_cubic_b_spline_surfaces_with_10_cp = BSplineSpace(name='cubic_b_spline_surfaces_10_cp', order=(order1,order1),
+                                                              parametric_coefficients_shape=(num_coefficients1,num_coefficients1))
+    space_of_quadratic_b_spline_surfaces_with_5_cp = BSplineSpace(name='quadratic_b_spline_surfaces_5_cp', order=(order2,order2),
+                                                              parametric_coefficients_shape=(num_coefficients2,num_coefficients2))
     b_spline_spaces = {space_of_cubic_b_spline_surfaces_with_10_cp.name : space_of_cubic_b_spline_surfaces_with_10_cp,
                        space_of_quadratic_b_spline_surfaces_with_5_cp.name : space_of_quadratic_b_spline_surfaces_with_5_cp}
     
-    b_spline_to_space_dict = {space_of_cubic_b_spline_surfaces_with_10_cp.name : space_of_cubic_b_spline_surfaces_with_10_cp.name,
+    b_spline_to_space = {space_of_cubic_b_spline_surfaces_with_10_cp.name : space_of_cubic_b_spline_surfaces_with_10_cp.name,
                                 space_of_quadratic_b_spline_surfaces_with_5_cp.name : space_of_quadratic_b_spline_surfaces_with_5_cp.name}
-    b_spline_set_space = BSplineSetSpace(name='my_b_spline_set', spaces=b_spline_spaces, b_spline_to_space_dict=b_spline_to_space_dict)
+    b_spline_set_space = BSplineSetSpace(name='my_b_spline_set', spaces=b_spline_spaces, b_spline_to_space=b_spline_to_space)
 
-    parametric_coordinates = np.array([
-        [0., 0.],
-        [0., 1.],
-        [1., 0.],
-        [1., 1.],
-        [0.5, 0.5],
-        [0.25, 0.75]
-    ])
-    eval_map = \
-        b_spline_set_space.compute_evaluation_map(space_of_cubic_b_spline_surfaces_with_10_cp.name,
-                                                  parametric_coordinates=parametric_coordinates, expansion_factor=3)
-    eval_map = \
-        b_spline_set_space.compute_evaluation_map(space_of_quadratic_b_spline_surfaces_with_5_cp.name,
-                                                  parametric_coordinates=parametric_coordinates)
-    
-    eval_map = \
-        b_spline_set_space.compute_evaluation_map(space_of_cubic_b_spline_surfaces_with_10_cp.name,
-                                                  parametric_coordinates=parametric_coordinates,
-                                                  parametric_derivative_order=(1,0))
-    eval_map = \
-        b_spline_set_space.compute_evaluation_map(space_of_quadratic_b_spline_surfaces_with_5_cp.name,
-                                                  parametric_coordinates=parametric_coordinates,
-                                                  parametric_derivative_order=(2,0))
+    coefficients_line = np.linspace(0., 1., num_coefficients1)
+    coefficients_x, coefficients_y = np.meshgrid(coefficients_line,coefficients_line)
+    coefficients1 = np.stack((coefficients_x, coefficients_y, 0.1*np.random.rand(num_coefficients1,num_coefficients1)), axis=-1)
+
+    coefficients_line = np.linspace(0., 1., num_coefficients2)
+    coefficients_x, coefficients_y = np.meshgrid(coefficients_line,coefficients_line)
+    coefficients_y += 1.5
+    coefficients2 = np.stack((coefficients_x, coefficients_y, 0.1*np.random.rand(num_coefficients2,num_coefficients2)), axis=-1)
+
+    coefficients = np.hstack((coefficients1.reshape((-1,)), coefficients2.reshape((-1,))))
+
+    my_b_spline_surface_set = b_spline_set_space.create_function(
+        name='my_b_spline_set', coefficients=coefficients)
+    my_b_spline_surface_set.plot()

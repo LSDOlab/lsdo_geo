@@ -43,13 +43,46 @@ class BSpline(m3l.Function):
 
     
     def evaluate(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> am.MappedArray:
-        basis_matrix = self.space.compute_evaluation_map(parametric_coordinates, parametric_derivative_order)
-        num_physical_dimensions = self.num_physical_dimensions
-        num_coefficient_elements = np.prod(self.space.parametric_coefficients_shape)
-        output = basis_matrix.dot(self.coefficients.reshape((num_coefficient_elements, num_physical_dimensions)))
+        basis_matrix = self.compute_evaluation_map(parametric_coordinates, parametric_derivative_order)
+        output = basis_matrix.dot(self.coefficients)
 
         return output
+    
+    
+    def compute_evaluation_map(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None,
+                               expand_map_for_physical:bool=True) -> sps.csc_matrix:
+        '''
+        Computes the evaluation map for the B-spline.
 
+        Parameters
+        ----------
+        parametric_coordinates : np.ndarray
+            The parametric coordinates to evaluate the B-spline at.
+        parametric_derivative_order : tuple
+            The order of the parametric derivative to evaluate the B-spline at. 0 is regular evaluation, 1 is first derivative, etc.
+        expand_map_for_physical : bool
+            Whether to expand the map for physical dimensions. For example, instead of the map being used to multiply with coefficients in shape
+            (nu*nv,3), the map is expanded to be used to multiply with coefficients in shape (nu*nv*3,) where 3 is 
+            the number of physical dimensions (most commonly x,y,z).
+
+        Returns
+        -------
+        map : sps.csc_matrix
+            The evaluation map.
+        '''
+        from lsdo_geo.splines.b_splines.b_spline_functions import compute_evaluation_map
+
+        if expand_map_for_physical:
+            expansion_factor = self.num_physical_dimensions
+
+        map = compute_evaluation_map(parametric_coordinates=parametric_coordinates, order=self.space.order,
+                                     parametric_coefficients_shape=self.space.parametric_coefficients_shape,
+                                     knots=self.space.knots,
+                                     parametric_derivative_order=parametric_derivative_order,
+                                     expansion_factor=expansion_factor)
+
+        return map
+    
 
     def project(self, points:np.ndarray, direction:np.ndarray=None, grid_search_density:int=50,
                     max_iterations:int=100, return_parametric_coordinates:bool=False, plot:bool=False):
@@ -86,7 +119,7 @@ class BSpline(m3l.Function):
         )
 
         parametric_coordinates = np.hstack((u_vec_flattened.reshape((-1,1)), v_vec_flattened.reshape((-1,1))))
-        map = self.space.compute_evaluation_map(parametric_coordinates, expansion_factor=self.num_physical_dimensions)
+        map = self.compute_evaluation_map(parametric_coordinates)
         projected_points = am.array(input=self.coefficients, linear_map=map, shape=input_shape)
 
         if plot:
@@ -106,7 +139,8 @@ class BSpline(m3l.Function):
 
         if return_parametric_coordinates:
             # return parametric_coordinates
-            return (u_vec_flattened, v_vec_flattened)
+            # return (u_vec_flattened, v_vec_flattened)
+            return np.hstack((u_vec_flattened.reshape((-1,1)), v_vec_flattened.reshape((-1,1))))
         else:
             return projected_points
 

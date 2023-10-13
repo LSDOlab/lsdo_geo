@@ -20,9 +20,13 @@ class Geometry(BSplineSet):
         '''
         Creates a copy of the geometry that does not point to this geometry.
         '''
-        return Geometry(self.name+'_copy', self.space, self.coefficients.copy(), self.num_physical_dimensions.copy(),
-                  self.coefficient_indices.copy(), self.connections.copy())
-    
+        if self.connections is not None:
+            return Geometry(self.name+'_copy', self.space, self.coefficients.copy(), self.num_physical_dimensions.copy(),
+                    self.coefficient_indices.copy(), self.connections.copy())
+        else:
+            return Geometry(self.name+'_copy', self.space, self.coefficients.copy(), self.num_physical_dimensions.copy(),
+                    self.coefficient_indices.copy())
+
     def declare_component(self, component_name:str, b_spline_names:list[str]=None, b_spline_search_names:list[str]=None) -> BSplineSubSet:
         '''
         Declares a component. This component will point to a sub-set of the entire geometry.
@@ -90,7 +94,7 @@ class Geometry(BSplineSet):
         self.coefficient_indices = b_spline_set.coefficient_indices
         self.connections = b_spline_set.connections
 
-    def refit(self, num_coefficients:tuple=(25,25), fit_resolution:tuple=(100,100), order:tuple=(4,4)):
+    def refit(self, num_coefficients:tuple=(25,25), fit_resolution:tuple=(100,100), order:tuple=(4,4), parallelize:bool=True):
         '''
         Evaluates a grid over the geometry and finds the best set of coefficients/control points at the desired resolution to fit the geometry.
 
@@ -104,7 +108,7 @@ class Geometry(BSplineSet):
             The order of the B-splines to use in each direction.
         '''
         from lsdo_geo.splines.b_splines.b_spline_functions import refit_b_spline_set
-        b_spline_set = refit_b_spline_set(self, num_coefficients, fit_resolution, order)
+        b_spline_set = refit_b_spline_set(self, num_coefficients, fit_resolution, order, parallelize=parallelize)
 
         self.debugging_b_spline_set = b_spline_set
 
@@ -123,24 +127,41 @@ if __name__ == "__main__":
     from lsdo_geo.core.python_core.geometry.geometry_functions import import_geometry
     import array_mapper as am
     import m3l
+    import time
 
     # var1 = m3l.Variable('var1', shape=(2,3), value=np.array([[1., 2., 3.], [4., 5., 6.]]))
     # var2 = m3l.Variable('var2', shape=(2,3), value=np.array([[1., 2., 3.], [4., 5., 6.]]))
     # var3 = var1 + var2
     # print(var3)
 
-
-    geometry = import_geometry('lsdo_geo/splines/b_splines/sample_geometries/rectangular_wing.stp')
-    geometry.refit()
-
-    geometry.find_connections()
+    t1 = time.time()
+    geometry = import_geometry('lsdo_geo/splines/b_splines/sample_geometries/rectangular_wing.stp', parallelize=False)
+    # geometry = import_geometry('lsdo_geo/splines/b_splines/sample_geometries/lift_plus_cruise_final.stp')
+    t2 = time.time()
+    geometry.refit(parallelize=False)
+    t3 = time.time()
+    # geometry.find_connections() # NOTE: This is really really slow for large geometries. Come back to this.
+    t4 = time.time()
     geometry.plot()
+    t5 = time.time()
+    print('Import time: ', t2-t1)
+    print('Refit time: ', t3-t2)
+    print('Find connections time: ', t4-t3)
+    print('Plot time: ', t5-t4)
 
-    projected_points1 = geometry.project(np.array([[0.2, 1., 10.], [0.5, 1., 1.]]), plot=True, direction=np.array([0., 0., -1.]))
-    projected_points2 = geometry.project(np.array([[0.2, 0., 10.], [0.5, 1., 1.]]), plot=True, max_iterations=100)
+    projected_points1_coordinates = geometry.project(np.array([[0.2, 1., 10.], [0.5, 1., 1.]]), plot=True, direction=np.array([0., 0., -1.]))
+    projected_points2_coordinates = geometry.project(np.array([[0.2, 0., 10.], [0.5, 1., 1.]]), plot=True, max_iterations=100)
 
-    test_linspace = am.linspace(projected_points1, projected_points2)
-    # print(test_linspace)
+    projected_points1 = geometry.evaluate(projected_points1_coordinates, plot=True)
+    projected_points2 = geometry.evaluate(projected_points2_coordinates, plot=True)
+
+    test_linspace = m3l.linspace(projected_points1, projected_points2)
+
+    # import vedo
+    # plotter = vedo.Plotter()
+    # plotting_points = vedo.Points(test_linspace.value.reshape(-1,3))
+    # geometry_plot = geometry.plot(show=False)
+    # plotter.show(geometry_plot, plotting_points, interactive=True, axes=1)
 
     right_wing = geometry.declare_component(component_name='right_wing', b_spline_search_names=['WingGeom, 0'])
     right_wing.plot()
@@ -175,6 +196,9 @@ if __name__ == "__main__":
     
     left_wing.plot(color=left_wing_pressure_function)
 
+    # IMPLEMENT LINSPACE IN M3L
+    # DO "MESH EVALUATION(?)" -Project should return coordinates (not M3L), then
+    #                                  evaluate geometry with coordinates after parameterization has been evaluated.
     # DO ACTUATIONS NEXT
     # THEN DO PYTHON FFD, PYTHON FFD SECTIONAL PARAMETERIZATION, THEN PYTHON FFD B-SPLINE SECTIONAL PARAMETERIZATION
     # NOTE: THE B-SPLINE SECTIONAL PARAMETERIZATION SHOULD JUST BE A STRAIGHT B-SPLINE PARAMETERIZATION, NOTHING SPECIFIC TO FFD

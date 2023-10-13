@@ -42,53 +42,8 @@ class BSplineSpace(m3l.FunctionSpace):
                 self.knot_indices.append(np.arange(knot_index, knot_index + num_knots_i))
                 knot_index += num_knots_i
 
-
-    def compute_evaluation_map(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None,
-                               expansion_factor:int=0) -> sps.csc_matrix:
-        # NOTE: parametric coordinates are in shape (np,3) where 3 corresponds to u,v,w
-        num_parametric_coordinates = parametric_coordinates.shape[-1]
-        if parametric_derivative_order is None:
-            parametric_derivative_order = (0,)*num_parametric_coordinates
-        if type(parametric_derivative_order) is int:
-            parametric_derivative_order = (parametric_derivative_order,)*num_parametric_coordinates
-        elif len(parametric_derivative_order) == 1 and num_parametric_coordinates != 1:
-            parametric_derivative_order = parametric_derivative_order*num_parametric_coordinates
-
-        num_points = np.prod(parametric_coordinates.shape[:-1])
-        order_multiplied = 1
-        for i in range(len(self.order)):
-            order_multiplied *= self.order[i]
-
-        data = np.zeros(num_points * order_multiplied) 
-        row_indices = np.zeros(len(data), np.int32)
-        col_indices = np.zeros(len(data), np.int32)
-
-        num_coefficient_elements = self.num_coefficient_elements
-
-        if self.num_parametric_dimensions == 2:
-            u_vec = parametric_coordinates[:,0].copy()
-            v_vec = parametric_coordinates[:,1].copy()
-            order_u = self.order[0]
-            order_v = self.order[1]
-            knots_u = self.knots[self.knot_indices[0]].copy()
-            knots_v = self.knots[self.knot_indices[1]].copy()
-            get_basis_surface_matrix(order_u, self.parametric_coefficients_shape[0], parametric_derivative_order[0], u_vec, knots_u, 
-                order_v, self.parametric_coefficients_shape[1], parametric_derivative_order[1], v_vec, knots_v, 
-                len(u_vec), data, row_indices, col_indices)
-            
-        basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), self.num_coefficient_elements))
-
-        if expansion_factor > 0:
-            expanded_basis = sps.lil_matrix((len(u_vec)*expansion_factor, num_coefficient_elements*expansion_factor))
-            for i in range(expansion_factor):
-                input_indices = np.arange(i, num_coefficient_elements*expansion_factor, expansion_factor)
-                output_indices = np.arange(i, len(u_vec)*expansion_factor, expansion_factor)
-                expanded_basis[np.ix_(output_indices, input_indices)] = basis0
-            return expanded_basis.tocsc()
-        else:
-            return basis0
     
-    def create_function(self, name:str, coefficients:np.ndarray, num_physical_dimensions:int) -> m3l.Function:
+    def create_function(self, name:str, coefficients:np.ndarray) -> m3l.Function:
         '''
         Creates a function in this function space.
 
@@ -98,9 +53,27 @@ class BSplineSpace(m3l.FunctionSpace):
             The name of the function.
         coefficients : np.ndarray
             The coefficients of the function.
-        num_physical_dimensions : int
-            The number of physical dimensions of the function.
         '''
+        # TODO: Automatically determine the number of physical dimensions from the shape of the coefficients array
+        # and parametric_coefficients_shape.
+        num_coefficient_elements = np.prod(self.parametric_coefficients_shape)
+
+        if len(coefficients.shape) == 1:
+            if np.mod(len(coefficients), num_coefficient_elements) != 0:
+                raise ValueError('Invalid number of coefficients.')
+            num_physical_dimensions = len(coefficients) // num_coefficient_elements
+        elif len(coefficients.shape) == 2:
+            if coefficients.shape[0] != num_coefficient_elements:
+                raise ValueError('Invalid number or shape of coefficients.')
+            num_physical_dimensions = coefficients.shape[1]
+        elif len(coefficients.shape) == (len(self.parametric_coefficients_shape)+1):
+            if coefficients.shape[:-1] != self.parametric_coefficients_shape:
+                raise ValueError('Invalid number or shape of coefficients.')
+            num_physical_dimensions = coefficients.shape[-1]
+        else:
+            raise ValueError('Invalid shape of coefficients. Please pass in a shape of (num_coeffs,)' + \
+                            'or (num_coeffs, num_physical_dimensions) or parametric_coefficients_shape + (num_physical_dimensions,).')
+
         from lsdo_geo.splines.b_splines.b_spline import BSpline
         return BSpline(name=name, space=self, coefficients=coefficients, num_physical_dimensions=num_physical_dimensions)
 
@@ -116,22 +89,15 @@ if __name__ == "__main__":
     # get_open_uniform(order=order, num_coefficients=num_coefficients, knot_vector=knots_u)
     # get_open_uniform(order=order, num_coefficients=num_coefficients, knot_vector=knots_v)
     # space_of_cubic_b_spline_surfaces_with_10_cp = BSplineSpace(name='cubic_b_spline_surfaces_10_cp', order=(order,order), knots=(knots_u,knots_v))
+    # NOTE: If passing in the knot vectors like this, the indices are also needed!
+
     space_of_cubic_b_spline_surfaces_with_10_cp = BSplineSpace(name='cubic_b_spline_surfaces_10_cp', order=(order,order),
                                                               parametric_coefficients_shape=(num_coefficients,num_coefficients))
 
-    parametric_coordinates = np.array([
-        [0., 0.],
-        [0., 1.],
-        [1., 0.],
-        [1., 1.],
-        [0.5, 0.5],
-        [0.25, 0.75]
-    ])
-    eval_map = \
-        space_of_cubic_b_spline_surfaces_with_10_cp.compute_evaluation_map(parametric_coordinates=parametric_coordinates, expansion_factor=3)
-    derivative_map = \
-        space_of_cubic_b_spline_surfaces_with_10_cp.compute_evaluation_map(
-            parametric_coordinates=parametric_coordinates, parametric_derivative_order=(1,1))
-    second_derivative_map = \
-        space_of_cubic_b_spline_surfaces_with_10_cp.compute_evaluation_map(
-            parametric_coordinates=parametric_coordinates, parametric_derivative_order=(2,2))
+    coefficients_line = np.linspace(0., 1., num_coefficients)
+    coefficients_x, coefficients_y = np.meshgrid(coefficients_line,coefficients_line)
+    coefficients = np.stack((coefficients_x, coefficients_y, 0.1*np.random.rand(10,10)), axis=-1)
+
+    my_cubic_b_spline_surface = space_of_cubic_b_spline_surfaces_with_10_cp.create_function(
+        name='my_cubic_b_spline_surface', coefficients=coefficients)
+    my_cubic_b_spline_surface.plot()
