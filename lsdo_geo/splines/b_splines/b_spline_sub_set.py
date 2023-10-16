@@ -9,6 +9,7 @@ import vedo
 from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
 
 from dataclasses import dataclass
+from typing import Union
 
 @dataclass
 class BSplineSubSet:
@@ -63,7 +64,7 @@ class BSplineSubSet:
 
 
     def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points'], plot_types:list=['mesh'],
-              opacity:float=1., color:str | BSplineSet ='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
+              opacity:float=1., color:Union[str,BSplineSet] ='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
         '''
         Plots the B-spline Surface.
 

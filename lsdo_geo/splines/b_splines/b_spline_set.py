@@ -14,6 +14,7 @@ from lsdo_geo.splines.b_splines.b_spline_set_space import BSplineSetSpace
 from lsdo_geo.splines.b_splines.b_spline import BSpline
 
 from dataclasses import dataclass
+from typing import Union
 
 # TODO: I'm going to leave this class as surface for now, but I want to generalize to n-dimensional.
 
@@ -622,7 +623,7 @@ class BSplineSet(m3l.Function):
 
 
     def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points'], plot_types:list=['mesh'],
-              opacity:float=1., color:str | BSplineSet='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
+              opacity:float=1., color:Union[str,BSplineSet]='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
         '''
         Plots the B-spline Surface.
 
