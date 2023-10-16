@@ -1,7 +1,9 @@
 import numpy as np
 import pickle
 from dataclasses import dataclass
-
+from pathlib import Path
+import os
+import pickle
 import m3l
 from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
 from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
@@ -108,7 +110,21 @@ class Geometry(BSplineSet):
             The order of the B-splines to use in each direction.
         '''
         from lsdo_geo.splines.b_splines.b_spline_functions import refit_b_spline_set
-        b_spline_set = refit_b_spline_set(self, order, num_coefficients, fit_resolution, parallelize=parallelize)
+        from lsdo_geo import REFIT_FOLDER
+
+        saved_refit_file = Path(REFIT_FOLDER / f'{self.name}_refit_dict.pickle')
+        if saved_refit_file.is_file():
+            with open(saved_refit_file, 'rb') as handle:
+                refit_dict = pickle.load(handle)
+                b_spline_set = refit_dict['b_spline_set']
+
+        else:
+            refit_dict = {}
+            b_spline_set = refit_b_spline_set(self, order, num_coefficients, fit_resolution, parallelize=parallelize)
+            refit_dict['b_spline_set'] = b_spline_set
+            with open(REFIT_FOLDER / f'{self.name}_refit_dict.pickle', 'wb+') as handle:
+                pickle.dump(refit_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
 
         self.debugging_b_spline_set = b_spline_set
 
