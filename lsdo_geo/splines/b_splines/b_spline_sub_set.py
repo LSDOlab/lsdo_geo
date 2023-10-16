@@ -11,11 +11,6 @@ from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
 from dataclasses import dataclass
 from typing import Union
 
-from pathlib import Path
-import os
-import pickle
-
-
 @dataclass
 class BSplineSubSet:
     '''
@@ -34,10 +29,10 @@ class BSplineSubSet:
     b_spline_set : BSplineSet
     b_spline_names : list[str]
 
-    def evaluate(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple[int]=None, plot:bool=False) -> am.MappedArray:
+    def evaluate(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple[int]=None) -> am.MappedArray:
 
         return self.b_spline_set.evaluate(parametric_coordinates=parametric_coordinates,
-                                           parametric_derivative_order=parametric_derivative_order, plot=plot)
+                                           parametric_derivative_order=parametric_derivative_order)
 
 
     def project(self, points:np.ndarray, targets:list[str]=None, direction:np.ndarray=None,
@@ -63,36 +58,9 @@ class BSplineSubSet:
 
         if targets is None:
             targets = list(self.b_spline_names)
-            # points, targets, direction, grid_search_density_parameter, max_iterations, 
-        
-        b_splines_spaces = str(self.b_spline_set.space.spaces)
-        coefficients = str(self.b_spline_set.coefficients)
 
-
-        from lsdo_geo import PROJECTIONS_FOLDER
-        saved_projections = PROJECTIONS_FOLDER / f'{str(points)}_{str(targets)}_{str(direction)}_{grid_search_density_parameter}_{max_iterations}_{b_splines_spaces}_{coefficients}.pickle'
-
-        saved_projections_file = Path(saved_projections)
-
-        if saved_projections_file.is_file():
-            with open(saved_projections, 'rb') as handle:
-                saved_projections_dict = pickle.load(handle)
-                parametric_coordinates = saved_projections_dict['parametric_coordinates']
-
-            if plot:
-                self.evaluate(parametric_coordinates=parametric_coordinates, plot=plot)
-
-        else:
-            parametric_coordinates = self.b_spline_set.project(points=points, targets=targets, direction=direction,
+        return self.b_spline_set.project(points=points, targets=targets, direction=direction,
                                          grid_search_density_parameter=grid_search_density_parameter, max_iterations=max_iterations, plot=plot)
-
-            saved_projections_dict = {}
-            saved_projections_dict['parametric_coordinates'] = parametric_coordinates
-
-            with open(PROJECTIONS_FOLDER / f'{str(points)}_{str(targets)}_{str(direction)}_{grid_search_density_parameter}_{max_iterations}_{b_splines_spaces}_{coefficients}.pickle', '+wb') as handle:
-                pickle.dump(saved_projections_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-        return parametric_coordinates
 
 
     def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points'], plot_types:list=['mesh'],
