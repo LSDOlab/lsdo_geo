@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Union
 
 import m3l
 import numpy as np
@@ -77,7 +78,7 @@ class BSplineSetSpace(m3l.FunctionSpace):
         self.knots = np.hstack(self.knots)
             
 
-    def create_function(self, name:str, coefficients:np.ndarray=None, num_physical_dimensions:dict[str,int]|int=None) -> m3l.Function:
+    def create_function(self, name:str, coefficients:np.ndarray=None, num_physical_dimensions:Union[dict[str,int],int]=None) -> m3l.Function:
         '''
         Creates a function in the B-spline set space.
 

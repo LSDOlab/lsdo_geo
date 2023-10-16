@@ -273,7 +273,7 @@ class BSplineSet(m3l.Function):
  
         return evaluation_map
     
-    def evaluate_grid(self, b_spline_names:list[str]=None, grid_resolution:tuple[int]|dict[str,tuple[int]]|int=(100,),
+    def evaluate_grid(self, b_spline_names:list[str]=None, grid_resolution:Union[tuple[int],dict[str,tuple[int]],int]=(100,),
                       parametric_derivative_order:tuple=None, return_flattened:bool=True) -> np.ndarray:
         '''
         Evaluates the B-spline set at a grid of parametric coordinates.
