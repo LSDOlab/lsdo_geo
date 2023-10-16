@@ -34,10 +34,10 @@ class BSplineSubSet:
     b_spline_set : BSplineSet
     b_spline_names : list[str]
 
-    def evaluate(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple[int]=None) -> am.MappedArray:
+    def evaluate(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple[int]=None, plot:bool=False) -> am.MappedArray:
 
         return self.b_spline_set.evaluate(parametric_coordinates=parametric_coordinates,
-                                           parametric_derivative_order=parametric_derivative_order)
+                                           parametric_derivative_order=parametric_derivative_order, plot=plot)
 
 
     def project(self, points:np.ndarray, targets:list[str]=None, direction:np.ndarray=None,
