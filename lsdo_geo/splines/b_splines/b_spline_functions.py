@@ -127,7 +127,8 @@ def import_file(file_name:str, parallelize:bool=True) -> dict[str, BSpline]:
     point_table["lines"] = filtered_point_table["lines"].values
 
     if parallelize:
-        b_spline_list = Parallel(n_jobs=20)(delayed(_build_b_splines)(i, parsed_info_dict, point_table, b_spline_spaces, b_splines_to_spaces_dict) for i in range(num_surf))
+        b_spline_list = Parallel(n_jobs=20)(delayed(_build_b_splines)(i, parsed_info_dict, point_table, b_spline_spaces, 
+                                                                      b_splines_to_spaces_dict) for i in range(num_surf))
     else:
         b_spline_list = []
         for i in range(num_surf):
@@ -223,7 +224,8 @@ def _parse_file_info(i, surf):
 
         order_u = int(parsed_info[1])+1
         order_v = int(parsed_info[2])+1
-        space_name = 'order_u_' + str(order_u) + 'order_v_' + str(order_v) + 'knots_u_' + str(knots_u) + 'knots_v_' + str(knots_v)
+        space_name = 'order_u_' + str(order_u) + 'order_v_' + str(order_v) + 'knots_u_' + str(knots_u) + 'knots_v_' + str(knots_v) + \
+            '_b_spline_space'
 
         return (parsed_info, space_name)
 
@@ -312,11 +314,21 @@ def fit_b_spline(fitting_points:np.ndarray, parametric_coordinates=None,
         flattened_fitting_points = fitting_points.reshape(flattened_fitting_points_shape)
 
         # Perform fitting
-        a = ((evaluation_matrix.T).dot(evaluation_matrix)).toarray()
-        if np.linalg.det(a) == 0:
-            cps_fitted,_,_,_ = np.linalg.lstsq(a, evaluation_matrix.T.dot(flattened_fitting_points), rcond=None)
-        else: 
-            cps_fitted = np.linalg.solve(a, evaluation_matrix.T.dot(flattened_fitting_points))            
+        # a = ((evaluation_matrix.T).dot(evaluation_matrix)).toarray()
+        a = ((evaluation_matrix.T).dot(evaluation_matrix))
+        if type(evaluation_matrix) is np.ndarray:
+            if np.linalg.det(evaluation_matrix) == 0:
+                cps_fitted,_,_,_ = np.linalg.lstsq(evaluation_matrix, flattened_fitting_points, rcond=None)
+            # else: 
+            #     cps_fitted = np.linalg.solve(a, evaluation_matrix.T.dot(flattened_fitting_points))
+        elif sps.isspmatrix(evaluation_matrix):
+            import scipy.sparse.linalg as spsl
+            # cps_fitted = np.zeros((evaluation_matrix.shape[1], flattened_fitting_points.shape[1]))
+            # if sps.linalg.det(a) == 0:
+            # for i in range(flattened_fitting_points.shape[1]):
+            #     cps_fitted[:,i] = spsl.lsqr(evaluation_matrix, flattened_fitting_points[:,i])[0]  # This is slower because looping is needed
+            # a = evaluation_matrix.T.dot(evaluation_matrix)
+            cps_fitted = spsl.spsolve(a, evaluation_matrix.T.dot(flattened_fitting_points))
 
         space_name = 'order_u_' + str(order_u) + 'order_v_' + str(order_v) + 'knots_u_' + str(knot_vector_u) + 'knots_v_' + str(knot_vector_v)
 
@@ -327,7 +339,7 @@ def fit_b_spline(fitting_points:np.ndarray, parametric_coordinates=None,
         b_spline = BSpline(
             name=name,
             space=b_spline_space,
-            coefficients=np.array(cps_fitted).reshape((-1,)),
+            coefficients=cps_fitted.reshape((-1,)),
             num_physical_dimensions=num_physical_dimensions
         )
 
@@ -393,64 +405,98 @@ def refit_b_spline(b_spline, order : tuple = (4,), num_coefficients : tuple = (1
     return
 
 
-def refit_b_spline_set_not_parallel(b_spline_set:BSplineSet, num_coefficients:tuple=(25,25), fit_resolution:tuple=(50,50), order:tuple=(4,4)):
+def fit_b_spline_set(fitting_points:np.ndarray, fitting_parametric_coordinates:list[dict[str,np.ndarray]], 
+                     b_spline_set_space:BSplineSetSpace) -> np.ndarray:
     '''
-    Evaluates a grid over the B-spline set and finds the best set of coefficients/control points at the desired resolution to fit the B-spline set.
-
-    Parameters
-    ----------
-    num_coefficients : tuple, optional
-        The number of coefficients to use in each direction.
-    fit_resolution : tuple, optional
-        The number of points to evaluate in each direction for each B-spline to fit the B-spline set.
-    order : tuple, optional
-        The order of the B-splines to use in each direction.
+    Finds the coefficients such that the B-spline set best fit the coordinates of a supplied mesh.
     '''
-    b_splines = {}
-    for b_spline_name, indices in b_spline_set.coefficient_indices.items():
-        if type(num_coefficients) is int:
-            num_coefficients = (num_coefficients, num_coefficients)
-        elif len(num_coefficients) == 1:
-            num_coefficients = (num_coefficients[0], num_coefficients[0])
 
-        if type(fit_resolution) is int:
-            fit_resolution = (fit_resolution, fit_resolution)
-        elif len(fit_resolution) == 1:
-            fit_resolution = (fit_resolution[0], fit_resolution[0])
+    # Lazy method: Create a B-spline Set object and use it to create the evaluation map
+    if len(fitting_points.shape) == 1:
+        num_physical_dimensions = 1
+    else:
+        num_physical_dimensions = fitting_points.shape[-1]
+    temp_b_spline_set = b_spline_set_space.create_function(name='temp', coefficients=None, num_physical_dimensions=num_physical_dimensions)
+    evaluation_map = temp_b_spline_set.compute_evaluation_map(parametric_coordinates=fitting_parametric_coordinates,
+                                                              expand_map_for_physical=False)
 
-        if type(order) is int:
-            order = (order, order)
-        elif len(order) == 1:
-            order = (order[0], order[0])
+    # Perform fitting
+    flattened_fitting_points = fitting_points.reshape((-1,num_physical_dimensions))
+    a = ((evaluation_map.T).dot(evaluation_map))
+    if type(evaluation_map) is np.ndarray:
+        # if np.linalg.det(a) == 0:
+        control_points,_,_,_ = np.linalg.lstsq(evaluation_map, flattened_fitting_points, rcond=None)
+        # else: 
+        #     control_points = np.linalg.solve(a, evaluation_map.T.dot(flattened_fitting_points))
+    elif sps.isspmatrix(evaluation_map):
+        import scipy.sparse.linalg as spsl
+        # control_points = np.zeros((evaluation_map.shape[1], flattened_fitting_points.shape[1]))
+        # for i in range(flattened_fitting_points.shape[1]):
+        #     control_points[:,i] = spsl.lsqr(evaluation_map, flattened_fitting_points[:,i])[0]
+        control_points = spsl.spsolve(a, evaluation_map.T.dot(flattened_fitting_points))
 
-        num_points_u = fit_resolution[0]
-        num_points_v = fit_resolution[1]
+    return control_points
 
-        num_dimensions = b_spline_set.num_physical_dimensions[b_spline_name]
-        u_vec = np.einsum('i,j->ij', np.linspace(0., 1., num_points_u), np.ones(num_points_v)).flatten()
-        v_vec = np.einsum('i,j->ij', np.ones(num_points_u), np.linspace(0., 1., num_points_v)).flatten()
-        parametric_coordinates = np.zeros((num_points_u*num_points_v, 2))
-        parametric_coordinates[:,0] = u_vec.copy()
-        parametric_coordinates[:,1] = v_vec.copy()
 
-        b_spline_space = b_spline_set.space.spaces[b_spline_set.space.b_spline_to_space[b_spline_name]]
-        evaluation_map = compute_evaluation_map(parametric_coordinates=parametric_coordinates, order=b_spline_space.order,
-            parametric_coefficients_shape=b_spline_space.parametric_coefficients_shape, knots=b_spline_space.knots)
-        points_vector = evaluation_map.dot(b_spline_set.coefficients[indices].reshape((evaluation_map.shape[1], -1)))
+# def refit_b_spline_set_not_parallel(b_spline_set:BSplineSet, num_coefficients:tuple=(25,25), fit_resolution:tuple=(50,50), order:tuple=(4,4)):
+#     '''
+#     Evaluates a grid over the B-spline set and finds the best set of coefficients/control points at the desired resolution to fit the B-spline set.
+#     This method involves fitting the whole set at once, but it seems to be very costly memory-wise. I could revisit this in the future.
 
-        points = points_vector.reshape((num_points_u, num_points_v, num_dimensions))
+#     Parameters
+#     ----------
+#     num_coefficients : tuple, optional
+#         The number of coefficients to use in each direction.
+#     fit_resolution : tuple, optional
+#         The number of points to evaluate in each direction for each B-spline to fit the B-spline set.
+#     order : tuple, optional
+#         The order of the B-splines to use in each direction.
+#     '''
+#     b_splines = {}
+#     for b_spline_name, indices in b_spline_set.coefficient_indices.items():
+#         if type(num_coefficients) is int:
+#             num_coefficients = (num_coefficients, num_coefficients)
+#         elif len(num_coefficients) == 1:
+#             num_coefficients = (num_coefficients[0], num_coefficients[0])
 
-        b_spline = fit_b_spline(fitting_points=points, parametric_coordinates=(u_vec, v_vec), 
-            order=order, num_coefficients=num_coefficients,
-            knot_vectors=None, name=b_spline_name)
+#         if type(fit_resolution) is int:
+#             fit_resolution = (fit_resolution, fit_resolution)
+#         elif len(fit_resolution) == 1:
+#             fit_resolution = (fit_resolution[0], fit_resolution[0])
+
+#         if type(order) is int:
+#             order = (order, order)
+#         elif len(order) == 1:
+#             order = (order[0], order[0])
+
+#         num_points_u = fit_resolution[0]
+#         num_points_v = fit_resolution[1]
+
+#         num_dimensions = b_spline_set.num_physical_dimensions[b_spline_name]
+#         u_vec = np.einsum('i,j->ij', np.linspace(0., 1., num_points_u), np.ones(num_points_v)).flatten()
+#         v_vec = np.einsum('i,j->ij', np.ones(num_points_u), np.linspace(0., 1., num_points_v)).flatten()
+#         parametric_coordinates = np.zeros((num_points_u*num_points_v, 2))
+#         parametric_coordinates[:,0] = u_vec.copy()
+#         parametric_coordinates[:,1] = v_vec.copy()
+
+#         b_spline_space = b_spline_set.space.spaces[b_spline_set.space.b_spline_to_space[b_spline_name]]
+#         evaluation_map = compute_evaluation_map(parametric_coordinates=parametric_coordinates, order=b_spline_space.order,
+#             parametric_coefficients_shape=b_spline_space.parametric_coefficients_shape, knots=b_spline_space.knots)
+#         points_vector = evaluation_map.dot(b_spline_set.coefficients[indices].reshape((evaluation_map.shape[1], -1)))
+
+#         points = points_vector.reshape((num_points_u, num_points_v, num_dimensions))
+
+#         b_spline = fit_b_spline(fitting_points=points, parametric_coordinates=(u_vec, v_vec), 
+#             order=order, num_coefficients=num_coefficients,
+#             knot_vectors=None, name=b_spline_name)
         
-        b_splines[b_spline_name] = b_spline
+#         b_splines[b_spline_name] = b_spline
 
-    new_b_spline_set = create_b_spline_set(name=b_spline_set.name, b_splines=b_splines)
+#     new_b_spline_set = create_b_spline_set(name=b_spline_set.name, b_splines=b_splines)
         
-    return new_b_spline_set
+#     return new_b_spline_set
 
-def refit_b_spline_set(b_spline_set:BSplineSet, num_coefficients:tuple=(25,25), fit_resolution:tuple=(50,50), order:tuple=(4,4), 
+def refit_b_spline_set(b_spline_set:BSplineSet, order:tuple=(4,4), num_coefficients:tuple=(25,25), fit_resolution:tuple=(50,50), 
                        parallelize:bool=True):
     '''
     Evaluates a grid over the B-spline set and finds the best set of coefficients/control points at the desired resolution to fit the B-spline set.
@@ -466,7 +512,9 @@ def refit_b_spline_set(b_spline_set:BSplineSet, num_coefficients:tuple=(25,25), 
     '''
     b_splines = {}
     if parallelize:
-        b_splines_list = Parallel(n_jobs=20)(delayed(_fit_b_spline_in_set)(b_spline_set, b_spline_name, indices, num_coefficients, fit_resolution, order) for b_spline_name, indices in b_spline_set.coefficient_indices.items())
+        b_splines_list = Parallel(n_jobs=20)(delayed(_fit_b_spline_in_set)(b_spline_set, b_spline_name, indices, num_coefficients, 
+                                                                           fit_resolution, order) for b_spline_name, indices in \
+                                                                            b_spline_set.coefficient_indices.items())
         for b_spline in b_splines_list:
             b_splines[b_spline.name] = b_spline
     else:
@@ -478,7 +526,8 @@ def refit_b_spline_set(b_spline_set:BSplineSet, num_coefficients:tuple=(25,25), 
         
     return new_b_spline_set
 
-def _fit_b_spline_in_set(b_spline_set:BSplineSet, b_spline_name:str, indices:np.ndarray, num_coefficients:tuple=(25,25), fit_resolution:tuple=(50,50), order:tuple=(4,4)):
+def _fit_b_spline_in_set(b_spline_set:BSplineSet, b_spline_name:str, indices:np.ndarray, num_coefficients:tuple=(25,25), 
+                                                                    fit_resolution:tuple=(50,50), order:tuple=(4,4)):
     if type(num_coefficients) is int:
         num_coefficients = (num_coefficients, num_coefficients)
     elif len(num_coefficients) == 1:
@@ -516,6 +565,71 @@ def _fit_b_spline_in_set(b_spline_set:BSplineSet, b_spline_name:str, indices:np.
         knot_vectors=None, name=b_spline_name)
     
     return b_spline
+
+
+# def refit_b_spline_set(b_spline_set:BSplineSet, order:tuple[int]=(4,), num_coefficients:tuple[int]=(25,), fit_resolution:tuple[int]=(50,)):
+#     '''
+#     Evaluates a grid over the B-spline set and finds the best set of coefficients/control points at the desired resolution to fit the B-spline set.
+
+#     Parameters
+#     ----------
+#     num_coefficients : tuple, optional
+#         The number of coefficients to use in each direction.
+#     fit_resolution : tuple, optional
+#         The number of points to evaluate in each direction for each B-spline to fit the B-spline set.
+#     order : tuple, optional
+#         The order of the B-splines to use in each direction.
+#     '''
+#     new_b_spline_spaces = {}
+#     new_b_spline_to_space = {}
+#     parametric_coordinates = []
+#     for b_spline_name in b_spline_set.coefficient_indices.keys():
+#         b_spline_original_space = b_spline_set.space.spaces[b_spline_set.space.b_spline_to_space[b_spline_name]]
+#         num_parametric_dimensions = b_spline_original_space.num_parametric_dimensions
+
+#         if len(num_coefficients) == 1:
+#             b_spline_num_coefficients = (num_coefficients[0],)*num_parametric_dimensions
+#         else:
+#             b_spline_num_coefficients = num_coefficients
+
+#         new_b_spline_space_name = 'order_' + str(order) + 'num_coefficients_' + str(num_coefficients) + '_b_spline_space'
+#         new_b_spline_space = BSplineSpace(name=new_b_spline_space_name, order=order, 
+#                                           parametric_coefficients_shape=b_spline_num_coefficients)
+#         new_b_spline_spaces[new_b_spline_space_name] = new_b_spline_space
+#         new_b_spline_to_space[b_spline_name] = new_b_spline_space_name
+
+#         if len(fit_resolution) == 1:
+#             b_spline_fit_resolution = (fit_resolution[0],)*num_parametric_dimensions
+#         elif type(fit_resolution) is int:
+#             b_spline_fit_resolution = (fit_resolution,)*num_parametric_dimensions
+#         else:
+#             b_spline_fit_resolution = fit_resolution
+
+#         mesh_grid_input = []
+#         for dimension_index in range(num_parametric_dimensions):
+#             mesh_grid_input.append(np.linspace(0., 1., b_spline_fit_resolution[dimension_index]))
+
+#         b_spline_parametric_coordinates_tuple = np.meshgrid(*mesh_grid_input, indexing='ij')
+#         for dimensions_index in range(num_parametric_dimensions):
+#             b_spline_parametric_coordinates_tuple[dimensions_index] = b_spline_parametric_coordinates_tuple[dimensions_index].reshape((-1,1))
+
+#         b_spline_parametric_coordinates = np.hstack(b_spline_parametric_coordinates_tuple)
+
+#         for i in range(b_spline_parametric_coordinates.shape[0]):
+#             parametric_coordinates.append((b_spline_name, b_spline_parametric_coordinates[i,:]))
+
+#     new_space_name = 'order_' + str(order) + 'num_coefficients_' + str(num_coefficients) + '_space'
+#     new_space = BSplineSetSpace(name=new_space_name, spaces=new_b_spline_spaces, b_spline_to_space=new_b_spline_to_space)
+
+#     fitting_points = b_spline_set.evaluate(parametric_coordinates=parametric_coordinates).reshape((-1,3))
+
+#     coefficients = new_space.fit_b_spline_set(fitting_points=fitting_points.value,
+#                                               fitting_parametric_coordinates=parametric_coordinates)
+
+#     new_b_spline_set = BSplineSet(name=b_spline_set.name, space=new_space, coefficients=coefficients, 
+#                                   num_physical_dimensions=b_spline_set.num_physical_dimensions)
+        
+#     return new_b_spline_set
 
 
 def compute_evaluation_map(parametric_coordinates:np.ndarray, order:tuple, parametric_coefficients_shape:tuple, knots:np.ndarray=None,

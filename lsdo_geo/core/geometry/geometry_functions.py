@@ -1,5 +1,5 @@
 from lsdo_geo.splines.b_splines.b_spline_functions import import_file, create_b_spline_set
-from lsdo_geo.core.python_core.geometry.geometry import Geometry
+from lsdo_geo.core.geometry.geometry import Geometry
 
 def import_geometry(file_name:str, name:str='geometry', parallelize:bool=True) -> Geometry:
     '''

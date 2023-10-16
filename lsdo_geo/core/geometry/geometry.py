@@ -94,7 +94,7 @@ class Geometry(BSplineSet):
         self.coefficient_indices = b_spline_set.coefficient_indices
         self.connections = b_spline_set.connections
 
-    def refit(self, num_coefficients:tuple=(25,25), fit_resolution:tuple=(100,100), order:tuple=(4,4), parallelize:bool=True):
+    def refit(self, num_coefficients:tuple=(20,20), fit_resolution:tuple=(50,50), order:tuple=(4,4), parallelize:bool=True):
         '''
         Evaluates a grid over the geometry and finds the best set of coefficients/control points at the desired resolution to fit the geometry.
 
@@ -108,7 +108,7 @@ class Geometry(BSplineSet):
             The order of the B-splines to use in each direction.
         '''
         from lsdo_geo.splines.b_splines.b_spline_functions import refit_b_spline_set
-        b_spline_set = refit_b_spline_set(self, num_coefficients, fit_resolution, order, parallelize=parallelize)
+        b_spline_set = refit_b_spline_set(self, order, num_coefficients, fit_resolution, parallelize=parallelize)
 
         self.debugging_b_spline_set = b_spline_set
 
@@ -124,7 +124,7 @@ class Geometry(BSplineSet):
 
 
 if __name__ == "__main__":
-    from lsdo_geo.core.python_core.geometry.geometry_functions import import_geometry
+    from lsdo_geo.core.geometry.geometry_functions import import_geometry
     import array_mapper as am
     import m3l
     import time
@@ -142,20 +142,20 @@ if __name__ == "__main__":
     t3 = time.time()
     # geometry.find_connections() # NOTE: This is really really slow for large geometries. Come back to this.
     t4 = time.time()
-    geometry.plot()
+    # geometry.plot()
     t5 = time.time()
     print('Import time: ', t2-t1)
     print('Refit time: ', t3-t2)
     print('Find connections time: ', t4-t3)
     print('Plot time: ', t5-t4)
 
-    projected_points1_coordinates = geometry.project(np.array([[0.2, 1., 10.], [0.5, 1., 1.]]), plot=True, direction=np.array([0., 0., -1.]))
-    projected_points2_coordinates = geometry.project(np.array([[0.2, 0., 10.], [0.5, 1., 1.]]), plot=True, max_iterations=100)
+    # projected_points1_coordinates = geometry.project(np.array([[0.2, 1., 10.], [0.5, 1., 1.]]), plot=True, direction=np.array([0., 0., -1.]))
+    # projected_points2_coordinates = geometry.project(np.array([[0.2, 0., 10.], [0.5, 1., 1.]]), plot=True, max_iterations=100)
 
-    projected_points1 = geometry.evaluate(projected_points1_coordinates, plot=True)
-    projected_points2 = geometry.evaluate(projected_points2_coordinates, plot=True)
+    # projected_points1 = geometry.evaluate(projected_points1_coordinates, plot=True)
+    # projected_points2 = geometry.evaluate(projected_points2_coordinates, plot=True)
 
-    test_linspace = m3l.linspace(projected_points1, projected_points2)
+    # test_linspace = m3l.linspace(projected_points1, projected_points2)
 
     # import vedo
     # plotter = vedo.Plotter()
@@ -163,19 +163,19 @@ if __name__ == "__main__":
     # geometry_plot = geometry.plot(show=False)
     # plotter.show(geometry_plot, plotting_points, interactive=True, axes=1)
 
-    right_wing = geometry.declare_component(component_name='right_wing', b_spline_search_names=['WingGeom, 0'])
-    right_wing.plot()
+    # right_wing = geometry.declare_component(component_name='right_wing', b_spline_search_names=['WingGeom, 0'])
+    # right_wing.plot()
 
-    projected_points1_on_right_wing = right_wing.project(np.array([[0.2, 1., 10.], [0.5, 1., 1.]]), plot=True, direction=np.array([0., 0., -1.]))
-    projected_points2_on_right_wing = right_wing.project(np.array([[0.2, 0., 1.], [0.5, 1., 1.]]), plot=True, max_iterations=100)
+    # projected_points1_on_right_wing = right_wing.project(np.array([[0.2, 1., 10.], [0.5, 1., 1.]]), plot=True, direction=np.array([0., 0., -1.]))
+    # projected_points2_on_right_wing = right_wing.project(np.array([[0.2, 0., 1.], [0.5, 1., 1.]]), plot=True, max_iterations=100)
 
     left_wing = geometry.declare_component(component_name='left_wing', b_spline_search_names=['WingGeom, 1'])
-    left_wing.plot()
+    # left_wing.plot()
 
-    geometry2 = geometry.copy()
-    geometry2.coefficients = geometry.coefficients.copy()*2
-    geometry2.plot()
-    geometry.plot()
+    # geometry2 = geometry.copy()
+    # geometry2.coefficients = geometry.coefficients.copy()*2
+    # geometry2.plot()
+    # geometry.plot()
 
     # print(projected_points1_on_right_wing.evaluate(geometry2.coefficients))
 
@@ -190,6 +190,41 @@ if __name__ == "__main__":
             * np.sqrt(1 - (2*left_wing_geometry_coefficients[:,0]/4)**2) \
             * (left_wing_geometry_coefficients[:,2]+0.05)
         pressure_coefficients = np.concatenate((pressure_coefficients, b_spline_pressure_coefficients.flatten()))
+
+    left_wing_pressure_function = left_wing_pressure_space.create_function(name='left_wing_pressure_function', 
+                                                                           coefficients=pressure_coefficients, num_physical_dimensions=1)
+    left_wing.plot(color=left_wing_pressure_function)
+
+    left_wing_pressure_space = geometry.space.create_sub_space(sub_space_name='left_wing_pressure_space',
+                                                                            b_spline_names=left_wing.b_spline_names)
+    # Manually creating a pressure distribution mesh
+    pressure_mesh = np.zeros((0,))
+    pressure_parametric_coordinates = []
+    for b_spline_name in left_wing.b_spline_names:
+        left_wing_geometry_coefficients = geometry.coefficients[geometry.coefficient_indices[b_spline_name]].reshape((-1,3))
+        b_spline_pressure_coefficients = \
+            -4*8.1/(np.pi*8.1)*np.sqrt(1 - (2*left_wing_geometry_coefficients[:,1]/8.1)**2) \
+            * np.sqrt(1 - (2*left_wing_geometry_coefficients[:,0]/4)**2) \
+            * (left_wing_geometry_coefficients[:,2]+0.05)
+        pressure_mesh = np.concatenate((pressure_mesh, b_spline_pressure_coefficients.flatten()))
+
+        # parametric_coordinates = left_wing.project(points=left_wing_geometry_coefficients, targets=[b_spline_name])
+        # pressure_parametric_coordinates.extend(parametric_coordinates)
+
+        b_spline_space = left_wing_pressure_space.spaces[left_wing_pressure_space.b_spline_to_space[b_spline_name]]
+
+        b_spline_num_coefficients_u = b_spline_space.parametric_coefficients_shape[0]
+        b_spline_num_coefficients_v = b_spline_space.parametric_coefficients_shape[1]
+
+        u_vec = np.einsum('i,j->ij', np.linspace(0., 1., b_spline_num_coefficients_u), np.ones(b_spline_num_coefficients_u)).flatten()
+        v_vec = np.einsum('i,j->ij', np.ones(b_spline_num_coefficients_v), np.linspace(0., 1., b_spline_num_coefficients_v)).flatten()
+        parametric_coordinates = np.hstack((u_vec.reshape((-1,1)), v_vec.reshape((-1,1))))
+
+        for i in range(len(parametric_coordinates)):
+            pressure_parametric_coordinates.append(tuple((b_spline_name, parametric_coordinates[i,:])))
+
+    pressure_coefficients = left_wing_pressure_space.fit_b_spline_set(fitting_points=pressure_mesh.reshape((-1,1)),
+                                                                                  fitting_parametric_coordinates=pressure_parametric_coordinates)
 
     left_wing_pressure_function = left_wing_pressure_space.create_function(name='left_wing_pressure_function', 
                                                                            coefficients=pressure_coefficients, num_physical_dimensions=1)

@@ -23,7 +23,12 @@ class BSplineSpace(m3l.FunctionSpace):
 
         self.num_coefficient_elements = np.prod(self.parametric_coefficients_shape)
 
-        self.num_parametric_dimensions = len(self.order)
+        self.num_parametric_dimensions = len(self.parametric_coefficients_shape)
+
+        if type(self.order) is int:
+            self.order = tuple([self.order] * self.num_parametric_dimensions)
+        if len(self.order) == 1:
+            self.order = tuple([self.order[0]] * self.num_parametric_dimensions)
 
         if self.knots is None:
             self.knots = np.array([])
