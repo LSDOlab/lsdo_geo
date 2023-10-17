@@ -7,6 +7,7 @@ import scipy.sparse as sps
 import re
 import pandas as pd
 from joblib import Parallel, delayed
+import m3l
 
 from lsdo_geo.splines.b_splines.b_spline import BSpline
 from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
@@ -830,3 +831,25 @@ def create_cartesian_enclosure_block(name:str, points:np.ndarray, num_coefficien
 
     return hyper_volume
 
+
+def rotate(points:m3l.Variable, axis_vector:m3l.Variable, axis_origin:m3l.Variable, angles:m3l.Variable, units:str='radians'):
+    '''
+    Rotates a given set of points around an axis by an angles.
+
+    Parameters
+    ----------
+    points : m3l.Variable
+        The points to rotate.
+    axis : m3l.Variable
+        The axis to rotate about.
+    angles : m3l.Variable
+        The angles to rotate by.
+
+    Returns
+    -------
+    rotated_points : m3l.Variable
+        The rotated points. If angles has multiple values, rotated points will have an additional axis in the front of its shape.
+    '''
+    if units == 'degrees':
+        theta = theta * np.pi/180.
+    

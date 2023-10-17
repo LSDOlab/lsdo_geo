@@ -140,7 +140,10 @@ class BSplineSet(m3l.Function):
         evaluation_map = self.compute_evaluation_map(parametric_coordinates=parametric_coordinates,
                                                      parametric_derivative_order=parametric_derivative_order)
         
-        evaluation_map = m3l.Variable(name='evaluation_map', shape=evaluation_map.shape, operation=None, 
+        # parametric_coordinates_string = ''
+        # for coordinate in parametric_coordinates:
+        #     parametric_coordinates_string += coordinate[0] + '_' + str(np.linalg.norm(coordinate[1]))
+        evaluation_map = m3l.Variable(name=f'evaluation_map', shape=evaluation_map.shape, operation=None, 
             value=evaluation_map)
 
         if type(self.coefficients) is np.ndarray:
@@ -149,8 +152,9 @@ class BSplineSet(m3l.Function):
         else:
             coefficients = self.coefficients
 
-        matvec_operation = m3l.MatVec()
-        output = matvec_operation.evaluate(evaluation_map, coefficients)
+        output = m3l.matvec(evaluation_map, coefficients)
+        # matvec_operation = m3l.MatVec()
+        # output = matvec_operation.evaluate(evaluation_map, coefficients)
 
         if plot:
             # Plot the surfaces that are projected onto
@@ -338,7 +342,13 @@ class BSplineSet(m3l.Function):
                                                     parametric_derivative_order=parametric_derivative_order,
                                                     expansion_factor=1
                                                     )
-            b_spline_coefficients = self.coefficients[self.coefficient_indices[b_spline_name]].reshape(
+            if type(self.coefficients) is np.ndarray:
+                plotting_coefficients = self.coefficients
+            elif type(self.coefficients) is m3l.Variable:
+                plotting_coefficients = self.coefficients.value
+            else:
+                raise Exception(f"Coefficients are of type {type(self.coefficients)}.")
+            b_spline_coefficients = plotting_coefficients[self.coefficient_indices[b_spline_name]].reshape(
                 (b_spline_space.num_coefficient_elements, self.num_physical_dimensions[b_spline_name]))
             b_spline_grid_points = evaluation_map.dot(b_spline_coefficients)
 
@@ -620,6 +630,58 @@ class BSplineSet(m3l.Function):
             plotter.show(b_spline_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
 
         return parametric_coordinates
+    
+
+
+    def rotate(self, axis_origin:m3l.Variable, axis_vector:m3l.Variable, angles:m3l.Variable, b_splines:list[str]=None, units:str='degrees'):
+        '''
+        Rotates the B-spline set about an axis.
+
+        Parameters
+        -----------
+        b_splines : list[str]
+            The B-splines to rotate.
+        axis_origin : m3l.Variable
+            The origin of the axis of rotation.
+        axis_vector : m3l.Variable
+            The vector of the axis of rotation.
+        angles : m3l.Variable
+            The angle of rotation.
+        units : str
+            The units of the angle of rotation. {degrees, radians}
+        '''
+        if units == 'degrees':
+            angles = angles * np.pi / 180.
+            units = 'radians'
+        elif units == 'radians':
+            pass
+        else:
+            raise ValueError(f'Invalid units {units}.')
+        
+        if b_splines is None:
+            b_splines = list(self.coefficient_indices.keys())
+        if type(b_splines) is str:
+            b_splines = [b_splines]
+        if type(b_splines) is not list:
+            raise ValueError('The B-splines must be a list of strings.')
+        
+        if type(axis_origin) is np.ndarray:
+            axis_origin = m3l.Variable(name='axis_origin', shape=axis_origin.shape, value=axis_origin)
+        if type(axis_vector) is np.ndarray:
+            axis_vector = m3l.Variable(name='axis_vector', shape=axis_vector.shape, value=axis_vector)
+        if type(angles) is np.ndarray:
+            angles = m3l.Variable(name='angles', shape=angles.shape, value=angles)
+
+        point_indices_list = []
+        for i in range(len(b_splines)):
+            b_spline_coefficients_indices = self.coefficient_indices[b_splines[i]]
+            point_indices_list.append(b_spline_coefficients_indices)
+        points_indices = np.hstack(point_indices_list)
+        rotating_points = self.coefficients[points_indices]
+
+        rotated_points = m3l.rotate(points=rotating_points, axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units)
+
+        self.coefficients[points_indices] = rotated_points
 
 
     def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points'], plot_types:list=['mesh'],

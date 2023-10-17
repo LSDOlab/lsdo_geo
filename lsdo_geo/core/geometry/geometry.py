@@ -195,41 +195,56 @@ if __name__ == "__main__":
                                                                            coefficients=pressure_coefficients, num_physical_dimensions=1)
     left_wing.plot(color=left_wing_pressure_function)
 
-    left_wing_pressure_space = geometry.space.create_sub_space(sub_space_name='left_wing_pressure_space',
-                                                                            b_spline_names=left_wing.b_spline_names)
-    # Manually creating a pressure distribution mesh
-    pressure_mesh = np.zeros((0,))
-    pressure_parametric_coordinates = []
-    for b_spline_name in left_wing.b_spline_names:
-        left_wing_geometry_coefficients = geometry.coefficients[geometry.coefficient_indices[b_spline_name]].reshape((-1,3))
-        b_spline_pressure_coefficients = \
-            -4*8.1/(np.pi*8.1)*np.sqrt(1 - (2*left_wing_geometry_coefficients[:,1]/8.1)**2) \
-            * np.sqrt(1 - (2*left_wing_geometry_coefficients[:,0]/4)**2) \
-            * (left_wing_geometry_coefficients[:,2]+0.05)
-        pressure_mesh = np.concatenate((pressure_mesh, b_spline_pressure_coefficients.flatten()))
+    # left_wing_pressure_space = geometry.space.create_sub_space(sub_space_name='left_wing_pressure_space',
+    #                                                                         b_spline_names=left_wing.b_spline_names)
+    # # Manually creating a pressure distribution mesh
+    # pressure_mesh = np.zeros((0,))
+    # pressure_parametric_coordinates = []
+    # for b_spline_name in left_wing.b_spline_names:
+    #     left_wing_geometry_coefficients = geometry.coefficients[geometry.coefficient_indices[b_spline_name]].reshape((-1,3))
+    #     b_spline_pressure_coefficients = \
+    #         -4*8.1/(np.pi*8.1)*np.sqrt(1 - (2*left_wing_geometry_coefficients[:,1]/8.1)**2) \
+    #         * np.sqrt(1 - (2*left_wing_geometry_coefficients[:,0]/4)**2) \
+    #         * (left_wing_geometry_coefficients[:,2]+0.05)
+    #     pressure_mesh = np.concatenate((pressure_mesh, b_spline_pressure_coefficients.flatten()))
 
-        # parametric_coordinates = left_wing.project(points=left_wing_geometry_coefficients, targets=[b_spline_name])
-        # pressure_parametric_coordinates.extend(parametric_coordinates)
+    #     # parametric_coordinates = left_wing.project(points=left_wing_geometry_coefficients, targets=[b_spline_name])
+    #     # pressure_parametric_coordinates.extend(parametric_coordinates)
 
-        b_spline_space = left_wing_pressure_space.spaces[left_wing_pressure_space.b_spline_to_space[b_spline_name]]
+    #     b_spline_space = left_wing_pressure_space.spaces[left_wing_pressure_space.b_spline_to_space[b_spline_name]]
 
-        b_spline_num_coefficients_u = b_spline_space.parametric_coefficients_shape[0]
-        b_spline_num_coefficients_v = b_spline_space.parametric_coefficients_shape[1]
+    #     b_spline_num_coefficients_u = b_spline_space.parametric_coefficients_shape[0]
+    #     b_spline_num_coefficients_v = b_spline_space.parametric_coefficients_shape[1]
 
-        u_vec = np.einsum('i,j->ij', np.linspace(0., 1., b_spline_num_coefficients_u), np.ones(b_spline_num_coefficients_u)).flatten()
-        v_vec = np.einsum('i,j->ij', np.ones(b_spline_num_coefficients_v), np.linspace(0., 1., b_spline_num_coefficients_v)).flatten()
-        parametric_coordinates = np.hstack((u_vec.reshape((-1,1)), v_vec.reshape((-1,1))))
+    #     u_vec = np.einsum('i,j->ij', np.linspace(0., 1., b_spline_num_coefficients_u), np.ones(b_spline_num_coefficients_u)).flatten()
+    #     v_vec = np.einsum('i,j->ij', np.ones(b_spline_num_coefficients_v), np.linspace(0., 1., b_spline_num_coefficients_v)).flatten()
+    #     parametric_coordinates = np.hstack((u_vec.reshape((-1,1)), v_vec.reshape((-1,1))))
 
-        for i in range(len(parametric_coordinates)):
-            pressure_parametric_coordinates.append(tuple((b_spline_name, parametric_coordinates[i,:])))
+    #     for i in range(len(parametric_coordinates)):
+    #         pressure_parametric_coordinates.append(tuple((b_spline_name, parametric_coordinates[i,:])))
 
-    pressure_coefficients = left_wing_pressure_space.fit_b_spline_set(fitting_points=pressure_mesh.reshape((-1,1)),
-                                                                                  fitting_parametric_coordinates=pressure_parametric_coordinates)
+    # pressure_coefficients = left_wing_pressure_space.fit_b_spline_set(fitting_points=pressure_mesh.reshape((-1,1)),
+    #                                                                               fitting_parametric_coordinates=pressure_parametric_coordinates)
 
-    left_wing_pressure_function = left_wing_pressure_space.create_function(name='left_wing_pressure_function', 
-                                                                           coefficients=pressure_coefficients, num_physical_dimensions=1)
+    # left_wing_pressure_function = left_wing_pressure_space.create_function(name='left_wing_pressure_function', 
+    #                                                                        coefficients=pressure_coefficients, num_physical_dimensions=1)
     
-    left_wing.plot(color=left_wing_pressure_function)
+    # left_wing.plot(color=left_wing_pressure_function)
+
+    geometry3 = geometry.copy()
+    axis_origin = geometry.evaluate(geometry.project(np.array([0.5, -10., 0.5])))
+    axis_vector = geometry.evaluate(geometry.project(np.array([0.5, 10., 0.5]))) - axis_origin
+    angles = 45
+    geometry3.coefficients = m3l.rotate(points=geometry3.coefficients.reshape((-1,3)), axis_origin=axis_origin, axis_vector=axis_vector, angles=angles,
+                                        units='degrees').reshape((-1,))
+    geometry3.plot()
+
+    geometry4 = geometry.copy()
+    # left_wing_transition = geometry.declare_component(component_name='left_wing', b_spline_search_names=['WingGeom, 1'])
+    # actuated_left_wing_transition = m3l.rotate(left_wing_transition.coefficients.reshape((-1,3)), axis_origin=axis_origin,
+    #                                            axis_vector=axis_vector, angles=angles, units='degrees').reshape((-1,))
+    geometry4.rotate(axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units='degrees')
+
 
     # DO ACTUATIONS NEXT
     # -- Should be able to actuate meshes/control/points/FFD, whatever. It should just take in points and rotate them around an axis.
