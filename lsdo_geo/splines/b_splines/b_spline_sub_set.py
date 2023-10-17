@@ -86,7 +86,7 @@ class BSplineSubSet:
         return self.b_spline_set.rotate(axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, b_splines=b_splines, units=units)
 
 
-    def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points'], plot_types:list=['mesh'],
+    def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points'], plot_types:list=['surface'],
               opacity:float=1., color:Union[str,BSplineSet] ='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
         '''
         Plots the B-spline Surface.

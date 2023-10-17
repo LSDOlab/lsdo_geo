@@ -7,6 +7,7 @@ import pickle
 import m3l
 from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
 from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
+from typing import Union
 
 @dataclass
 class Geometry(BSplineSet):
@@ -137,6 +138,125 @@ class Geometry(BSplineSet):
 
         self.num_coefficients = b_spline_set.num_coefficients
 
+    
+    def plot_meshes(self, meshes:list[m3l.Variable], mesh_plot_types:list[str]=['wireframe'], mesh_opacity:float=1., mesh_color:str='#F5F0E6',
+                b_splines:list[str]=None, b_splines_plot_types:list[str]=['surface'], b_splines_opacity:float=0.25, b_splines_color:str='#00629B',
+                b_splines_surface_texture:str="", additional_plotting_elements:list=[], camera:dict=None, show:bool=True):
+        '''
+        Plots a mesh over the geometry.
+
+        Parameters
+        ----------
+        meshes : list
+            A list of meshes to plot.
+        mesh_plot_types : list, optional
+            A list of plot types for each mesh. Options are 'wireframe', 'surface', and 'points'.
+        mesh_opacity : float, optional
+            The opacity of the mesh.
+        mesh_color : str, optional
+            The color of the mesh.
+        b_splines : list, optional
+            A list of b_splines to plot.
+        b_splines_plot_types : list, optional
+            A list of plot types for each primitive. Options are 'wireframe', 'surface', and 'points'.
+        b_splines_opacity : float, optional
+            The opacity of the b_splines.
+        b_splines_color : str, optional
+            The color of the b_splines.
+        b_splines_surface_texture : str {"", "metallic", "glossy", "ambient",... see Vedo for more options}
+            The surface texture for the primitive surfaces. (determines how light bounces off)
+            More options: https://github.com/marcomusy/vedo/blob/master/examples/basic/lightings.py
+        additional_plotting_elements : list, optional
+            A list of additional plotting elements to plot.
+        camera : dict, optional
+            A dictionary of camera parameters. see Vedo documentation for more information.
+        show : bool, optional
+            Whether or not to show the plot.
+
+        Returns
+        -------
+        plotting_elements : list
+            A list of the vedo plotting elements.
+        '''
+        import vedo
+        plotting_elements = additional_plotting_elements.copy()
+
+        if not isinstance(meshes, list) and not isinstance(meshes, tuple):
+            meshes = [meshes]
+
+        # Create plotting meshes for b_splines
+        plotting_elements = self.plot(b_splines=b_splines, plot_types=b_splines_plot_types, opacity=b_splines_opacity,
+                                      color=b_splines_color, surface_texture=b_splines_surface_texture,
+                                      additional_plotting_elements=plotting_elements,show=False)
+
+        for mesh in meshes:
+            if type(mesh) is m3l.Variable:
+                points = mesh.value
+            else:
+                points = mesh
+
+            if isinstance(mesh, tuple):
+                # Is vector, so draw an arrow
+                processed_points = ()
+                for point in mesh:
+                    if type(point) is am.MappedArray:
+                        processed_points = processed_points + (point.value,)
+                    else:
+                        processed_points = processed_points + (point,)
+                arrow = vedo.Arrow(tuple(processed_points[0].reshape((-1,))), 
+                                   tuple((processed_points[0] + processed_points[1]).reshape((-1,))), s=0.05)
+                plotting_elements.append(arrow)
+                continue
+
+            if 'point_cloud' in mesh_plot_types:
+                num_points = np.cumprod(points.shape[:-1])[-1]
+                plotting_elements.append(vedo.Points(points.reshape((num_points,-1)), r=4).color('#00C6D7'))
+
+            if points.shape[0] == 1:
+                points = points.reshape((points.shape[1:]))
+
+            if len(points.shape) == 2:  # If it's a curve
+                from vedo import Line
+                plotting_elements.append(Line(points).color(mesh_color).linewidth(3))
+                
+                if 'wireframe' in mesh_plot_types:
+                    num_points = np.cumprod(points.shape[:-1])[-1]
+                    plotting_elements.append(vedo.Points(points.reshape((num_points,-1)), r=12).color(mesh_color))
+                continue
+
+            if ('surface' in mesh_plot_types or 'wireframe' in mesh_plot_types) and len(points.shape) == 3:
+                num_points_u = points.shape[0]
+                num_points_v = points.shape[1]
+                num_points = num_points_u*num_points_v
+                vertices = []
+                faces = []
+                for u_index in range(num_points_u):
+                    for v_index in range(num_points_v):
+                        vertex = tuple(points[u_index,v_index,:])
+                        vertices.append(vertex)
+                        if u_index != 0 and v_index != 0:
+                            face = tuple((
+                                (u_index-1)*num_points_v+(v_index-1),
+                                (u_index-1)*num_points_v+(v_index),
+                                (u_index)*num_points_v+(v_index),
+                                (u_index)*num_points_v+(v_index-1),
+                            ))
+                            faces.append(face)
+
+                plotting_mesh = vedo.Mesh([vertices, faces]).opacity(mesh_opacity).color('lightblue')
+            if 'surface' in mesh_plot_types:
+                plotting_elements.append(plotting_mesh)
+            if 'wireframe' in mesh_plot_types:
+                # plotting_mesh = vedo.Mesh([vertices, faces]).opacity(mesh_opacity).color('blue')
+                plotting_mesh = vedo.Mesh([vertices, faces]).opacity(mesh_opacity).color(mesh_color) # Default is UCSD Sand
+                plotting_elements.append(plotting_mesh.wireframe().linewidth(3))
+            
+        if show:
+            plotter = vedo.Plotter()
+            plotter.show(plotting_elements, 'Meshes', axes=1, viewup="z", interactive=True, camera=camera)
+
+        return plotting_elements
+
 
 
 if __name__ == "__main__":
@@ -255,11 +375,53 @@ if __name__ == "__main__":
                                         units='degrees').reshape((-1,))
     geometry3.plot()
 
+    leading_edge_parametric_coordinates = [
+        ('WingGeom, 0, 3', np.array([1.,  0.])),
+        ('WingGeom, 0, 3', np.array([0.8, 0.])),
+        ('WingGeom, 0, 3', np.array([0.6, 0.])),
+        ('WingGeom, 0, 3', np.array([0.4, 0.])),
+        ('WingGeom, 0, 3', np.array([0.2, 0.])),
+        ('WingGeom, 0, 3', np.array([0. , 0.])),
+        ('WingGeom, 1, 8', np.array([0.,  0.])),
+        ('WingGeom, 1, 8', np.array([0.2, 0.])),
+        ('WingGeom, 1, 8', np.array([0.4, 0.])),
+        ('WingGeom, 1, 8', np.array([0.6, 0.])),
+        ('WingGeom, 1, 8', np.array([0.8, 0.])),
+        ('WingGeom, 1, 8', np.array([1. , 0.])),
+    ]
+
+    trailing_edge_parametric_coordinates = [
+        ('WingGeom, 0, 3', np.array([1.,  1.])),
+        ('WingGeom, 0, 3', np.array([0.8, 1.])),
+        ('WingGeom, 0, 3', np.array([0.6, 1.])),
+        ('WingGeom, 0, 3', np.array([0.4, 1.])),
+        ('WingGeom, 0, 3', np.array([0.2, 1.])),
+        ('WingGeom, 0, 3', np.array([0. , 1.])),
+        ('WingGeom, 1, 8', np.array([0.2, 1.])),
+        ('WingGeom, 1, 8', np.array([0.4, 1.])),
+        ('WingGeom, 1, 8', np.array([0.6, 1.])),
+        ('WingGeom, 1, 8', np.array([0.8, 1.])),
+        ('WingGeom, 1, 8', np.array([1. , 1.])),
+    ]
+
     geometry4 = geometry.copy()
+
+    leading_edge = geometry4.evaluate(leading_edge_parametric_coordinates, plot=True).reshape((-1,3))
+    trailing_edge = geometry4.evaluate(trailing_edge_parametric_coordinates, plot=True).reshape((-1,3))
+    chord_surface = m3l.linspace(leading_edge, trailing_edge, num_steps=4)
+
+    geometry4.plot_meshes(meshes=chord_surface, mesh_plot_types=['wireframe'], mesh_opacity=1., mesh_color='#F5F0E6',)
+
     # geometry4.rotate(axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units='degrees')
     left_wing_transition = geometry4.declare_component(component_name='left_wing', b_spline_search_names=['WingGeom, 1'])
     left_wing_transition.rotate(axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units='degrees')
     geometry4.plot()
+
+    leading_edge = geometry4.evaluate(leading_edge_parametric_coordinates, plot=True).reshape((-1,3))
+    trailing_edge = geometry4.evaluate(trailing_edge_parametric_coordinates, plot=True).reshape((-1,3))
+    chord_surface = m3l.linspace(leading_edge, trailing_edge, num_steps=4)
+
+    geometry4.plot_meshes(meshes=chord_surface, mesh_plot_types=['wireframe'], mesh_opacity=1., mesh_color='#F5F0E6',)
 
 
     # THEN DO PYTHON FFD, PYTHON FFD SECTIONAL PARAMETERIZATION, THEN PYTHON FFD B-SPLINE SECTIONAL PARAMETERIZATION

@@ -972,7 +972,7 @@ class BSplineSet(m3l.Function):
         self.coefficients[points_indices] = rotated_points
 
 
-    def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points'], plot_types:list=['mesh'],
+    def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points'], plot_types:list=['surface'],
               opacity:float=1., color:Union[str,BSplineSet]='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
         '''
         Plots the B-spline Surface.
@@ -1001,7 +1001,7 @@ class BSplineSet(m3l.Function):
         
         plotting_elements = additional_plotting_elements.copy()
 
-        if b_splines is None:
+        if b_splines is None or len(b_splines) == 0:
             b_splines = list(self.coefficient_indices.keys())
 
 
@@ -1043,7 +1043,7 @@ class BSplineSet(m3l.Function):
                     for b_spline_name in self.coefficient_indices.keys():
                         plotting_elements.append(vedo.Points(plotting_points).opacity(opacity).color('darkred'))
 
-                if 'mesh' in plot_types or 'wireframe' in plot_types:
+                if 'surface' in plot_types or 'wireframe' in plot_types:
                     num_plot_u = plotting_points_shape[0]
                     num_plot_v = plotting_points_shape[1]
 
@@ -1068,7 +1068,7 @@ class BSplineSet(m3l.Function):
                         mesh.color(color)
                     elif type(color) is BSplineSet:
                         mesh.cmap('jet', plotting_colors)
-                if 'mesh' in plot_types:
+                if 'surface' in plot_types:
                     plotting_elements.append(mesh)
                 if 'wireframe' in plot_types:
                     mesh = vedo.Mesh([vertices, faces]).opacity(opacity)
