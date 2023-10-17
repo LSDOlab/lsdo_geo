@@ -679,7 +679,7 @@ class BSplineSet(m3l.Function):
                     projection_grid_search_density = 1
                 projected_point_on_b_spline_parametric_coordinates = b_spline.project(points=point, direction=direction_vector, 
                                                             grid_search_density=projection_grid_search_density,max_iterations=max_iterations,
-                                                            plot=False, return_parametric_coordinates=True)
+                                                            plot=False)
                 parametric_coordinates.append((closest_b_spline_name, projected_point_on_b_spline_parametric_coordinates))
 
             # projected_points = self.evaluate(parametric_coordinates=parametric_coordinates)

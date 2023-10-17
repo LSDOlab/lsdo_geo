@@ -103,12 +103,29 @@ class BSpline(m3l.Function):
         # self.num_parametric_dimensions = self.space.num_parametric_dimensions
 
     
-    def evaluate(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> am.MappedArray:
-        basis_matrix = self.compute_evaluation_map(parametric_coordinates, parametric_derivative_order)
-        output = basis_matrix.dot(self.coefficients)
+    def evaluate(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None, plot:bool=False) -> m3l.Variable:
+        # basis_matrix = self.compute_evaluation_map(parametric_coordinates, parametric_derivative_order)
+        # output = basis_matrix.dot(self.coefficients)
 
-        return output
-    
+        evaluation_map = self.compute_evaluation_map(parametric_coordinates=parametric_coordinates,
+                                                     parametric_derivative_order=parametric_derivative_order)
+        
+        evaluation_map = m3l.Variable(name=f'evaluation_map', shape=evaluation_map.shape, operation=None, value=evaluation_map)
+
+        output = m3l.matvec(evaluation_map, self.coefficients)
+
+        if plot:
+            plotter = vedo.Plotter()
+            b_spline_meshes = self.plot(opacity=0.25, show=False)
+            # Plot 
+            plotting_points = []
+            # TODO This will break if geometry is not one of the properties. Fix this.
+            flattened_projected_points = (output.value).reshape((-1, 3)) # last axis usually has length 3 for x,y,z
+            plotting_projected_points = vedo.Points(flattened_projected_points, r=12, c='#00C6D7')  # TODO make this (1,3) instead of (3,)
+            plotting_points.append(plotting_projected_points)
+            plotter.show(b_spline_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
+
+        return output    
     
     def compute_evaluation_map(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None,
                                expand_map_for_physical:bool=True) -> sps.csc_matrix:
@@ -146,7 +163,7 @@ class BSpline(m3l.Function):
     
 
     def project(self, points:np.ndarray, direction:np.ndarray=None, grid_search_density:int=50,
-                    max_iterations:int=100, return_parametric_coordinates:bool=False, plot:bool=False):
+                    max_iterations:int=100, plot:bool=False) -> m3l.Variable:
         
         if type(points) is am.MappedArray:
             points = points.value
@@ -173,15 +190,15 @@ class BSpline(m3l.Function):
             np.array([self.space.order[1]]), np.array([self.coefficients_shape[1]]),
             num_points, max_iterations,
             flattened_points, 
-            self.coefficients.reshape((-1,)),
+            self.coefficients.value.reshape((-1,)),
             self.space.knots[self.space.knot_indices[0]].copy(), self.space.knots[self.space.knot_indices[1]].copy(),
             u_vec_flattened, v_vec_flattened, grid_search_density,
-            direction.reshape((-1,)), np.zeros((num_points,), dtype=int), self.coefficients.reshape((1, -1))
+            direction.reshape((-1,)), np.zeros((num_points,), dtype=int), self.coefficients.value.reshape((1, -1))
         )
 
         parametric_coordinates = np.hstack((u_vec_flattened.reshape((-1,1)), v_vec_flattened.reshape((-1,1))))
-        map = self.compute_evaluation_map(parametric_coordinates)
-        projected_points = am.array(input=self.coefficients, linear_map=map, shape=input_shape)
+        # map = self.compute_evaluation_map(parametric_coordinates)
+        # projected_points = am.array(input=self.coefficients, linear_map=map, shape=input_shape)
 
         if plot:
             # Plot the surfaces that are projected onto
@@ -198,12 +215,14 @@ class BSpline(m3l.Function):
         # v_vec = v_vec_flattened.reshape(tuple(input_shape[:-1],)+(1,))
         # parametric_coordinates = np.concatenate((u_vec, v_vec), axis=-1)
 
-        if return_parametric_coordinates:
+        return parametric_coordinates
+
+        # if return_parametric_coordinates:
             # return parametric_coordinates
             # return (u_vec_flattened, v_vec_flattened)
-            return np.hstack((u_vec_flattened.reshape((-1,1)), v_vec_flattened.reshape((-1,1))))
-        else:
-            return projected_points
+            # return np.hstack((u_vec_flattened.reshape((-1,1)), v_vec_flattened.reshape((-1,1))))
+        # else:
+        #     return projected_points
 
 
     def plot(self, point_types:list=['evaluated_points', 'coefficients'], plot_types:list=['mesh'],
