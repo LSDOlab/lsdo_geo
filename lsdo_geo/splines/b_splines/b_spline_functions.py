@@ -53,7 +53,7 @@ def create_b_spline_set(name : str, b_splines : dict[str, BSpline]):
     coefficients = np.zeros((num_coefficients,))
     num_coefficients = 0
     for b_spline_name, b_spline in b_splines.items():
-        coefficients[num_coefficients:num_coefficients + b_spline.num_coefficients] = b_spline.coefficients
+        coefficients[num_coefficients:num_coefficients + b_spline.num_coefficients] = b_spline.coefficients.value
         num_coefficients += b_spline.num_coefficients
 
     b_spline_set = BSplineSet(name=name, space=b_spline_set_space, coefficients=coefficients, num_physical_dimensions=num_physical_dimensions)
@@ -557,7 +557,7 @@ def _fit_b_spline_in_set(b_spline_set:BSplineSet, b_spline_name:str, indices:np.
     b_spline_space = b_spline_set.space.spaces[b_spline_set.space.b_spline_to_space[b_spline_name]]
     evaluation_map = compute_evaluation_map(parametric_coordinates=parametric_coordinates, order=b_spline_space.order,
         parametric_coefficients_shape=b_spline_space.parametric_coefficients_shape, knots=b_spline_space.knots)
-    points_vector = evaluation_map.dot(b_spline_set.coefficients[indices].reshape((evaluation_map.shape[1], -1)))
+    points_vector = evaluation_map.dot(b_spline_set.coefficients.value[indices].reshape((evaluation_map.shape[1], -1)))
 
     points = points_vector.reshape((num_points_u, num_points_v, num_dimensions))
 

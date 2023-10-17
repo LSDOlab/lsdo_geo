@@ -200,7 +200,7 @@ if __name__ == "__main__":
     # Manually creating a pressure distribution
     pressure_coefficients = np.zeros((0,))
     for b_spline_name in left_wing.b_spline_names:
-        left_wing_geometry_coefficients = geometry.coefficients[geometry.coefficient_indices[b_spline_name]].reshape((-1,3))
+        left_wing_geometry_coefficients = geometry.coefficients.value[geometry.coefficient_indices[b_spline_name]].reshape((-1,3))
         b_spline_pressure_coefficients = \
             -4*8.1/(np.pi*8.1)*np.sqrt(1 - (2*left_wing_geometry_coefficients[:,1]/8.1)**2) \
             * np.sqrt(1 - (2*left_wing_geometry_coefficients[:,0]/4)**2) \
@@ -256,10 +256,10 @@ if __name__ == "__main__":
     geometry3.plot()
 
     geometry4 = geometry.copy()
-    # left_wing_transition = geometry.declare_component(component_name='left_wing', b_spline_search_names=['WingGeom, 1'])
-    # actuated_left_wing_transition = m3l.rotate(left_wing_transition.coefficients.reshape((-1,3)), axis_origin=axis_origin,
-    #                                            axis_vector=axis_vector, angles=angles, units='degrees').reshape((-1,))
-    geometry4.rotate(axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units='degrees')
+    # geometry4.rotate(axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units='degrees')
+    left_wing_transition = geometry4.declare_component(component_name='left_wing', b_spline_search_names=['WingGeom, 1'])
+    left_wing_transition.rotate(axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units='degrees')
+    geometry4.plot()
 
 
     # DO ACTUATIONS NEXT

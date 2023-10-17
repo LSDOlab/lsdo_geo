@@ -50,13 +50,13 @@ class BSplineSet(m3l.Function):
     '''
     B-spline set class.
 
-    Parameters
+    Attributes
     ----------
     name : str
         The name of the B-spline.
     space : BSplineSetSpace
         The space that the B-spline set is a member of.
-    coefficients : np.ndarray
+    coefficients : m3l.Variable
         The coefficients of the B-spline set.
     num_physical_dimensions : dict[str, int]
         A dictionary of the number of physical dimensions for each B-spline.
@@ -96,6 +96,10 @@ class BSplineSet(m3l.Function):
                 self.num_coefficients = coefficients_counter
             else:
                 raise ValueError('The number of coefficients does not match the sum of the number of coefficients of the B-splines.')
+            
+
+        if type(self.coefficients) is np.ndarray:
+            self.coefficients = m3l.Variable(name=f'{self.name}_coefficients', shape=self.coefficients.shape, value=self.coefficients)
 
         # NOTE: For aggregation, see not on BSplineSetSpace (it should come later probably)
         # # Promote attributes to make this object a bit more intuitive?
@@ -451,12 +455,33 @@ class BSplineSet(m3l.Function):
         plot : bool
             A boolean on whether or not to plot the projection result.
         '''
+
+        if type(points) is am.MappedArray:
+                points = points.value
+        if len(points.shape) == 1:
+            points = points.reshape((1, -1))    # Last axis is reserved for dimensionality of physical space
+        
+        num_points = np.prod(points.shape[:-1])
+        num_physical_dimensions = points.shape[-1]
+
+        if targets is None:
+            targets = list(self.coefficient_indices.keys())
+        
+        if len(targets) == 0:
+            raise Exception("No geometry to project on to.")
+
+        if type(direction) is am.MappedArray:
+            direction = direction.value
+        if direction is None:
+            direction = np.zeros((num_points, num_physical_dimensions))
+        if type(direction.shape[0]) is int: # checks if only one direction vector is given
+            direction = np.tile(direction, (points.shape[0], 1))
         
 
-        coeff_norm = round(np.linalg.norm(self.coefficients), 2)
+        coeff_norm = round(np.linalg.norm(self.coefficients.value), 2)
         name_space = f'{self.name}_{coeff_norm}'
 
-        for target in targets:
+        for target in targets[:1]:
             target_space = self.space.spaces[self.space.b_spline_to_space[target]]
 
             order = target_space.order
@@ -720,6 +745,8 @@ class BSplineSet(m3l.Function):
         rotating_points = self.coefficients[points_indices]
 
         rotated_points = m3l.rotate(points=rotating_points, axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units)
+
+        rotated_points = rotated_points.reshape((-1,))
 
         self.coefficients[points_indices] = rotated_points
 

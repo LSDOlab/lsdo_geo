@@ -61,6 +61,29 @@ class BSplineSubSet:
 
         return self.b_spline_set.project(points=points, targets=targets, direction=direction,
                                          grid_search_density_parameter=grid_search_density_parameter, max_iterations=max_iterations, plot=plot)
+    
+
+    def rotate(self, axis_origin:m3l.Variable, axis_vector:m3l.Variable, angles:m3l.Variable, b_splines:list[str]=None, units:str='degrees'):
+        '''
+        Rotates the B-spline set about an axis.
+
+        Parameters
+        -----------
+        b_splines : list[str]
+            The B-splines to rotate.
+        axis_origin : m3l.Variable
+            The origin of the axis of rotation.
+        axis_vector : m3l.Variable
+            The vector of the axis of rotation.
+        angles : m3l.Variable
+            The angle of rotation.
+        units : str
+            The units of the angle of rotation. {degrees, radians}
+        '''
+        if b_splines is None:
+            b_splines = list(self.b_spline_names)
+
+        return self.b_spline_set.rotate(axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, b_splines=b_splines, units=units)
 
 
     def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points'], plot_types:list=['mesh'],
