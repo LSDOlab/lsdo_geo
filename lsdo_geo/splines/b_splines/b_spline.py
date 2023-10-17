@@ -19,6 +19,64 @@ from dataclasses import dataclass
 class BSpline(m3l.Function):
     '''
     B-spline class
+
+    Attributes
+    ----------
+    name : str
+        The name of the B-spline.
+    space : BSplineSpace
+        The space that the B-spline is in.
+    coefficients : m3l.Variable
+        The coefficients of the B-spline.
+    num_physical_dimensions : int
+        The number of physical dimensions that the B-spline is in.
+
+    Methods
+    -------
+    evaluate(parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> am.MappedArray
+        Evaluates the B-spline at the given parametric coordinates.
+    compute_evaluation_map(parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None,
+                           expand_map_for_physical:bool=True) -> sps.csc_matrix
+        Computes the evaluation map for the B-spline.
+    project(points:np.ndarray, direction:np.ndarray=None, grid_search_density:int=50,
+            max_iterations:int=100, return_parametric_coordinates:bool=False, plot:bool=False)
+        Projects the given points onto the B-spline.
+    plot(point_types:list=['evaluated_points', 'coefficients'], plot_types:list=['mesh'],
+         opacity:float=1., color:str='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True)
+        Plots the B-spline Surface.
+
+
+    Notes
+    -----
+    The B-spline is defined by the following equation:
+
+    .. math::
+
+        \\mathbf{P}(u,v) = \\sum_{i=0}^{n_u-1} \\sum_{j=0}^{n_v-1} \\mathbf{C}_{i,j} N_{i,p}(u) N_{j,q}(v)
+
+    where :math:`\\mathbf{P}(u,v)` is the B-spline surface, :math:`\\mathbf{C}_{i,j}` are the coefficients, :math:`N_{i,p}(u)` are the basis functions
+    in the u-direction, and :math:`N_{j,q}(v)` are the basis functions in the v-direction.
+
+    The basis functions are defined by the Cox-de Boor recursion formula:
+
+    .. math::
+
+        N_{i,0}(u) = \\begin{cases}
+            1 & \\text{if } u_i \\leq u < u_{i+1} \\\\
+            0 & \\text{otherwise}
+        \\end{cases}
+
+        N_{i,p}(u) = \\frac{u-u_i}{u_{i+p}-u_i} N_{i,p-1}(u) + \\frac{u_{i+p+1}-u}{u_{i+p+1}-u_{i+1}} N_{i+1,p-1}(u)
+
+    where :math:`u_i` are the knots.
+
+    The evaluation map is defined by the following equation:
+
+    .. math::
+
+        \\mathbf{P}(u,v) = \\mathbf{B}(u,v) \\mathbf{C}
+
+    where :math:`\\mathbf{B}(u,v)` is the evaluation map and :math:`\\mathbf{C}` are the coefficients.
     '''
     space : BSplineSpace    # Just overwriting the type hint for the space attribute
     num_physical_dimensions : int
@@ -33,6 +91,9 @@ class BSpline(m3l.Function):
                 self.coefficients = self.coefficients.reshape((-1,))
             else:
                 raise Exception("Coefficients size doesn't match the function space's coefficients shape.")
+            
+        if type(self.coefficients) is np.ndarray:
+            self.coefficients = m3l.Variable(name=f'{self.name}_coefficients', shape=self.coefficients.shape, value=self.coefficients)
 
         # Promote attributes to make this object a bit more intuitive
         # Not doing this for now to make objects more lightweight
