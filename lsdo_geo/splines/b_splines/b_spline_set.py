@@ -493,7 +493,10 @@ class BSplineSet(m3l.Function):
             else:
                 name_space += f'_{str(order)}_{str(coeff_shape)}_{str(knot_vectors_norm)}'
         
-        name_space += f'_{str(np.linalg.norm(points))}_{str(direction)}_{grid_search_density_parameter}_{max_iterations}'
+        print(name_space)
+        print(np.linalg.norm(points))
+        print(np.linalg.norm(direction))
+        name_space += f'_{str(np.linalg.norm(points))}_{str(np.linalg.norm(direction))}_{grid_search_density_parameter}_{max_iterations}'
 
 
         from lsdo_geo import PROJECTIONS_FOLDER
