@@ -533,6 +533,8 @@ class BSplineSet(m3l.Function):
             num_points = np.prod(points.shape[:-1])
             num_physical_dimensions = points.shape[-1]
 
+            points = points.reshape((num_points, num_physical_dimensions))
+
             if targets is None:
                 targets = list(self.coefficient_indices.keys())
             
