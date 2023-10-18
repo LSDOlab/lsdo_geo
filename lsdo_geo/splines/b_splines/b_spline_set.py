@@ -162,8 +162,8 @@ class BSplineSet(m3l.Function):
         # parametric_coordinates_string = ''
         # for coordinate in parametric_coordinates:
         #     parametric_coordinates_string += coordinate[0] + '_' + str(np.linalg.norm(coordinate[1]))
-        # evaluation_map = m3l.Variable(name=f'evaluation_map', shape=evaluation_map.shape, operation=None, 
-        #     value=evaluation_map)
+        evaluation_map = m3l.Variable(name=f'evaluation_map', shape=evaluation_map.shape, operation=None, 
+            value=evaluation_map)
 
         if type(self.coefficients) is np.ndarray:
             coefficients = m3l.Variable(name='b_spline_set_coefficients', shape=self.coefficients.shape, operation=None, 
@@ -499,10 +499,10 @@ class BSplineSet(m3l.Function):
             coeff_shape = target_space.parametric_coefficients_shape
             knot_vectors_norm = round(np.linalg.norm(target_space.knots), 2)
 
-            if f'{str(order)}_{str(coeff_shape)}_{str(knot_vectors_norm)}' in name_space:
+            if f'{target}_{str(order)}_{str(coeff_shape)}_{str(knot_vectors_norm)}' in name_space:
                 pass
             else:
-                name_space += f'_{str(order)}_{str(coeff_shape)}_{str(knot_vectors_norm)}'
+                name_space += f'_{target}_{str(order)}_{str(coeff_shape)}_{str(knot_vectors_norm)}'
         
         long_name_space = name_space + f'_{str(points)}_{str(direction)}_{grid_search_density_parameter}_{max_iterations}'
 
