@@ -29,6 +29,31 @@ class BSplineSubSet:
     b_spline_set : BSplineSet
     b_spline_names : list[str]
 
+    def get_coefficients(self) -> m3l.Variable:
+        '''
+        Gets the coefficients of the B-spline sub-set.
+
+        Returns
+        -------
+        coefficients : m3l.Variable
+            The coefficients of the B-spline sub-set.
+        '''
+
+        return self.b_spline_set.get_coefficients(b_spline_names=self.b_spline_names, name=self.name + '_coefficients')
+    
+    def assign_coefficients(self, coefficients:m3l.Variable):
+        '''
+        Assigns the coefficients of the B-spline sub-set.
+
+        Parameters
+        ----------
+        coefficients : m3l.Variable
+            The coefficients of the B-spline sub-set.
+        '''
+
+        return self.b_spline_set.assign_coefficients(coefficients=coefficients, b_spline_names=self.b_spline_names)
+
+
     def evaluate(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple[int]=None) -> am.MappedArray:
 
         return self.b_spline_set.evaluate(parametric_coordinates=parametric_coordinates,

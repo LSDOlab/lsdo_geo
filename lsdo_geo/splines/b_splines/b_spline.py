@@ -152,6 +152,8 @@ class BSpline(m3l.Function):
 
         if expand_map_for_physical:
             expansion_factor = self.num_physical_dimensions
+        else:
+            expansion_factor = 1
 
         map = compute_evaluation_map(parametric_coordinates=parametric_coordinates, order=self.space.order,
                                      parametric_coefficients_shape=self.space.parametric_coefficients_shape,
@@ -164,8 +166,10 @@ class BSpline(m3l.Function):
 
     def project(self, points:np.ndarray, direction:np.ndarray=None, grid_search_density:int=50,
                     max_iterations:int=100, plot:bool=False) -> m3l.Variable:
-        
-        if type(points) is am.MappedArray:
+        if len(points.shape) == 1:
+            points = points.reshape((-1,self.num_physical_dimensions))
+
+        if type(points) is m3l.Variable:
             points = points.value
         
         input_shape = points.shape
@@ -203,13 +207,14 @@ class BSpline(m3l.Function):
         if plot:
             # Plot the surfaces that are projected onto
             plotter = vedo.Plotter()
-            primitive_meshes = self.plot(plot_types=['mesh'], opacity=0.25, show=False)
+            b_spline_meshes = self.plot(plot_types=['surface'], opacity=0.25, show=False)
             # Plot 
             plotting_points = []
+            projected_points = self.evaluate(parametric_coordinates=parametric_coordinates)
             flattened_projected_points = (projected_points.value).reshape((num_points, -1)) # last axis usually has length 3 for x,y,z
-            plotting_primitive_coefficients = vedo.Points(flattened_projected_points, r=12, c='blue')  # TODO make this (1,3) instead of (3,)
-            plotting_points.append(plotting_primitive_coefficients)
-            plotter.show(primitive_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
+            plotting_b_spline_coefficients = vedo.Points(flattened_projected_points, r=12, c='blue')  # TODO make this (1,3) instead of (3,)
+            plotting_points.append(plotting_b_spline_coefficients)
+            plotter.show(b_spline_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
 
         # u_vec = u_vec_flattened.reshape(tuple(input_shape[:-1],)+(1,))
         # v_vec = v_vec_flattened.reshape(tuple(input_shape[:-1],)+(1,))
@@ -225,7 +230,7 @@ class BSpline(m3l.Function):
         #     return projected_points
 
 
-    def plot(self, point_types:list=['evaluated_points', 'coefficients'], plot_types:list=['mesh'],
+    def plot(self, point_types:list=['evaluated_points'], plot_types:list=['surface'],
               opacity:float=1., color:str='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
         '''
         Plots the B-spline Surface.
@@ -235,7 +240,37 @@ class BSpline(m3l.Function):
         points_type : list
             The type of points to be plotted. {evaluated_points, coefficients}
         plot_types : list
-            The type of plot {mesh, wireframe, point_cloud}
+            The type of plot {surface, wireframe, point_cloud}
+        opactity : float
+            The opacity of the plot. 0 is fully transparent and 1 is fully opaque.
+        color : str
+            The 6 digit color code to plot the B-spline as.
+        surface_texture : str = "" {"metallic", "glossy", ...}, optional
+            The surface texture to determine how light bounces off the surface.
+            See https://github.com/marcomusy/vedo/blob/master/examples/basic/lightings.py for options.
+        additional_plotting_elemets : list
+            Vedo plotting elements that may have been returned from previous plotting functions that should be plotted with this plot.
+        show : bool
+            A boolean on whether to show the plot or not. If the plot is not shown, the Vedo plotting element is returned.
+        '''
+        if self.space.num_parametric_dimensions == 2:
+            return self.plot_surface(point_types=point_types, plot_types=plot_types, opacity=opacity, color=color, 
+                                     surface_texture=surface_texture, additional_plotting_elements=additional_plotting_elements, show=show)
+        elif self.space.num_parametric_dimensions == 3:
+            return self.plot_volume(point_types=point_types, plot_types=plot_types, opacity=opacity, color=color,
+                                    surface_texture=surface_texture, additional_plotting_elements=additional_plotting_elements, show=show)
+
+    def plot_surface(self, point_types:list=['evaluated_points'], plot_types:list=['surface'],
+              opacity:float=1., color:str='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
+        '''
+        Plots the B-spline Surface.
+
+        Parameters
+        -----------
+        points_type : list
+            The type of points to be plotted. {evaluated_points, coefficients}
+        plot_types : list
+            The type of plot {surface, wireframe, point_cloud}
         opactity : float
             The opacity of the plot. 0 is fully transparent and 1 is fully opaque.
         color : str
@@ -269,9 +304,9 @@ class BSpline(m3l.Function):
                 plotting_points = self.coefficients.reshape((-1,num_physical_dimensions))
 
             if 'point_cloud' in plot_types:
-                plotting_elements.append(vedo.Points(plotting_points).opacity(opacity).color('darkred'))
+                plotting_elements.append(vedo.Points(plotting_points, r=6).opacity(opacity).color('darkred'))
 
-            if 'mesh' in plot_types or 'wireframe' in plot_types:
+            if 'surface' in plot_types or 'wireframe' in plot_types:
                 num_plot_u = plotting_points_shape[0]
                 num_plot_v = plotting_points_shape[1]
 
@@ -292,7 +327,7 @@ class BSpline(m3l.Function):
                             faces.append(face)
 
                 mesh = vedo.Mesh([vertices, faces]).opacity(opacity).color(color).lighting(surface_texture)
-            if 'mesh' in plot_types:
+            if 'surface' in plot_types:
                 plotting_elements.append(mesh)
             if 'wireframe' in plot_types:
                 mesh = vedo.Mesh([vertices, faces]).opacity(opacity)
@@ -305,6 +340,121 @@ class BSpline(m3l.Function):
             # plotter = vedo.Plotter(size=(3200,1000))
             # plotter.show(plotting_elements, light, f'B-spline Surface: {self.name}', axes=1, viewup="z", interactive=True)
             plotter.show(plotting_elements, f'B-spline Surface: {self.name}', axes=1, viewup="z", interactive=True)
+            return plotting_elements
+        else:
+            return plotting_elements
+        
+    def plot_volume(self, point_types:list=['evaluated_points'], plot_types:list=['surface'],
+              opacity:float=1., color:str='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
+        '''
+        Plots the B-spline Surface.
+
+        Parameters
+        -----------
+        points_type : list
+            The type of points to be plotted. {evaluated_points, coefficients}
+        plot_types : list
+            The type of plot {surface, wireframe, point_cloud}
+        opactity : float
+            The opacity of the plot. 0 is fully transparent and 1 is fully opaque.
+        color : str
+            The 6 digit color code to plot the B-spline as.
+        surface_texture : str = "" {"metallic", "glossy", ...}, optional
+            The surface texture to determine how light bounces off the surface.
+            See https://github.com/marcomusy/vedo/blob/master/examples/basic/lightings.py for options.
+        additional_plotting_elemets : list
+            Vedo plotting elements that may have been returned from previous plotting functions that should be plotted with this plot.
+        show : bool
+            A boolean on whether to show the plot or not. If the plot is not shown, the Vedo plotting element is returned.
+        '''
+        # Plot the 6 sides of the volume
+        plotting_elements = additional_plotting_elements.copy()
+
+        coefficients = self.coefficients.value.reshape(self.space.parametric_coefficients_shape + (self.num_physical_dimensions,))
+        
+        plotting_elements = self.plot_volume_side(coefficients[:,:,0], plot_types=plot_types, opacity=opacity, 
+                                              additional_plotting_elements=plotting_elements, show=False)
+        plotting_elements = self.plot_volume_side(coefficients[:,:,-1], plot_types=plot_types, opacity=opacity, 
+                                              additional_plotting_elements=plotting_elements, show=False)
+        plotting_elements = self.plot_volume_side(coefficients[:,0,:], plot_types=plot_types, opacity=opacity, 
+                                              additional_plotting_elements=plotting_elements, show=False)
+        plotting_elements = self.plot_volume_side(coefficients[:,-1,:], plot_types=plot_types, opacity=opacity, 
+                                              additional_plotting_elements=plotting_elements, show=False)
+        plotting_elements = self.plot_volume_side(coefficients[0,:,:], plot_types=plot_types, opacity=opacity, 
+                                              additional_plotting_elements=plotting_elements, show=False)
+        plotting_elements = self.plot_volume_side(coefficients[-1,:,:], plot_types=plot_types, opacity=opacity, 
+                                              additional_plotting_elements=plotting_elements, show=False)
+
+        if show:
+            plotter = vedo.Plotter()
+            plotter.show(plotting_elements, f'B-spline Volume: {self.name}', axes=1, viewup="z", interactive=True)
+            return plotting_elements
+        else:
+            return plotting_elements
+
+    def plot_volume_side(self, points:np.ndarray, plot_types:list=['surface'],
+              opacity:float=1., color:str='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
+        '''
+        Plots the B-spline Surface.
+
+        Parameters
+        -----------
+        points_type : list
+            The type of points to be plotted. {evaluated_points, coefficients}
+        plot_types : list
+            The type of plot {surface, wireframe, point_cloud}
+        opactity : float
+            The opacity of the plot. 0 is fully transparent and 1 is fully opaque.
+        color : str
+            The 6 digit color code to plot the B-spline as.
+        surface_texture : str = "" {"metallic", "glossy", ...}, optional
+            The surface texture to determine how light bounces off the surface.
+            See https://github.com/marcomusy/vedo/blob/master/examples/basic/lightings.py for options.
+        additional_plotting_elemets : list
+            Vedo plotting elements that may have been returned from previous plotting functions that should be plotted with this plot.
+        show : bool
+            A boolean on whether to show the plot or not. If the plot is not shown, the Vedo plotting element is returned.
+        '''
+        plotting_elements = additional_plotting_elements.copy()
+        
+        if 'point_cloud' in plot_types:
+            num_points = points.shape[0]*points.shape[1]
+            if 'surface' in plot_types:
+                point_opacity = (0.75*opacity + 0.25*1.)
+            else:
+                point_opacity = opacity
+            plotting_elements.append(vedo.Points(points.reshape((num_points,-1)), r=6).opacity(point_opacity).color('darkred'))
+
+        if 'surface' in plot_types or 'wireframe' in plot_types:
+            num_control_points_u = points.shape[0]
+            num_control_points_v = points.shape[1]
+            vertices = []
+            faces = []
+            for u_index in range(num_control_points_u):
+                for v_index in range(num_control_points_v):
+                    vertex = tuple(points[u_index, v_index, :])
+                    vertices.append(vertex)
+                    if u_index != 0 and v_index != 0:
+                        face = tuple((
+                            (u_index-1)*num_control_points_v+(v_index-1),
+                            (u_index-1)*num_control_points_v+(v_index),
+                            (u_index)*num_control_points_v+(v_index),
+                            (u_index)*num_control_points_v+(v_index-1),
+                        ))
+                        faces.append(face)
+
+            
+
+            mesh = vedo.Mesh([vertices, faces]).opacity(opacity).color('lightblue')
+        if 'surface' in plot_types:
+            plotting_elements.append(mesh)
+        if 'wireframe' in plot_types:
+            mesh = vedo.Mesh([vertices, faces]).opacity(opacity).color('lightblue')
+            plotting_elements.append(mesh.wireframe().color('lightblue'))
+
+        if show:
+            plotter = vedo.Plotter()
+            plotter.show(plotting_elements, 'Surface', axes=1, viewup="z", interactive=True)
             return plotting_elements
         else:
             return plotting_elements

@@ -15,6 +15,7 @@ from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
 from lsdo_geo.splines.b_splines.b_spline_set_space import BSplineSetSpace
 
 from lsdo_geo.cython.basis_matrix_surface_py import get_basis_surface_matrix
+from lsdo_geo.cython.basis_matrix_volume_py import get_basis_volume_matrix
 from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
 
 
@@ -406,8 +407,8 @@ def refit_b_spline(b_spline, order : tuple = (4,), num_coefficients : tuple = (1
     return
 
 
-def fit_b_spline_set(fitting_points:np.ndarray, fitting_parametric_coordinates:list[dict[str,np.ndarray]], 
-                     b_spline_set_space:BSplineSetSpace) -> np.ndarray:
+def fit_b_spline_set(fitting_points:np.ndarray, fitting_parametric_coordinates:list[dict[str,np.ndarray]],
+                     b_spline_set_space:BSplineSetSpace, regularization_parameter:float=0.,) -> np.ndarray:
     '''
     Finds the coefficients such that the B-spline set best fit the coordinates of a supplied mesh.
     '''
@@ -423,7 +424,7 @@ def fit_b_spline_set(fitting_points:np.ndarray, fitting_parametric_coordinates:l
 
     # Perform fitting
     flattened_fitting_points = fitting_points.reshape((-1,num_physical_dimensions))
-    a = ((evaluation_map.T).dot(evaluation_map))
+    a = ((evaluation_map.T).dot(evaluation_map)) + regularization_parameter * sps.identity(evaluation_map.shape[1])
     if type(evaluation_map) is np.ndarray:
         # if np.linalg.det(a) == 0:
         control_points,_,_,_ = np.linalg.lstsq(evaluation_map, flattened_fitting_points, rcond=None)
@@ -697,6 +698,30 @@ def compute_evaluation_map(parametric_coordinates:np.ndarray, order:tuple, param
         get_basis_surface_matrix(order_u, parametric_coefficients_shape[0], parametric_derivative_order[0], u_vec, knots_u, 
             order_v, parametric_coefficients_shape[1], parametric_derivative_order[1], v_vec, knots_v, 
             len(u_vec), data, row_indices, col_indices)
+    elif num_parametric_dimensions == 2:
+        u_vec = parametric_coordinates[:,0].copy()
+        v_vec = parametric_coordinates[:,1].copy()
+        w_vec = parametric_coordinates[:,2].copy()
+        order_u = order[0]
+        order_v = order[1]
+        order_w = order[2]
+        if knots is None:
+            knots_u = np.zeros(parametric_coefficients_shape[0]+order_u)
+            get_open_uniform(order_u, parametric_coefficients_shape[0], knots_u)
+            knots_v = np.zeros(parametric_coefficients_shape[1]+order_v)
+            get_open_uniform(order_v, parametric_coefficients_shape[1], knots_v)
+            knots_w = np.zeros(parametric_coefficients_shape[1]+order_w)
+            get_open_uniform(order_w, parametric_coefficients_shape[1], knots_w)
+        elif len(knots.shape) == 1:
+            knots_u = knots[:parametric_coefficients_shape[0]+order_u]
+            knots_v = knots[parametric_coefficients_shape[0]+order_u : 
+                            parametric_coefficients_shape[0]+order_u + parametric_coefficients_shape[1]+order_v]
+            knots_w = knots[parametric_coefficients_shape[0]+order_u + parametric_coefficients_shape[1]+order_v:]
+
+        get_basis_volume_matrix(order_u, parametric_coefficients_shape[0], parametric_derivative_order[0], u_vec, knots_u,
+            order_v, parametric_coefficients_shape[1], parametric_derivative_order[1], v_vec, knots_v, 
+            order_w, parametric_coefficients_shape[1], parametric_derivative_order[1], w_vec, knots_w, 
+            len(u_vec), data, row_indices, col_indices)
         
     basis0 = sps.csc_matrix((data, (row_indices, col_indices)), shape=(len(u_vec), num_coefficient_elements))
 
@@ -732,6 +757,11 @@ def create_b_spline_from_corners(name:str, corners:np.ndarray, order:tuple=(4,),
         for dimension_index in range(num_dimensions):
             knot_vectors = knot_vectors + \
                     tuple(generate_open_uniform_knot_vector(num_coefficients[dimension_index], order[dimension_index]),)
+    
+    total_knot_vector = []
+    for knot_vector in knot_vectors:
+        total_knot_vector.append(knot_vector)
+    knot_vectors = np.hstack(total_knot_vector)
 
     # Build up hyper-volume based on corners given
     previous_dimension_hyper_volume = corners
@@ -771,7 +801,7 @@ def create_b_spline_from_corners(name:str, corners:np.ndarray, order:tuple=(4,),
     #             shape=dimension_hyper_volumes.shape, coefficients=dimension_hyper_volumes)
 
 
-def create_cartesian_enclosure_block(name:str, points:np.ndarray, num_coefficients:tuple, order:tuple, knot_vectors:tuple=None, 
+def create_cartesian_enclosure_block(name:str, points:np.ndarray, num_coefficients:tuple[int], order:tuple[int], knot_vectors:tuple=None, 
                                       num_parametric_dimensions:int=3, num_physical_dimensions:int=3) -> BSpline:
     '''
     Creates an nd volume that tightly fits around a set of entities.
@@ -799,7 +829,6 @@ def create_cartesian_enclosure_block(name:str, points:np.ndarray, num_coefficien
     # if abs(maxs[2]-mins[2]) < 1e-6:
     #     maxs[2] += 1e-6
 
-
     # Can probably automate this to nd using a for loop
     corners_shape = (2,)*num_parametric_dimensions + (num_physical_dimensions,)
     corners = np.zeros(corners_shape)
@@ -816,15 +845,6 @@ def create_cartesian_enclosure_block(name:str, points:np.ndarray, num_coefficien
             physical_dimension_index = 0
 
     corners = corners_flattened.reshape(corners_shape)
-
-    # points[0,0,0,:] = np.array([mins[0], mins[1], mins[2]])
-    # points[0,0,1,:] = np.array([mins[0], mins[1], maxs[2]])
-    # points[0,1,0,:] = np.array([mins[0], maxs[1], mins[2]])
-    # points[0,1,1,:] = np.array([mins[0], maxs[1], maxs[2]])
-    # points[1,0,0,:] = np.array([maxs[0], mins[1], mins[2]])
-    # points[1,0,1,:] = np.array([maxs[0], mins[1], maxs[2]])
-    # points[1,1,0,:] = np.array([maxs[0], maxs[1], mins[2]])
-    # points[1,1,1,:] = np.array([maxs[0], maxs[1], maxs[2]])
 
     hyper_volume = create_b_spline_from_corners(name=name, corners=corners, order=order, num_coefficients=num_coefficients,
             knot_vectors=knot_vectors)

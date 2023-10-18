@@ -130,7 +130,8 @@ class BSplineSetSpace(m3l.FunctionSpace):
         return BSplineSet(name=name, space=self, coefficients=coefficients, num_physical_dimensions=num_physical_dimensions)
     
 
-    def fit_b_spline_set(self, fitting_points:np.ndarray, fitting_parametric_coordinates:list[tuple[str,np.ndarray]]) -> np.ndarray:
+    def fit_b_spline_set(self, fitting_points:np.ndarray, fitting_parametric_coordinates:list[tuple[str,np.ndarray]],
+                         regularization_parameter:float=0.) -> np.ndarray:
         '''
         Fits a B-spline set to a mesh.
 
@@ -144,6 +145,8 @@ class BSplineSetSpace(m3l.FunctionSpace):
             The number of control points to use in each direction.
         order : tuple[int]
             The order of the B-splines to use in each direction.
+        regularization_parameter : float = 0.
+            The regularization parameter to use when fitting the B-spline set to the mesh.
 
         Returns
         -------
@@ -152,7 +155,7 @@ class BSplineSetSpace(m3l.FunctionSpace):
         '''
         from lsdo_geo.splines.b_splines.b_spline_functions import fit_b_spline_set
         coefficients = fit_b_spline_set(fitting_points=fitting_points, fitting_parametric_coordinates=fitting_parametric_coordinates, 
-                                        b_spline_set_space=self)
+                                        b_spline_set_space=self, regularization_parameter=regularization_parameter)
         return coefficients
         
     

@@ -109,6 +109,85 @@ class BSplineSet(m3l.Function):
         # Find connections!
         # self.find_connections()
 
+    def get_coefficients(self, b_spline_names:list[str]=None, name:str=None) -> m3l.Variable:
+        '''
+        Gets the coefficients for the given B-splines.
+
+        Parameters
+        ----------
+        b_spline_names : list[str], optional
+            The names of the B-splines to get the coefficients for.
+        name : str, optional
+            The name of the coefficients variable.
+
+        Returns
+        -------
+        coefficients : m3l.Variable
+            The coefficients for the given B-splines.
+        '''
+        if b_spline_names is None:
+            return self.coefficients
+            # b_spline_names = list(self.space.b_spline_to_space.keys())
+
+        if name is None:
+            name = ''
+            for b_spline_name in b_spline_names:
+                name += b_spline_name + '_'
+            name += 'coefficients'
+
+        num_indexed_coefficients = 0
+        for b_spline_name in b_spline_names:
+            num_indexed_coefficients += self.coefficient_indices[b_spline_name].shape[0]
+        indexed_coefficients = m3l.Variable(name=name, shape=(num_indexed_coefficients,),
+                                            value=np.zeros((num_indexed_coefficients,)))
+
+        index_counter = 0
+        for b_spline_name in b_spline_names:
+            if b_spline_name not in self.space.b_spline_to_space.keys():
+                raise ValueError(f'The B-spline {b_spline_name} is not in this B-spline set.')
+            
+            b_spline_indices = self.coefficient_indices[b_spline_name]
+            b_spline_num_coefficients = len(b_spline_indices)
+            assignment_indices = np.arange(index_counter, index_counter+b_spline_num_coefficients)
+            indexed_coefficients[assignment_indices] = self.coefficients[b_spline_indices]
+
+            index_counter += b_spline_num_coefficients
+
+        return indexed_coefficients
+    
+
+    def assign_coefficients(self, coefficients:m3l.Variable, b_spline_names:list[str]=None) -> m3l.Variable:
+        '''
+        Gets the coefficients for the given B-splines.
+
+        Parameters
+        ----------
+        coefficients  : m3l.Variable
+            The coefficients to assign for the given B-spline names.
+        b_spline_names : list[str], optional
+            The names of the B-splines to get the coefficients for.
+
+        Returns
+        -------
+        coefficients : m3l.Variable
+            The coefficients for the given B-splines.
+        '''
+        if b_spline_names is None:
+            b_spline_names = list(self.space.b_spline_to_space.keys())
+
+        index_counter = 0
+        for b_spline_name in b_spline_names:
+            if b_spline_name not in self.space.b_spline_to_space.keys():
+                raise ValueError(f'The B-spline {b_spline_name} is not in this B-spline set.')
+            
+            b_spline_indices = self.coefficient_indices[b_spline_name]
+            b_spline_num_coefficients = len(b_spline_indices)
+            assignment_indices = np.arange(index_counter, index_counter+b_spline_num_coefficients)
+            self.coefficients[b_spline_indices] = coefficients[assignment_indices]
+
+            index_counter += b_spline_num_coefficients
+
+        return self.coefficients
 
 
     # def evaluate(self, b_spline_name:str, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> am.MappedArray:
