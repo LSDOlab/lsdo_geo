@@ -2,7 +2,6 @@ import numpy as np
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-import os
 import pickle
 import m3l
 from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
@@ -382,7 +381,6 @@ if __name__ == "__main__":
         ('WingGeom, 0, 3', np.array([0.4, 0.])),
         ('WingGeom, 0, 3', np.array([0.2, 0.])),
         ('WingGeom, 0, 3', np.array([0. , 0.])),
-        ('WingGeom, 1, 8', np.array([0.,  0.])),
         ('WingGeom, 1, 8', np.array([0.2, 0.])),
         ('WingGeom, 1, 8', np.array([0.4, 0.])),
         ('WingGeom, 1, 8', np.array([0.6, 0.])),
