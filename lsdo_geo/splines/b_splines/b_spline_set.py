@@ -162,8 +162,8 @@ class BSplineSet(m3l.Function):
         # parametric_coordinates_string = ''
         # for coordinate in parametric_coordinates:
         #     parametric_coordinates_string += coordinate[0] + '_' + str(np.linalg.norm(coordinate[1]))
-        evaluation_map = m3l.Variable(name=f'evaluation_map', shape=evaluation_map.shape, operation=None, 
-            value=evaluation_map)
+        # evaluation_map = m3l.Variable(name=f'evaluation_map', shape=evaluation_map.shape, operation=None, 
+        #     value=evaluation_map)
 
         if type(self.coefficients) is np.ndarray:
             coefficients = m3l.Variable(name='b_spline_set_coefficients', shape=self.coefficients.shape, operation=None, 
