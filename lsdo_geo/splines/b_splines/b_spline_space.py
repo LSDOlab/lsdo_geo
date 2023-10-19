@@ -36,7 +36,7 @@ class BSplineSpace(m3l.FunctionSpace):
             for i in range(self.num_parametric_dimensions):
                 num_knots = self.order[i] + self.parametric_coefficients_shape[i]
                 knots_i = np.zeros((num_knots,))
-                get_open_uniform(order=self.order[i], num_coefficients=self.parametric_coefficients_shape[i], knot_vector=knots_i)
+                get_open_uniform(self.order[i], self.parametric_coefficients_shape[i], knots_i)
                 self.knot_indices.append(np.arange(len(self.knots), len(self.knots) + num_knots))
                 self.knots = np.hstack((self.knots, knots_i))
         else:
