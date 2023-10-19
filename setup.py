@@ -83,6 +83,7 @@ setup(
         'sphinx-autoapi',
         'numpydoc',
         'gitpython',
+        'Cython==0.29.28', 
         #'sphinxcontrib-collections @ git+https://github.com/anugrahjo/sphinx-collections.git', # 'sphinx-collections',
         'sphinxcontrib-bibtex',
         'setuptools',
