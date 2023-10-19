@@ -370,7 +370,8 @@ if __name__ == "__main__":
     angles = 45
     geometry3.coefficients = m3l.rotate(points=geometry3.coefficients.reshape((-1,3)), axis_origin=axis_origin, axis_vector=axis_vector, angles=angles,
                                         units='degrees').reshape((-1,))
-    # geometry3.plot()
+    geometry3.plot()
+    exit()
 
     leading_edge_parametric_coordinates = [
         ('WingGeom, 0, 3', np.array([1.,  0.])),
