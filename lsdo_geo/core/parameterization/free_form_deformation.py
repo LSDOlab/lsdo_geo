@@ -80,6 +80,8 @@ class FFDBlock(BSpline):
             The embedded points.
         '''
         # Perform update
+        self.coefficients = coefficients
+
         updated_points = m3l.matvec(map=self.evaluation_map, x=coefficients)
 
         outputs = {}
@@ -104,7 +106,7 @@ class FFDBlock(BSpline):
             self.plot(plot_embedded_points=True, plot_types=['surface','point_cloud'], opacity=0.3, show=True)
 
         if len(outputs) == 1:
-            return outputs[0]
+            return outputs[list(outputs.keys())[0]]
         else:
             return outputs
         

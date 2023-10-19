@@ -8,6 +8,7 @@ import vedo
 
 from lsdo_geo.cython.basis_matrix_surface_py import get_basis_surface_matrix
 from lsdo_geo.cython.surface_projection_py import compute_surface_projection
+from lsdo_geo.cython.volume_projection_py import compute_volume_projection
 
 from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
 
@@ -184,23 +185,46 @@ class BSpline(m3l.Function):
         else:
             direction = np.tile(direction, num_points)
 
-        
-        u_vec_flattened = np.zeros(num_points)
-        v_vec_flattened = np.zeros(num_points)
-        num_coefficients = self.num_coefficients
+        if self.space.num_parametric_dimensions == 2:
+            u_vec_flattened = np.zeros(num_points)
+            v_vec_flattened = np.zeros(num_points)
 
-        compute_surface_projection(
-            np.array([self.space.order[0]]), np.array([self.coefficients_shape[0]]),
-            np.array([self.space.order[1]]), np.array([self.coefficients_shape[1]]),
-            num_points, max_iterations,
-            flattened_points, 
-            self.coefficients.value.reshape((-1,)),
-            self.space.knots[self.space.knot_indices[0]].copy(), self.space.knots[self.space.knot_indices[1]].copy(),
-            u_vec_flattened, v_vec_flattened, grid_search_density,
-            direction.reshape((-1,)), np.zeros((num_points,), dtype=int), self.coefficients.value.reshape((1, -1))
-        )
+            compute_surface_projection(
+                np.array([self.space.order[0]]), np.array([self.coefficients_shape[0]]),
+                np.array([self.space.order[1]]), np.array([self.coefficients_shape[1]]),
+                num_points, max_iterations,
+                flattened_points, 
+                self.coefficients.value.reshape((-1,)),
+                self.space.knots[self.space.knot_indices[0]].copy(), self.space.knots[self.space.knot_indices[1]].copy(),
+                u_vec_flattened, v_vec_flattened, grid_search_density,
+                direction.reshape((-1,)), np.zeros((num_points,), dtype=int), self.coefficients.value.reshape((1, -1))
+            )
 
-        parametric_coordinates = np.hstack((u_vec_flattened.reshape((-1,1)), v_vec_flattened.reshape((-1,1))))
+            parametric_coordinates = np.hstack((u_vec_flattened.reshape((-1,1)), v_vec_flattened.reshape((-1,1))))
+
+        elif self.space.num_parametric_dimensions == 3:
+            u_vec_flattened = np.zeros(num_points)
+            v_vec_flattened = np.zeros(num_points)
+            w_vec_flattened = np.zeros(num_points)
+
+            # print('FFD PROJECTION')
+            # print(self.name)
+            # exit()
+
+            compute_volume_projection(
+                np.array([self.space.order[0]]), np.array([self.coefficients_shape[0]]),
+                np.array([self.space.order[1]]), np.array([self.coefficients_shape[1]]),
+                np.array([self.space.order[2]]), np.array([self.coefficients_shape[2]]),
+                num_points, max_iterations,
+                flattened_points, 
+                self.coefficients.value.reshape((-1,)),
+                self.space.knots[self.space.knot_indices[0]].copy(), self.space.knots[self.space.knot_indices[1]].copy(),
+                self.space.knots[self.space.knot_indices[2]].copy(),
+                u_vec_flattened, v_vec_flattened, w_vec_flattened, grid_search_density, direction.reshape((-1,))
+            )
+
+            parametric_coordinates = np.hstack((u_vec_flattened.reshape((-1,1)), v_vec_flattened.reshape((-1,1)), w_vec_flattened.reshape((-1,1))))
+
         # map = self.compute_evaluation_map(parametric_coordinates)
         # projected_points = am.array(input=self.coefficients, linear_map=map, shape=input_shape)
 

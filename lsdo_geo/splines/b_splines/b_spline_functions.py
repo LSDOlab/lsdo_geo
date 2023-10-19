@@ -698,7 +698,7 @@ def compute_evaluation_map(parametric_coordinates:np.ndarray, order:tuple, param
         get_basis_surface_matrix(order_u, parametric_coefficients_shape[0], parametric_derivative_order[0], u_vec, knots_u, 
             order_v, parametric_coefficients_shape[1], parametric_derivative_order[1], v_vec, knots_v, 
             len(u_vec), data, row_indices, col_indices)
-    elif num_parametric_dimensions == 2:
+    elif num_parametric_dimensions == 3:
         u_vec = parametric_coordinates[:,0].copy()
         v_vec = parametric_coordinates[:,1].copy()
         w_vec = parametric_coordinates[:,2].copy()

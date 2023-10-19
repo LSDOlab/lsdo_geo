@@ -425,8 +425,9 @@ if __name__ == "__main__":
     scaling_matrix = sps.eye(left_wing_ffd_block.num_coefficients)*2
     scaling_matrix = scaling_matrix.tocsc()
 
-    left_wing_ffd_block.coefficients = m3l.matvec(scaling_matrix, left_wing_ffd_block.coefficients)
-    left_wing_ffd_block.plot()
+    new_left_wing_ffd_block_coefficients = m3l.matvec(scaling_matrix, left_wing_ffd_block.coefficients)
+    left_wing_ffd_block.evaluate(new_left_wing_ffd_block_coefficients, plot=True)
+    # Do we want FFD set object? I'm thnking not...
 
     # THEN DO PYTHON FFD, PYTHON FFD SECTIONAL PARAMETERIZATION, THEN PYTHON FFD B-SPLINE SECTIONAL PARAMETERIZATION
     # NOTE: THE B-SPLINE SECTIONAL PARAMETERIZATION SHOULD JUST BE A STRAIGHT B-SPLINE PARAMETERIZATION, NOTHING SPECIFIC TO FFD
