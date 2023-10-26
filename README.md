@@ -13,7 +13,7 @@
 [![Issues](https://img.shields.io/github/issues/LSDOlab/lsdo_project_template.svg)](https://github.com/LSDOlab/lsdo_project_template/issues)
 
 
-A package for representing and parameterizing geometry for engineering design.
+A package for representing and parameterizing geometry and states for multidisciplinary design optimization.
 
 
 # Installation
