@@ -663,9 +663,9 @@ def _fit_b_spline_in_set(b_spline_set:BSplineSet, b_spline_name:str, indices:np.
 
     points = points_vector.reshape((num_points_u, num_points_v, num_dimensions))
 
-    b_spline = fit_b_spline(fitting_points=points, parametric_coordinates=(u_vec, v_vec), 
+    b_spline = fit_b_spline(fitting_points=points, parametric_coordinates=parametric_coordinates, 
         order=order, num_coefficients=num_coefficients,
-        knot_vectors=None, name=b_spline_name)
+        knots=None, name=b_spline_name)
     
     return b_spline
 
