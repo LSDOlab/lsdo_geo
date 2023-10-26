@@ -3,7 +3,7 @@ import csdl
 
 import numpy as np
 import scipy.sparse as sps
-import array_mapper as am
+# import array_mapper as am
 import vedo
 
 from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
@@ -54,7 +54,7 @@ class BSplineSubSet:
         return self.b_spline_set.assign_coefficients(coefficients=coefficients, b_spline_names=self.b_spline_names)
 
 
-    def evaluate(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple[int]=None) -> am.MappedArray:
+    def evaluate(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple[int]=None) -> m3l.Variable:
 
         return self.b_spline_set.evaluate(parametric_coordinates=parametric_coordinates,
                                            parametric_derivative_order=parametric_derivative_order)
@@ -67,11 +67,11 @@ class BSplineSubSet:
 
         Parameters
         -----------
-        points : {np.ndarray, am.MappedArray}
+        points : {np.ndarray, m3l.Variable}
             The points to be projected onto the system.
         targets : list, optional
             The list of primitives to project onto.
-        direction : {np.ndarray, am.MappedArray}, optional
+        direction : {np.ndarray, m3l.Variable}, optional
             An axis for perfoming projection along an axis. The projection will return the closest point to the axis.
         grid_search_density : int, optional
             The resolution of the grid search prior to the Newton iteration for solving the optimization problem.
@@ -149,7 +149,7 @@ class BSplineSubSet:
 
 if __name__ == "__main__":
     from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
-    from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
+    from lsdo_b_splines_cython.cython.get_open_uniform_py import get_open_uniform
 
     # ''' Creating B-spline set manually '''
 

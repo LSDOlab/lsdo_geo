@@ -3,8 +3,8 @@ import scipy.sparse as sps
 import array_mapper as am
 import vedo
 
-from lsdo_geo.cython.basis_matrix_surface_py import get_basis_surface_matrix
-from lsdo_geo.cython.surface_projection_py import compute_surface_projection
+from lsdo_b_splines_cython.cython.basis_matrix_surface_py import get_basis_surface_matrix
+from lsdo_b_splines_cython.cython.surface_projection_py import compute_surface_projection
 
 from lsdo_geo.primitives.b_splines.b_spline import BSpline
 

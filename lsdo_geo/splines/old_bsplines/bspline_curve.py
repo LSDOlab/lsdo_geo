@@ -4,9 +4,9 @@ import scipy.sparse as sps
 import vedo
 import vedo.pyplot as plt
 
-from lsdo_geo.cython.basis_matrix_curve_py import get_basis_curve_matrix
-from lsdo_geo.cython.curve_projection_py import compute_curve_projection
-from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
+from lsdo_b_splines_cython.cython.basis_matrix_curve_py import get_basis_curve_matrix
+from lsdo_b_splines_cython.cython.curve_projection_py import compute_curve_projection
+from lsdo_b_splines_cython.cython.get_open_uniform_py import get_open_uniform
 
 from lsdo_geo.primitives.b_splines.b_spline import BSpline
 

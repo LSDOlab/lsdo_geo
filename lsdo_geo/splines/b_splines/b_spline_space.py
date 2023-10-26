@@ -2,11 +2,11 @@ from dataclasses import dataclass
 
 import m3l
 import numpy as np
-import array_mapper as am
+# import array_mapper as am
 import scipy.sparse as sps
 
-from lsdo_geo.cython.basis_matrix_surface_py import get_basis_surface_matrix
-from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
+from lsdo_b_splines_cython.cython.basis_matrix_surface_py import get_basis_surface_matrix
+from lsdo_b_splines_cython.cython.get_open_uniform_py import get_open_uniform
 
 # from lsdo_geo.splines.b_splines.b_spline import BSpline   # Can't do this. Circular import.
 
@@ -85,7 +85,7 @@ class BSplineSpace(m3l.FunctionSpace):
 
 if __name__ == "__main__":
     from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
-    from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
+    from lsdo_b_splines_cython.cython.get_open_uniform_py import get_open_uniform
 
     num_coefficients = 10
     order = 4

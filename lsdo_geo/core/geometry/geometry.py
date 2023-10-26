@@ -194,7 +194,7 @@ class Geometry(BSplineSet):
                 # Is vector, so draw an arrow
                 processed_points = ()
                 for point in mesh:
-                    if type(point) is am.MappedArray:
+                    if type(point) is m3l.Variable:
                         processed_points = processed_points + (point.value,)
                     else:
                         processed_points = processed_points + (point,)
@@ -260,7 +260,7 @@ class Geometry(BSplineSet):
 
 if __name__ == "__main__":
     from lsdo_geo.core.geometry.geometry_functions import import_geometry
-    import array_mapper as am
+    # import array_mapper as am
     import m3l
     import time
     import scipy.sparse as sps

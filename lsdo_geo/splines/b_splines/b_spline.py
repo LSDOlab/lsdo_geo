@@ -5,12 +5,12 @@ import csdl
 
 import numpy as np
 import scipy.sparse as sps
-import array_mapper as am
+# import array_mapper as am
 import vedo
 
-from lsdo_geo.cython.basis_matrix_surface_py import get_basis_surface_matrix
-from lsdo_geo.cython.surface_projection_py import compute_surface_projection
-from lsdo_geo.cython.volume_projection_py import compute_volume_projection
+from lsdo_b_splines_cython.cython.basis_matrix_surface_py import get_basis_surface_matrix
+from lsdo_b_splines_cython.cython.surface_projection_py import compute_surface_projection
+from lsdo_b_splines_cython.cython.volume_projection_py import compute_volume_projection
 
 from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
 
@@ -36,7 +36,7 @@ class BSpline(m3l.Function):
 
     Methods
     -------
-    evaluate(parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> am.MappedArray
+    evaluate(parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> m3l.Variable
         Evaluates the B-spline at the given parametric coordinates.
     compute_evaluation_map(parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None,
                            expand_map_for_physical:bool=True) -> sps.csc_matrix

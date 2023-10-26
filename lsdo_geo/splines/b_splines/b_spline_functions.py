@@ -14,10 +14,10 @@ from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
 from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
 from lsdo_geo.splines.b_splines.b_spline_set_space import BSplineSetSpace
 
-from lsdo_geo.cython.basis_matrix_curve_py import get_basis_curve_matrix
-from lsdo_geo.cython.basis_matrix_surface_py import get_basis_surface_matrix
-from lsdo_geo.cython.basis_matrix_volume_py import get_basis_volume_matrix
-from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
+from lsdo_b_splines_cython.cython.basis_matrix_curve_py import get_basis_curve_matrix
+from lsdo_b_splines_cython.cython.basis_matrix_surface_py import get_basis_surface_matrix
+from lsdo_b_splines_cython.cython.basis_matrix_volume_py import get_basis_volume_matrix
+from lsdo_b_splines_cython.cython.get_open_uniform_py import get_open_uniform
 from scipy.linalg import expm_cond
 
 # def create_b_spline_space() # It's not that hard to get the control points shape

@@ -4,11 +4,11 @@ import csdl
 
 import numpy as np
 import scipy.sparse as sps
-import array_mapper as am
+# import array_mapper as am
 import vedo
 
-from lsdo_geo.cython.basis_matrix_surface_py import get_basis_surface_matrix
-from lsdo_geo.cython.surface_projection_py import compute_surface_projection
+from lsdo_b_splines_cython.cython.basis_matrix_surface_py import get_basis_surface_matrix
+from lsdo_b_splines_cython.cython.surface_projection_py import compute_surface_projection
 
 from lsdo_geo.splines.b_splines.b_spline_set_space import BSplineSetSpace
 from lsdo_geo.splines.b_splines.b_spline import BSpline
@@ -201,7 +201,7 @@ class BSplineSet(m3l.Function):
         return self.coefficients
 
 
-    # def evaluate(self, b_spline_name:str, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> am.MappedArray:
+    # def evaluate(self, b_spline_name:str, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> m3l.Variable:
     #     b_spline_basis = self.space.compute_evaluation_map(
     #         b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates, parametric_derivative_order=parametric_derivative_order)
         
@@ -529,17 +529,17 @@ class BSplineSet(m3l.Function):
 
 
     def project(self, points:np.ndarray, targets:list[str]=None, direction:np.ndarray=None,
-                grid_search_density_parameter:int=10, max_iterations=100, plot:bool=False) -> am.MappedArray:
+                grid_search_density_parameter:int=10, max_iterations=100, plot:bool=False) -> list[str,np.ndarray]:
         '''
         Projects points onto the B-spline set.
 
         Parameters
         -----------
-        points : {np.ndarray, am.MappedArray}
+        points : {np.ndarray, m3l.Variable}
             The points to be projected onto the system.
         targets : list, optional
             The list of primitives to project onto.
-        direction : {np.ndarray, am.MappedArray}, optional
+        direction : {np.ndarray, m3l.Variable}, optional
             An axis for perfoming projection along an axis. The projection will return the closest point to the axis.
         grid_search_density : int, optional
             The resolution of the grid search prior to the Newton iteration for solving the optimization problem.
@@ -549,7 +549,7 @@ class BSplineSet(m3l.Function):
             A boolean on whether or not to plot the projection result.
         '''
 
-        if type(points) is am.MappedArray:
+        if type(points) is m3l.Variable:
                 points = points.value
         if len(points.shape) == 1:
             points = points.reshape((1, -1))    # Last axis is reserved for dimensionality of physical space
@@ -563,7 +563,7 @@ class BSplineSet(m3l.Function):
         if len(targets) == 0:
             raise Exception("No geometry to project on to.")
 
-        if type(direction) is am.MappedArray:
+        if type(direction) is m3l.Variable:
             direction = direction.value
         if direction is None:
             direction = np.zeros((num_points, num_physical_dimensions))
@@ -641,7 +641,7 @@ class BSplineSet(m3l.Function):
 
                 points_shape = points.shape
 
-                if type(points) is am.MappedArray:
+                if type(points) is m3l.Variable:
                     points = points.value
                 if len(points.shape) == 1:
                     points = points.reshape((1, -1))    # Last axis is reserved for dimensionality of physical space
@@ -657,7 +657,7 @@ class BSplineSet(m3l.Function):
                 if len(targets) == 0:
                     raise Exception("No geometry to project on to.")
 
-                if type(direction) is am.MappedArray:
+                if type(direction) is m3l.Variable:
                     direction = direction.value
                 if direction is None:
                     direction = np.zeros((num_points, num_physical_dimensions))
@@ -826,7 +826,7 @@ class BSplineSet(m3l.Function):
 
             points_shape = points.shape
 
-            if type(points) is am.MappedArray:
+            if type(points) is m3l.Variable:
                 points = points.value
             if len(points.shape) == 1:
                 points = points.reshape((1, -1))    # Last axis is reserved for dimensionality of physical space
@@ -842,7 +842,7 @@ class BSplineSet(m3l.Function):
             if len(targets) == 0:
                 raise Exception("No geometry to project on to.")
 
-            if type(direction) is am.MappedArray:
+            if type(direction) is m3l.Variable:
                 direction = direction.value
             if direction is None:
                 direction = np.zeros((num_points, num_physical_dimensions))
@@ -1403,7 +1403,7 @@ class BSplineSet(m3l.Function):
 
 if __name__ == "__main__":
     from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
-    from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
+    from lsdo_b_splines_cython.cython.get_open_uniform_py import get_open_uniform
 
     # ''' Creating B-spline set manually '''
 

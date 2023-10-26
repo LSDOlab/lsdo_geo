@@ -2,8 +2,8 @@ import numpy as np
 import array_mapper as am
 import scipy.sparse as sps
 
-from lsdo_geo.cython.basis_matrix_volume_py import get_basis_volume_matrix
-from lsdo_geo.cython.volume_projection_py import compute_volume_projection
+from lsdo_b_splines_cython.cython.basis_matrix_volume_py import get_basis_volume_matrix
+from lsdo_b_splines_cython.cython.volume_projection_py import compute_volume_projection
 
 from lsdo_geo.primitives.b_splines.b_spline import BSpline
 

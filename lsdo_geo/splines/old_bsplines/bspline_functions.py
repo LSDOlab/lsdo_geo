@@ -9,8 +9,8 @@ from lsdo_geo.primitives.b_splines.b_spline_curve import BSplineCurve
 from lsdo_geo.primitives.b_splines.b_spline_surface import BSplineSurface
 from lsdo_geo.primitives.b_splines.b_spline_volume import BSplineVolume
 
-from lsdo_geo.cython.basis_matrix_surface_py import get_basis_surface_matrix
-from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
+from lsdo_b_splines_cython.cython.basis_matrix_surface_py import get_basis_surface_matrix
+from lsdo_b_splines_cython.cython.get_open_uniform_py import get_open_uniform
 
 
 '''

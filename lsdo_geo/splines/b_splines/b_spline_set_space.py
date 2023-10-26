@@ -3,7 +3,7 @@ from typing import Union
 
 import m3l
 import numpy as np
-import array_mapper as am
+# import array_mapper as am
 import scipy.sparse as sps
 
 from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
