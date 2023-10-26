@@ -18,7 +18,7 @@ from lsdo_geo.cython.basis_matrix_curve_py import get_basis_curve_matrix
 from lsdo_geo.cython.basis_matrix_surface_py import get_basis_surface_matrix
 from lsdo_geo.cython.basis_matrix_volume_py import get_basis_volume_matrix
 from lsdo_geo.cython.get_open_uniform_py import get_open_uniform
-
+from scipy.linalg import expm_cond
 
 # def create_b_spline_space() # It's not that hard to get the control points shape
 
@@ -513,6 +513,15 @@ def fit_b_spline_set(fitting_points:np.ndarray, fitting_parametric_coordinates:l
     temp_b_spline_set = b_spline_set_space.create_function(name='temp', coefficients=None, num_physical_dimensions=num_physical_dimensions)
     evaluation_map = temp_b_spline_set.compute_evaluation_map(parametric_coordinates=fitting_parametric_coordinates,
                                                               expand_map_for_physical=False)
+    # import scipy
+    # print(evaluation_map.T.shape)
+    # print((evaluation_map.T @ evaluation_map).shape)
+    # U, s, Vh = scipy.linalg.svd(((evaluation_map.T).dot(evaluation_map)) + regularization_parameter * sps.identity(evaluation_map.shape[1]).toarray())
+    # print(s[0])
+    # print(s[-1])
+    # print(np.count_nonzero(s))
+    # exit()
+    # print('CONDITION NUMBER', expm_cond((evaluation_map.T @ evaluation_map).toarray()))
 
     # Perform fitting
     flattened_fitting_points = fitting_points.reshape((-1,num_physical_dimensions))

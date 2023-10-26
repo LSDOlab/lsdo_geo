@@ -83,12 +83,14 @@ setup(
         'sphinx-autoapi',
         'numpydoc',
         'gitpython',
+        'Cython==0.29.28', 
+        'array_mapper @ git+https://github.com/LSDOLab/array_mapper.git',
+
         #'sphinxcontrib-collections @ git+https://github.com/anugrahjo/sphinx-collections.git', # 'sphinx-collections',
         'sphinxcontrib-bibtex',
         'setuptools',
         'wheel',
         'twine',
-        'cython',
     ],
     classifiers=[
         'Programming Language :: Python',

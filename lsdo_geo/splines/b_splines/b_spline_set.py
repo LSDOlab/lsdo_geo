@@ -19,6 +19,17 @@ from typing import Union
 import os
 import pickle
 from pathlib import Path
+import string 
+import random
+
+def generate_random_string(length=5):
+    # Define the characters to choose from
+    characters = string.ascii_letters + string.digits  # Alphanumeric characters
+
+    # Generate a random string of the specified length
+    random_string = ''.join(random.choice(characters) for _ in range(length))
+    
+    return random_string
 
 # TODO: I'm going to leave this class as surface for now, but I want to generalize to n-dimensional.
 
@@ -563,43 +574,251 @@ class BSplineSet(m3l.Function):
         coeff_norm = round(np.linalg.norm(self.coefficients.value), 2)
         name_space = f'{self.name}_{coeff_norm}'
 
-        for target in targets[:1]:
+        for target in targets:
             target_space = self.space.spaces[self.space.b_spline_to_space[target]]
 
             order = target_space.order
             coeff_shape = target_space.parametric_coefficients_shape
             knot_vectors_norm = round(np.linalg.norm(target_space.knots), 2)
 
-            name_space += f'_{str(order)}_{str(coeff_shape)}_{str(knot_vectors_norm)}'
+            if f'{target}_{str(order)}_{str(coeff_shape)}_{str(knot_vectors_norm)}' in name_space:
+                pass
+            else:
+                name_space += f'_{target}_{str(order)}_{str(coeff_shape)}_{str(knot_vectors_norm)}'
         
-        name_space += f'_{str(points)}_{str(direction)}_{grid_search_density_parameter}_{max_iterations}'
+        long_name_space = name_space + f'_{str(points)}_{str(direction)}_{grid_search_density_parameter}_{max_iterations}'
 
 
         from lsdo_geo import PROJECTIONS_FOLDER
         
-        saved_projections = PROJECTIONS_FOLDER / f'{name_space}.pickle'
+        # NOTE: procedure for storing projections
+        # Problem: Want to give each projection a unique name but piecing together a long string based on the 
+        # projection function arguments exceeds the length of allowable characters 
 
-        saved_projections_file = Path(saved_projections)
+        # Solution
+        # 1) create a long name space by looping over the targets and assembling all projection inputs into a long string 
+        # 2) Create a random 6 character alpha-numeric string and associate it with long string name through a dictionary 
+        # 3) Save the dictionary of short and long name combination of strings in a pickle file
+        # 4) For each projection, check if the long name is in the keys of the dictionary
+        #       - If yes, get the short name space and load the projections from the corresponding pickle file
+        #       - If no, proceed with projection 
 
-        if saved_projections_file.is_file():
-            with open(saved_projections, 'rb') as handle:
-                projections_dict = pickle.load(handle)
-                parametric_coordinates = projections_dict['parametric_coordinates']
 
-            self.evaluate(parametric_coordinates=parametric_coordinates, plot=plot)
+        name_space_dict_file_path = Path(PROJECTIONS_FOLDER / f'name_space_dict.pickle')
+        if name_space_dict_file_path.is_file():
+            with open(PROJECTIONS_FOLDER / 'name_space_dict.pickle', 'rb') as handle:
+                name_space_dict = pickle.load(handle)
+            if long_name_space in name_space_dict.keys():
+                short_name_space = name_space_dict[long_name_space]
+                saved_projections = PROJECTIONS_FOLDER / f'{short_name_space}.pickle'
+                with open(saved_projections, 'rb') as handle:
+                    projections_dict = pickle.load(handle)
+                    parametric_coordinates = projections_dict['parametric_coordinates']
 
+                self.evaluate(parametric_coordinates=parametric_coordinates, plot=plot)
+                
+            else: 
+                short_name_space = generate_random_string(6)
+                name_space_dict[long_name_space] = short_name_space
+                with open(PROJECTIONS_FOLDER / 'name_space_dict.pickle', 'wb+') as handle:
+                    pickle.dump(name_space_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                
+                # NOTE/TODO: Consider changing the algorithm to use the connection information to reduce the number of dense grid-searches and
+                #   individual projection Newton optimizations.
+                # TODO: Make this M3L operation and allow for returning parametric coordinates
+
+                # steps:
+                # 1. Evaluates a coarse grid on every B-spline to find potentially close B-splines for each point
+                # 2. Evaluate a dense grid over ALL the potentially close B-splines and use it to find the most likely closest B-spline for each point
+                # 3. For each point, perform a projection on the closest B-spline with a very dense grid and a Newton iteration
+                #   -- If the solution is on the edge of the B-spline, then the projections will be performed on the connected B-splines
+                #   -- -- For each connected B-spline, if the objetive goes up, the branch is cut off.
+                #   -- -- If the objective goes down, the branch is followed / logic is repeeated until there are no more branches.
+
+                coarse_grid_search_density_parameter = 5
+                fine_grid_search_density_parameter = 25*grid_search_density_parameter
+                projection_grid_search_density_parameter = 10*grid_search_density_parameter
+
+                points_shape = points.shape
+
+                if type(points) is am.MappedArray:
+                    points = points.value
+                if len(points.shape) == 1:
+                    points = points.reshape((1, -1))    # Last axis is reserved for dimensionality of physical space
+                
+                num_points = np.prod(points.shape[:-1])
+                num_physical_dimensions = points.shape[-1]
+
+                points = points.reshape((num_points, num_physical_dimensions))
+
+                if targets is None:
+                    targets = list(self.coefficient_indices.keys())
+                
+                if len(targets) == 0:
+                    raise Exception("No geometry to project on to.")
+
+                if type(direction) is am.MappedArray:
+                    direction = direction.value
+                if direction is None:
+                    direction = np.zeros((num_points, num_physical_dimensions))
+                if type(direction.shape[0]) is int: # checks if only one direction vector is given
+                    direction = np.tile(direction, (points.shape[0], 1))
+                
+                if len(targets) == 1:
+                    # If there is only one target, then we can just project on that B-spline
+                    b_spline_name = targets[0]
+                    b_spline = BSpline(name='temp', space=self.space.spaces[self.space.b_spline_to_space[b_spline_name]], 
+                                    coefficients=self.coefficients[self.coefficient_indices[b_spline_name]], 
+                                    num_physical_dimensions=self.num_physical_dimensions[b_spline_name])
+                    b_spline_parametric_coordinates = b_spline.project(points=points, direction=direction,
+                                                                grid_search_density=fine_grid_search_density_parameter,max_iterations=max_iterations,
+                                                                plot=plot, return_parametric_coordinates=True)
+                    
+                    parametric_coordinates = []
+                    for i in range(num_points):
+                        parametric_coordinates.append((b_spline_name, b_spline_parametric_coordinates[i]))
+                    return parametric_coordinates
+                
+
+                coarse_grid_points, coarse_grid_points_indices = self.evaluate_grid(b_spline_names=targets,
+                                                                                    grid_resolution=(coarse_grid_search_density_parameter,),
+                                                                                    parametric_derivative_order=None,
+                                                                                    return_flattened=False)
+
+                # Get a length scale parameter to determine a tolerance for each point
+                points_expanded_coarse = np.repeat(points[:,np.newaxis,:], coarse_grid_points.shape[0], axis=1)
+                coarse_distances = np.linalg.norm(points_expanded_coarse - coarse_grid_points, axis=2)
+                length_scales = np.min(coarse_distances, axis=1)
+                system_length_scales = np.zeros((3,))
+                for i in range(3):
+                    system_length_scales[i] = np.max(coarse_grid_points[:,i]) - np.min(coarse_grid_points[:,i])
+                system_length_scale = np.max(system_length_scales)
+                projection_tolerances = length_scales + 0.01*length_scales*system_length_scale
+
+                # Check which b_splines are close to which points
+                close_targets = []    # total list of close targets
+                close_targets_for_this_point = []   # list of close targets for this point. This is a list of lists
+                for i in range(num_points):
+                    close_targets_for_this_point.append([])
+                close_b_spline_indices = np.argwhere(coarse_distances < projection_tolerances[:,np.newaxis])
+
+                for i in range(close_b_spline_indices.shape[0]):    # i corresponds to the index looping over the list of close target/point pairs
+                    point_index = close_b_spline_indices[i,0]
+                    close_grid_point_index = close_b_spline_indices[i,1]
+                    for target_name, point_indices in coarse_grid_points_indices.items():
+                        if close_grid_point_index in point_indices:
+                            close_b_spline_name = target_name
+                            break
+                    if close_b_spline_name not in close_targets:
+                        close_targets.append(close_b_spline_name)
+                    if close_b_spline_name not in close_targets_for_this_point[point_index]:
+                        close_targets_for_this_point[point_index].append(close_b_spline_name)
+
+                # Evaluate a fine grid on every B-spline that is close to at least one point
+                # fine_grid_points_indices = {}
+                # fine_grid_points = np.zeros((0, num_physical_dimensions))
+                b_spline_length_scales_dict = {}
+                fine_grid_search_density = {}
+                i = 0
+                for b_spline_name in close_targets:
+                    num_parametric_dimensions = self.space.spaces[self.space.b_spline_to_space[b_spline_name]].num_parametric_dimensions
+                    b_spline_length_scales = np.zeros((3,))
+                    for j in range(3):
+                        b_spline_length_scales[j] = np.max(coarse_grid_points[coarse_grid_points_indices[b_spline_name],j]) \
+                            - np.min(coarse_grid_points[coarse_grid_points_indices[b_spline_name],j])
+                    b_spline_length_scale = np.linalg.norm(b_spline_length_scales)
+                    b_spline_length_scales_dict[b_spline_name] = b_spline_length_scale
+                    fine_grid_search_density[b_spline_name] = int(np.ceil(fine_grid_search_density_parameter*b_spline_length_scale/system_length_scale
+                                                    /num_parametric_dimensions))
+                    # dimension_linspace = np.linspace(0., 1., fine_grid_search_density)
+
+                    # mesh_grid_input = []
+                    # for dimension_index in range(num_parametric_dimensions):
+                    #     mesh_grid_input.append(dimension_linspace)
+
+                    # parametric_coordinates_tuple = np.meshgrid(*mesh_grid_input, indexing='ij')
+                    # for dimensions_index in range(num_parametric_dimensions):
+                    #     parametric_coordinates_tuple[dimensions_index] = parametric_coordinates_tuple[dimensions_index].reshape((-1,1))
+
+                    # parametric_coordinates = np.hstack(parametric_coordinates_tuple)
+                    # b_spline_grid_points = self.evaluate(b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates)
+                    # fine_grid_points = np.vstack((fine_grid_points, b_spline_grid_points))
+                    # fine_grid_points_indices[b_spline_name] = np.arange(fine_grid_search_density**num_parametric_dimensions) + i
+                    # i += fine_grid_search_density**num_parametric_dimensions
+                fine_grid_points, fine_grid_points_indices = self.evaluate_grid(b_spline_names=close_targets,
+                                                                                grid_resolution=fine_grid_search_density,
+                                                                                parametric_derivative_order=None,
+                                                                                return_flattened=False)
+
+                # Find the closest fine grid point to each point
+                points_expanded_fine = np.repeat(points[:,np.newaxis,:], fine_grid_points.shape[0], axis=1)
+                fine_distances = np.linalg.norm(points_expanded_fine - fine_grid_points, axis=2)
+                closest_fine_grid_point_indices = np.argmin(fine_distances, axis=1)
+                closest_fine_grid_point_b_spline_names = []
+                for i in range(num_points):
+                    close_grid_point_index = closest_fine_grid_point_indices[i]
+                    for target_name, point_indices in fine_grid_points_indices.items():
+                        if close_grid_point_index in point_indices:
+                            close_b_spline_name = target_name
+                            break
+                    closest_fine_grid_point_b_spline_names.append(target_name)
+
+                # For each point, perform a projection on the closest B-spline with a very dense grid and a Newton iteration
+                # -- If the solution is on the edge of the B-spline, then the projections will be performed on the connected B-splines
+                # -- -- For each connected B-spline, if the objetive goes up, the branch is cut off.
+                # -- -- If the objective goes down, the branch is followed / logic is repeeated until there are no more branches.
+                closest_b_splines = {}
+                for i in closest_fine_grid_point_b_spline_names:    # This is a bit tacky, but create B-spline objects to make projections easier
+                    b_spline = BSpline(name=i, space=self.space.spaces[self.space.b_spline_to_space[i]], 
+                                    coefficients=self.coefficients[self.coefficient_indices[i]], num_physical_dimensions=self.num_physical_dimensions[i])
+                    closest_b_splines[i] = b_spline
+
+                parametric_coordinates = []
+                # TODO: Insert boundary checking and projection onto connected B-splines
+                for i in range(num_points):
+                    point = points[i]
+                    direction_vector = direction[i].copy()
+                    closest_b_spline_name = closest_fine_grid_point_b_spline_names[i]
+                    
+                    b_spline = closest_b_splines[closest_b_spline_name]
+                    projection_grid_search_density = int(np.ceil(projection_grid_search_density_parameter
+                                                                *b_spline_length_scales_dict[close_b_spline_name]/system_length_scale
+                                                                /num_parametric_dimensions
+                                                                *int(np.prod(np.array(b_spline.space.order)-1))))
+                    if projection_grid_search_density == 0:
+                        projection_grid_search_density = 1
+                    projected_point_on_b_spline_parametric_coordinates = b_spline.project(points=point, direction=direction_vector, 
+                                                                grid_search_density=projection_grid_search_density,max_iterations=max_iterations,
+                                                                plot=False)
+                    parametric_coordinates.append((closest_b_spline_name, projected_point_on_b_spline_parametric_coordinates))
+
+                # projected_points = self.evaluate(parametric_coordinates=parametric_coordinates)
+
+                if plot:
+                    # Plot the surfaces that are projected onto
+                    plotter = vedo.Plotter()
+                    b_spline_meshes = self.plot(b_splines=list(closest_b_splines.keys()), opacity=0.25, show=False)
+                    # b_spline_meshes = self.plot(b_splines=list(self.coefficient_indices.keys()), opacity=0.25, show=False)
+                    # Plot 
+                    plotting_points = []
+                    projected_points = self.evaluate(parametric_coordinates=parametric_coordinates)
+                    flattened_projected_points = (projected_points.value).reshape((num_points, -1)) # last axis usually has length 3 for x,y,z
+                    plotting_projected_points = vedo.Points(flattened_projected_points, r=12, c='#00C6D7')  # TODO make this (1,3) instead of (3,)
+                    plotting_points.append(plotting_projected_points)
+                    plotter.show(b_spline_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
+
+                projections_dict = {}
+                projections_dict['parametric_coordinates'] = parametric_coordinates
+                with open(PROJECTIONS_FOLDER / f'{short_name_space}.pickle', 'wb+') as handle:
+                    pickle.dump(projections_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        
+        # After running projections for the first time, this else should never be triggered again
         else:
-            # NOTE/TODO: Consider changing the algorithm to use the connection information to reduce the number of dense grid-searches and
-            #   individual projection Newton optimizations.
-            # TODO: Make this M3L operation and allow for returning parametric coordinates
-
-            # steps:
-            # 1. Evaluates a coarse grid on every B-spline to find potentially close B-splines for each point
-            # 2. Evaluate a dense grid over ALL the potentially close B-splines and use it to find the most likely closest B-spline for each point
-            # 3. For each point, perform a projection on the closest B-spline with a very dense grid and a Newton iteration
-            #   -- If the solution is on the edge of the B-spline, then the projections will be performed on the connected B-splines
-            #   -- -- For each connected B-spline, if the objetive goes up, the branch is cut off.
-            #   -- -- If the objective goes down, the branch is followed / logic is repeeated until there are no more branches.
+            short_name_space = generate_random_string(6)
+            name_space_dict = {}
+            name_space_dict[long_name_space] = short_name_space
+            with open(PROJECTIONS_FOLDER / 'name_space_dict.pickle', 'wb+') as handle:
+                pickle.dump(name_space_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
             coarse_grid_search_density_parameter = 5
             fine_grid_search_density_parameter = 25*grid_search_density_parameter
@@ -775,9 +994,9 @@ class BSplineSet(m3l.Function):
 
             projections_dict = {}
             projections_dict['parametric_coordinates'] = parametric_coordinates
-            with open(PROJECTIONS_FOLDER / f'{name_space}.pickle', 'wb+') as handle:
+            with open(PROJECTIONS_FOLDER / f'{short_name_space}.pickle', 'wb+') as handle:
                 pickle.dump(projections_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
+        
         return parametric_coordinates
     
 

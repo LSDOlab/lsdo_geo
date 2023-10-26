@@ -11,7 +11,7 @@ sphinx-autoapi
 numpydoc
 gitpython
 # git+https://github.com/anugrahjo/sphinx-collections.git
-cython==0.29.28
+Cython==0.29.28
 
 scipy
 vedo
