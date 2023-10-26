@@ -1,4 +1,4 @@
-from lsdo_geo.core.parameterization.free_form_deformation import FFDBlock
+from lsdo_geo.core.parameterization.ffd_block import FFDBlock
 
 from typing import Union
 import numpy as np

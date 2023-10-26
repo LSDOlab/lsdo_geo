@@ -475,7 +475,10 @@ class BSplineSet(m3l.Function):
             b_spline_names_input = b_spline_names.copy()
 
         if b_spline_search_names is not None:
-            b_spline_names_input += self.space.search_b_spline_names(b_spline_search_names)
+            found_b_spline_names = self.space.search_b_spline_names(b_spline_search_names)
+            b_spline_names_input += found_b_spline_names
+            if not found_b_spline_names:    # If list is still empty
+                raise ValueError(f'No B-splines found with search names {b_spline_search_names}.')
 
         from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
         return BSplineSubSet(name=sub_set_name, b_spline_set=self, b_spline_names=b_spline_names_input)
@@ -832,6 +835,119 @@ class BSplineSet(m3l.Function):
         self.coefficients[points_indices] = rotated_points
 
 
+    # def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points'], plot_types:list=['surface'],
+    #           opacity:float=1., color:Union[str,BSplineSet]='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
+    #     '''
+    #     Plots the B-spline Surface.
+
+    #     Parameters
+    #     -----------
+    #     b_splines : list[str]
+    #         The B-splines to be plotted. If None, all B-splines are plotted.
+    #     points_type : list
+    #         The type of points to be plotted. {evaluated_points, coefficients}
+    #     plot_types : list
+    #         The type of plot {mesh, wireframe, point_cloud}
+    #     opactity : float
+    #         The opacity of the plot. 0 is fully transparent and 1 is fully opaque.
+    #     color : str | BSplineSet
+    #         The 6 digit color code to plot the B-spline as OR
+    #         a BSplineSet that shares a function space and has num_physical_dimensions=1.
+    #     surface_texture : str = "" {"metallic", "glossy", ...}, optional
+    #         The surface texture to determine how light bounces off the surface.
+    #         See https://github.com/marcomusy/vedo/blob/master/examples/basic/lightings.py for options.
+    #     additional_plotting_elemets : list
+    #         Vedo plotting elements that may have been returned from previous plotting functions that should be plotted with this plot.
+    #     show : bool
+    #         A boolean on whether to show the plot or not. If the plot is not shown, the Vedo plotting element is returned.
+    #     '''
+        
+    #     plotting_elements = additional_plotting_elements.copy()
+
+    #     if b_splines is None or len(b_splines) == 0:
+    #         b_splines = list(self.coefficient_indices.keys())
+
+
+    #     for point_type in point_types:
+    #         for b_spline_name in b_splines:
+    #             b_spline_coefficient_indices = self.coefficient_indices[b_spline_name]
+    #             if point_type == 'evaluated_points':
+    #                 num_points_u = 25
+    #                 num_points_v = 25
+    #                 u_vec = np.einsum('i,j->ij', np.linspace(0., 1., num_points_u), np.ones(num_points_v)).reshape((-1,1))
+    #                 v_vec = np.einsum('i,j->ij', np.ones(num_points_u), np.linspace(0., 1., num_points_v)).reshape((-1,1))
+    #                 parametric_coordinates = np.hstack((u_vec, v_vec))
+    #                 num_plotting_points = num_points_u * num_points_v
+
+    #                 set_parametric_coordinates = []
+    #                 for i in range(num_plotting_points):
+    #                     set_parametric_coordinates.append((b_spline_name, parametric_coordinates[i,:]))
+
+    #                 plotting_points, _ = self.evaluate_grid(b_spline_names=[b_spline_name], grid_resolution=(num_points_u, num_points_v),
+    #                                                      parametric_derivative_order=None, return_flattened=True)
+    #                 plotting_points_shape = (num_points_u, num_points_v, self.num_physical_dimensions[b_spline_name])
+
+    #                 if type(color) is BSplineSet:
+    #                     plotting_colors, _ = color.evaluate_grid(b_spline_names=[b_spline_name], grid_resolution=(num_points_u, num_points_v),
+    #                                                             parametric_derivative_order=None, return_flattened=True)
+    #             elif point_type == 'coefficients':
+    #                 plotting_points_shape = self.space.spaces[self.space.b_spline_to_space[b_spline_name]].parametric_coefficients_shape + \
+    #                     (self.num_physical_dimensions[b_spline_name],)
+    #                 num_plotting_points = np.prod(plotting_points_shape[:-1])
+    #                 plotting_points = self.coefficients[b_spline_coefficient_indices].reshape((num_plotting_points,-1))
+
+    #                 # if type(color) is BSplineSet:
+    #                 #     color_coefficient_indices = color.coefficient_indices[b_spline_name]
+    #                 #     plotting_colors = color.coefficients[color_coefficient_indices]
+    #             else:
+    #                 raise NotImplementedError(f'Point type {point_type} is not implemented.')
+
+    #             if 'point_cloud' in plot_types:
+    #                 for b_spline_name in self.coefficient_indices.keys():
+    #                     plotting_elements.append(vedo.Points(plotting_points).opacity(opacity).color('darkred'))
+
+    #             if 'surface' in plot_types or 'wireframe' in plot_types:
+    #                 num_plot_u = plotting_points_shape[0]
+    #                 num_plot_v = plotting_points_shape[1]
+
+    #                 vertices = []
+    #                 faces = []
+    #                 plotting_points_reshaped = plotting_points.reshape(plotting_points_shape)
+    #                 for u_index in range(num_plot_u):
+    #                     for v_index in range(num_plot_v):
+    #                         vertex = tuple(plotting_points_reshaped[u_index, v_index, :])
+    #                         vertices.append(vertex)
+    #                         if u_index != 0 and v_index != 0:
+    #                             face = tuple((
+    #                                 (u_index-1)*num_plot_v+(v_index-1),
+    #                                 (u_index-1)*num_plot_v+(v_index),
+    #                                 (u_index)*num_plot_v+(v_index),
+    #                                 (u_index)*num_plot_v+(v_index-1),
+    #                             ))
+    #                             faces.append(face)
+
+    #                 mesh = vedo.Mesh([vertices, faces]).opacity(opacity).lighting(surface_texture)
+    #                 if type(color) is str:
+    #                     mesh.color(color)
+    #                 elif type(color) is BSplineSet:
+    #                     mesh.cmap('jet', plotting_colors)
+    #             if 'surface' in plot_types:
+    #                 plotting_elements.append(mesh)
+    #             if 'wireframe' in plot_types:
+    #                 mesh = vedo.Mesh([vertices, faces]).opacity(opacity)
+    #                 plotting_elements.append(mesh.wireframe())
+
+    #     if show:
+    #         plotter = vedo.Plotter()
+    #         from vedo import Light
+    #         # light = Light([-1,0,0], c='w', intensity=1)
+    #         # plotter.show(plotting_elements, light, f'B-spline Surface: {self.name}', axes=1, viewup="z", interactive=True)
+    #         plotter.show(plotting_elements, f'Geometry: {self.name}', axes=1, viewup="z", interactive=True)
+    #         return plotting_elements
+    #     else:
+    #         return plotting_elements
+        
+
     def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points'], plot_types:list=['surface'],
               opacity:float=1., color:Union[str,BSplineSet]='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
         '''
@@ -865,80 +981,26 @@ class BSplineSet(m3l.Function):
             b_splines = list(self.coefficient_indices.keys())
 
 
-        for point_type in point_types:
-            for b_spline_name in b_splines:
-                b_spline_coefficient_indices = self.coefficient_indices[b_spline_name]
-                if point_type == 'evaluated_points':
-                    num_points_u = 25
-                    num_points_v = 25
-                    u_vec = np.einsum('i,j->ij', np.linspace(0., 1., num_points_u), np.ones(num_points_v)).reshape((-1,1))
-                    v_vec = np.einsum('i,j->ij', np.ones(num_points_u), np.linspace(0., 1., num_points_v)).reshape((-1,1))
-                    parametric_coordinates = np.hstack((u_vec, v_vec))
-                    num_plotting_points = num_points_u * num_points_v
+        for b_spline_name in b_splines:
+            b_spline_object_for_plotting = BSpline(name=b_spline_name, space=self.space.spaces[self.space.b_spline_to_space[b_spline_name]],
+                                                    coefficients=self.coefficients[self.coefficient_indices[b_spline_name]],
+                                                    num_physical_dimensions=self.num_physical_dimensions[b_spline_name])
+            
+            if type(color) is BSplineSet:
+                color_coefficients = color.coefficients[color.coefficient_indices[b_spline_name]]
+                color_b_spline = BSpline(name=b_spline_name, space=color.space.spaces[self.space.b_spline_to_space[b_spline_name]],
+                                            coefficients=color_coefficients,
+                                            num_physical_dimensions=color.num_physical_dimensions[b_spline_name])
 
-                    set_parametric_coordinates = []
-                    for i in range(num_plotting_points):
-                        set_parametric_coordinates.append((b_spline_name, parametric_coordinates[i,:]))
-
-                    plotting_points, _ = self.evaluate_grid(b_spline_names=[b_spline_name], grid_resolution=(num_points_u, num_points_v),
-                                                         parametric_derivative_order=None, return_flattened=True)
-                    plotting_points_shape = (num_points_u, num_points_v, self.num_physical_dimensions[b_spline_name])
-
-                    if type(color) is BSplineSet:
-                        plotting_colors, _ = color.evaluate_grid(b_spline_names=[b_spline_name], grid_resolution=(num_points_u, num_points_v),
-                                                                parametric_derivative_order=None, return_flattened=True)
-                elif point_type == 'coefficients':
-                    plotting_points_shape = self.space.spaces[self.space.b_spline_to_space[b_spline_name]].parametric_coefficients_shape + \
-                        (self.num_physical_dimensions[b_spline_name],)
-                    num_plotting_points = np.prod(plotting_points_shape[:-1])
-                    plotting_points = self.coefficients[b_spline_coefficient_indices].reshape((num_plotting_points,-1))
-
-                    # if type(color) is BSplineSet:
-                    #     color_coefficient_indices = color.coefficient_indices[b_spline_name]
-                    #     plotting_colors = color.coefficients[color_coefficient_indices]
-                else:
-                    raise NotImplementedError(f'Point type {point_type} is not implemented.')
-
-                if 'point_cloud' in plot_types:
-                    for b_spline_name in self.coefficient_indices.keys():
-                        plotting_elements.append(vedo.Points(plotting_points).opacity(opacity).color('darkred'))
-
-                if 'surface' in plot_types or 'wireframe' in plot_types:
-                    num_plot_u = plotting_points_shape[0]
-                    num_plot_v = plotting_points_shape[1]
-
-                    vertices = []
-                    faces = []
-                    plotting_points_reshaped = plotting_points.reshape(plotting_points_shape)
-                    for u_index in range(num_plot_u):
-                        for v_index in range(num_plot_v):
-                            vertex = tuple(plotting_points_reshaped[u_index, v_index, :])
-                            vertices.append(vertex)
-                            if u_index != 0 and v_index != 0:
-                                face = tuple((
-                                    (u_index-1)*num_plot_v+(v_index-1),
-                                    (u_index-1)*num_plot_v+(v_index),
-                                    (u_index)*num_plot_v+(v_index),
-                                    (u_index)*num_plot_v+(v_index-1),
-                                ))
-                                faces.append(face)
-
-                    mesh = vedo.Mesh([vertices, faces]).opacity(opacity).lighting(surface_texture)
-                    if type(color) is str:
-                        mesh.color(color)
-                    elif type(color) is BSplineSet:
-                        mesh.cmap('jet', plotting_colors)
-                if 'surface' in plot_types:
-                    plotting_elements.append(mesh)
-                if 'wireframe' in plot_types:
-                    mesh = vedo.Mesh([vertices, faces]).opacity(opacity)
-                    plotting_elements.append(mesh.wireframe())
+                b_spline_plot_color = color_b_spline
+            else:
+                b_spline_plot_color = color
+            plotting_elements = b_spline_object_for_plotting.plot(point_types=point_types, plot_types=plot_types, opacity=opacity, 
+                                                                    color=b_spline_plot_color, surface_texture=surface_texture,
+                                                                    additional_plotting_elements=plotting_elements, show=False)
 
         if show:
             plotter = vedo.Plotter()
-            from vedo import Light
-            # light = Light([-1,0,0], c='w', intensity=1)
-            # plotter.show(plotting_elements, light, f'B-spline Surface: {self.name}', axes=1, viewup="z", interactive=True)
             plotter.show(plotting_elements, f'Geometry: {self.name}', axes=1, viewup="z", interactive=True)
             return plotting_elements
         else:
