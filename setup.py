@@ -21,8 +21,6 @@ setup(
     install_requires=[
         'numpy',
         'cython==0.29.28',
-        'lsdo_b_splines_cython @ git+https://github.com/LSDOlab/lsdo_b_splines_cython.git',
-        'm3l @ git+https://github.com/LSDOlab/m3l.git',
         'pytest',
         'myst-nb',
         'sphinx_rtd_theme',

@@ -192,15 +192,17 @@ class BSpline(m3l.Function):
             u_vec_flattened = np.zeros(num_points)
             v_vec_flattened = np.zeros(num_points)
 
+            num_surfaces = 1
+
             compute_surface_projection(
-                np.array([self.space.order[0]]), np.array([self.coefficients_shape[0]]),
-                np.array([self.space.order[1]]), np.array([self.coefficients_shape[1]]),
+                np.array([self.space.order[0]], dtype=np.int32), np.array([self.coefficients_shape[0]], dtype=np.int32),
+                np.array([self.space.order[1]], dtype=np.int32), np.array([self.coefficients_shape[1]], dtype=np.int32),
                 num_points, max_iterations,
                 flattened_points, 
                 self.coefficients.value.reshape((-1,)),
                 self.space.knots[self.space.knot_indices[0]].copy(), self.space.knots[self.space.knot_indices[1]].copy(),
                 u_vec_flattened, v_vec_flattened, grid_search_density,
-                direction.reshape((-1,)), np.zeros((num_points,), dtype=int), self.coefficients.value.reshape((1, -1))
+                direction.reshape((-1,)), np.zeros((num_points,), dtype=np.int32), num_surfaces
             )
 
             parametric_coordinates = np.hstack((u_vec_flattened.reshape((-1,1)), v_vec_flattened.reshape((-1,1))))
