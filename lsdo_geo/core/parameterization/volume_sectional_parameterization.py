@@ -261,7 +261,7 @@ class VolumeSectionalParameterization:
         #     updated_points = updated_points + m3l.matvec(map=self.linear_parameter_maps[parameter_name], x=sectional_parameters[parameter_name])
             
         # # updated_points = m3l.matvec(map=self.evaluation_map, x=sectional_parameters) + self.parameterized_points
-        self.parameterized_points = updated_points
+        # self.parameterized_points = updated_points
 
         # Perform rotations
         for parameter_name, axis in self.rotational_axes.items():
@@ -304,7 +304,7 @@ class VolumeSectionalParameterization:
                 updated_points[indices] = m3l.rotate(points=section_updated_points, axis_origin=section_average, axis_vector=rotation_axis,
                                                      angles=angle).reshape((-1,))
 
-        self.parameterized_points = updated_points
+        # self.parameterized_points = updated_points
         if plot:    # Note: plot the surfaces for each section. (if 3d)
             # plot the updated ffd block in section form with the updated points.
             self.plot()

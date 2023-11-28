@@ -265,7 +265,7 @@ class BSplineSet(m3l.Function):
             plotting_points = []
             # TODO This will break if geometry is not one of the properties. Fix this.
             flattened_projected_points = (output.value).reshape((-1, 3)) # last axis usually has length 3 for x,y,z
-            plotting_projected_points = vedo.Points(flattened_projected_points, r=12, c='#00C6D7')  # TODO make this (1,3) instead of (3,)
+            plotting_projected_points = vedo.Points(flattened_projected_points, r=10, c='#00C6D7')  # TODO make this (1,3) instead of (3,)
             plotting_points.append(plotting_projected_points)
             plotter.show(b_spline_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
 
@@ -1216,7 +1216,8 @@ class BSplineSet(m3l.Function):
                                                                     additional_plotting_elements=plotting_elements, show=False)
 
         if show:
-            plotter = vedo.Plotter()
+            
+            plotter = vedo.Plotter(size=(800,800), )
             plotter.show(plotting_elements, f'Geometry: {self.name}', axes=1, viewup="z", interactive=True)
             return plotting_elements
         else:

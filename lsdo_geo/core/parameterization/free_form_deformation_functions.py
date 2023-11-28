@@ -9,7 +9,7 @@ from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
 from lsdo_geo.core.geometry.geometry import Geometry
 
 def construct_ffd_block_around_entities(name:str, entities:list[Union[np.ndarray, m3l.Variable, BSpline, BSplineSet, BSplineSubSet]],
-                                        num_coefficients:tuple[int]=5, order:type[int]=2, num_physical_dimensions:int=3):
+                                        num_coefficients:tuple[int]=5, order:tuple[int]=2, num_physical_dimensions:int=3):
     '''
     Constructs an FFD block around the given entities and embeds them within.
     '''

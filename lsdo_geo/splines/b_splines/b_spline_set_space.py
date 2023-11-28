@@ -139,12 +139,10 @@ class BSplineSetSpace(m3l.FunctionSpace):
         ----------
         name : str
             The name of the B-spline set.
-        fitting_mesh : np.ndarray
-            The mesh to fit the B-spline set to. The points should have the number of the physical dimension as the last axis (e.g. (num_points, 3))
-        num_control_points : tuple[int] = (10,)
-            The number of control points to use in each direction.
-        order : tuple[int]
-            The order of the B-splines to use in each direction.
+        fitting_points : np.ndarray
+            The points to fit the B-spline set to. The points should have the number of the physical dimension as the last axis (e.g. (num_points, 3))
+        fitting_parametric_coordinates : list[tuple[str,np.ndarray]]
+            A list of tuples of the B-spline names and the parametric coordinates of the fitting points.
         regularization_parameter : float = 0.
             The regularization parameter to use when fitting the B-spline set to the mesh.
 

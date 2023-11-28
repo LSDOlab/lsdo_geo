@@ -373,8 +373,8 @@ if __name__ == "__main__":
     axis_origin = geometry.evaluate(geometry.project(np.array([0.5, -10., 0.5])))
     axis_vector = geometry.evaluate(geometry.project(np.array([0.5, 10., 0.5]))) - axis_origin
     angles = 45
-    geometry3.coefficients = m3l.rotate(points=geometry3.coefficients.reshape((-1,3)), axis_origin=axis_origin, axis_vector=axis_vector,
-                                        angles=angles, units='degrees').reshape((-1,))
+    # geometry3.coefficients = m3l.rotate(points=geometry3.coefficients.reshape((-1,3)), axis_origin=axis_origin, axis_vector=axis_vector,
+    #                                     angles=angles, units='degrees').reshape((-1,))
     # geometry3.plot()
 
     leading_edge_parametric_coordinates = [
@@ -445,6 +445,7 @@ if __name__ == "__main__":
 
     left_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='left_wing_sweep', axis=0)
     left_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='left_wing_diheral', axis=2)
+    left_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='left_wing_wingspan_stretch', axis=1)
     left_wing_ffd_block_sectional_parameterization.add_sectional_stretch(name='left_wing_chord_stretch', axis=0)
     left_wing_ffd_block_sectional_parameterization.add_sectional_rotation(name='left_wing_twist', axis=1)
     # left_wing_ffd_block_sectional_parameterization.plot()
@@ -462,6 +463,10 @@ if __name__ == "__main__":
     left_wing_dihedral_b_spline = bsp.BSpline(name='left_wing_dihedral_b_spline', space=linear_b_spline_curve_2_dof_space, 
                                            coefficients=left_wing_dihedral_coefficients, num_physical_dimensions=1)
     
+    left_wing_wingspan_stretch_coefficients = m3l.Variable(name='left_wing_wingspan_stretch_coefficients', shape=(2,), value=np.array([-1., 0.]))
+    left_wing_wingspan_stretch_b_spline = bsp.BSpline(name='left_wing_wingspan_stretch_b_spline', space=linear_b_spline_curve_2_dof_space,
+                                                     coefficients=left_wing_wingspan_stretch_coefficients, num_physical_dimensions=1)
+    
     left_wing_chord_stretch_coefficients = m3l.Variable(name='left_wing_chord_stretch_coefficients', shape=(3,), 
                                                         value=np.array([-0.5, -0.1, 0.]))
     left_wing_chord_stretch_b_spline = bsp.BSpline(name='left_wing_chord_stretch_b_spline', space=linear_b_spline_curve_3_dof_space,
@@ -471,10 +476,13 @@ if __name__ == "__main__":
                                                 value=np.array([0., 30., 20., 10., 0.]))
     left_wing_twist_b_spline = bsp.BSpline(name='left_wing_twist_b_spline', space=cubic_b_spline_curve_5_dof_space,
                                              coefficients=left_wing_twist_coefficients, num_physical_dimensions=1)
+
+
     
     section_parametric_coordinates = np.linspace(0., 1., left_wing_ffd_block_sectional_parameterization.num_sections).reshape((-1,1))
     left_wing_sectional_sweep = left_wing_sweep_b_spline.evaluate(section_parametric_coordinates)
     left_wing_sectional_diheral = left_wing_dihedral_b_spline.evaluate(section_parametric_coordinates)
+    left_wing_wingspan_stretch = left_wing_wingspan_stretch_b_spline.evaluate(section_parametric_coordinates)
     left_wing_sectional_chord_stretch = left_wing_chord_stretch_b_spline.evaluate(section_parametric_coordinates)
     left_wing_sectional_twist = left_wing_twist_b_spline.evaluate(section_parametric_coordinates)
 
@@ -493,37 +501,127 @@ if __name__ == "__main__":
     sectional_parameters = {
         'left_wing_sweep':left_wing_sectional_sweep, 
         'left_wing_diheral':left_wing_sectional_diheral,
+        'left_wing_wingspan_stretch':left_wing_wingspan_stretch,
         'left_wing_chord_stretch':left_wing_sectional_chord_stretch,
         'left_wing_twist':left_wing_sectional_twist,
                             }
     
 
-    # # Before code
-    # import cProfile
-    # profiler = cProfile.Profile()
-    # profiler.enable()
-    
     left_wing_ffd_block_coefficients = left_wing_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=False)
-    # # After code
-    # profiler.disable()
-    # profiler.dump_stats('output')
-    # exit()
-    left_wing_coefficients = left_wing_ffd_block.evaluate(left_wing_ffd_block_coefficients, plot=True)
+
+    left_wing_coefficients = left_wing_ffd_block.evaluate(left_wing_ffd_block_coefficients, plot=False)
 
     # left_wing_ffd_block_sectional_parameterization.plot()
     geometry5.assign_coefficients(coefficients=left_wing_coefficients, b_spline_names=left_wing.b_spline_names)
+
+    geometry5.rotate(axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units='degrees')
+
+    # leading_edge = geometry5.evaluate(leading_edge_parametric_coordinates, plot=False).reshape((-1,3))
+    # trailing_edge = geometry5.evaluate(trailing_edge_parametric_coordinates, plot=False).reshape((-1,3))
+    # chord_surface = m3l.linspace(leading_edge, trailing_edge, num_steps=4)
+
+    # geometry5.plot_meshes(meshes=chord_surface, mesh_plot_types=['wireframe'], mesh_opacity=1., mesh_color='#F5F0E6',)
+    # geometry5.plot()
+
+    left_wing_root_quarter_chord_ish = geometry5.evaluate([('WingGeom, 1, 8', np.array([0., 0.6]),)], plot=False)
+    left_wing_tip_quarter_chord_ish = geometry5.evaluate([('WingGeom, 1, 8', np.array([1., 0.6]),)], plot=False)
+    half_wingspan = m3l.norm(left_wing_tip_quarter_chord_ish - left_wing_root_quarter_chord_ish)    # NOTE: Consider adding dot operation to m3l
+
+    left_wing_root_leading_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([0., 0.]),)], plot=False)
+    left_wing_root_trailing_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([0., 1.]),)], plot=False)
+    left_wing_tip_leading_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([1., 0.]),)], plot=False)
+    left_wing_tip_trailing_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([1., 1.]),)], plot=False)
+    root_chord = m3l.norm(left_wing_root_leading_edge - left_wing_root_trailing_edge)
+    tip_chord = m3l.norm(left_wing_tip_leading_edge - left_wing_tip_trailing_edge)
+
+    from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver
+    left_wing_parameterization_solver = ParameterizationSolver()
+
+    left_wing_parameterization_solver.declare_state('left_wing_wingspan_stretch_coefficients', left_wing_wingspan_stretch_coefficients)
+    # left_wing_parameterization_solver.declare_state('left_wing_chord_stretch_coefficients', left_wing_chord_stretch_coefficients)
+
+    left_wing_parameterization_solver.declare_input(name='half_wingspan', input=half_wingspan)
+    # left_wing_parameterization_solver.declare_input(name='root_chord', input=root_chord)
+    # left_wing_parameterization_solver.declare_input(name='tip_chord', input=tip_chord)
+
+    half_wingspan_input = m3l.Variable(name='half_wingspan', shape=(1,), value=np.array([10.]))
+    root_chord_input = m3l.Variable(name='root_chord', shape=(1,), value=np.array([4.]))
+    tip_chord_input = m3l.Variable(name='tip_chord', shape=(1,), value=np.array([2.]))
+
+    parameterization_inputs = {
+        'half_wingspan':half_wingspan_input,
+        # 'root_chord':root_chord_input,
+        # 'tip_chord':tip_chord_input,
+    
+    }
+    outputs_dict = left_wing_parameterization_solver.evaluate(inputs=parameterization_inputs, plot=False)
+    
+    # print(outputs_dict['left_wing_wingspan_stretch_coefficients'])
+
+    # left_wing_ffd_block = construct_ffd_block_around_entities(name='left_wing_ffd_block', entities=left_wing, num_coefficients=(3, 30, 2))
+
+    # from lsdo_geo.core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization
+    # left_wing_ffd_block_sectional_parameterization = VolumeSectionalParameterization(name='left_wing_ffd_block_sectional_parameterization',
+    #                                                                                  principal_parametric_dimension=1,
+    #                                                                                  parameterized_points=left_wing_ffd_block.coefficients,
+    #                                                         parameterized_points_shape=left_wing_ffd_block.coefficients_shape)
+
+    left_wing_dihedral_coefficients = m3l.Variable(name='left_wing_dihedral_coefficients', shape=(2,), value=np.array([1., 0.]))
+    left_wing_dihedral_b_spline = bsp.BSpline(name='left_wing_dihedral_b_spline', space=linear_b_spline_curve_2_dof_space, 
+                                           coefficients=left_wing_dihedral_coefficients, num_physical_dimensions=1)
+    
+    left_wing_wingspan_stretch_coefficients = outputs_dict['left_wing_wingspan_stretch_coefficients']
+    left_wing_wingspan_stretch_b_spline = bsp.BSpline(name='left_wing_wingspan_stretch_b_spline', space=linear_b_spline_curve_2_dof_space,
+                                                     coefficients=left_wing_wingspan_stretch_coefficients, num_physical_dimensions=1)
+    
+    left_wing_chord_stretch_coefficients = m3l.Variable(name='left_wing_chord_stretch_coefficients', shape=(3,), 
+                                                        value=np.array([-0.5, -0.1, 0.]))
+    left_wing_chord_stretch_b_spline = bsp.BSpline(name='left_wing_chord_stretch_b_spline', space=linear_b_spline_curve_3_dof_space,
+                                                    coefficients=left_wing_chord_stretch_coefficients, num_physical_dimensions=1)
+    
+    left_wing_twist_coefficients = m3l.Variable(name='left_wing_twist_coefficients', shape=(5,),
+                                                value=np.array([0., 30., 20., 10., 0.]))
+    left_wing_twist_b_spline = bsp.BSpline(name='left_wing_twist_b_spline', space=cubic_b_spline_curve_5_dof_space,
+                                             coefficients=left_wing_twist_coefficients, num_physical_dimensions=1)
+
+
+    
+    section_parametric_coordinates = np.linspace(0., 1., left_wing_ffd_block_sectional_parameterization.num_sections).reshape((-1,1))
+    left_wing_sectional_sweep = left_wing_sweep_b_spline.evaluate(section_parametric_coordinates)
+    left_wing_sectional_diheral = left_wing_dihedral_b_spline.evaluate(section_parametric_coordinates)
+    left_wing_wingspan_stretch = left_wing_wingspan_stretch_b_spline.evaluate(section_parametric_coordinates)
+    left_wing_sectional_chord_stretch = left_wing_chord_stretch_b_spline.evaluate(section_parametric_coordinates)
+    left_wing_sectional_twist = left_wing_twist_b_spline.evaluate(section_parametric_coordinates)
+
+    sectional_parameters = {
+        'left_wing_sweep':left_wing_sectional_sweep, 
+        'left_wing_diheral':left_wing_sectional_diheral,
+        'left_wing_wingspan_stretch':left_wing_wingspan_stretch,
+        'left_wing_chord_stretch':left_wing_sectional_chord_stretch,
+        'left_wing_twist':left_wing_sectional_twist,
+                            }
+    
+
+    left_wing_ffd_block_coefficients = left_wing_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=True)
+
+    left_wing_coefficients = left_wing_ffd_block.evaluate(left_wing_ffd_block_coefficients, plot=False)
+
+    geometry5.assign_coefficients(coefficients=left_wing_coefficients, b_spline_names=left_wing.b_spline_names)
+
+    geometry5.rotate(axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units='degrees')
 
     leading_edge = geometry5.evaluate(leading_edge_parametric_coordinates, plot=False).reshape((-1,3))
     trailing_edge = geometry5.evaluate(trailing_edge_parametric_coordinates, plot=False).reshape((-1,3))
     chord_surface = m3l.linspace(leading_edge, trailing_edge, num_steps=4)
 
-    geometry5.plot_meshes(meshes=chord_surface, mesh_plot_types=['wireframe'], mesh_opacity=1., mesh_color='#F5F0E6',)
+    # geometry5.plot_meshes(meshes=chord_surface, mesh_plot_types=['wireframe'], mesh_opacity=1., mesh_color='#F5F0E6',)
     # geometry5.plot()
 
-    # DO PYTHON FFD SECTIONAL PARAMETERIZATION, THEN PYTHON FFD B-SPLINE SECTIONAL PARAMETERIZATION
-    # NOTE: THE B-SPLINE SECTIONAL PARAMETERIZATION SHOULD JUST BE A STRAIGHT B-SPLINE PARAMETERIZATION, NOTHING SPECIFIC TO FFD
-    # THEN DO INNER OPTIMIZATION
-    # I guess, as doing each one, should just do the CSDL models and M3L operation at the same time.
+    left_wing_root_quarter_chord_ish = geometry5.evaluate([('WingGeom, 1, 8', np.array([0., 0.6]),)], plot=False)
+    left_wing_tip_quarter_chord_ish = geometry5.evaluate([('WingGeom, 1, 8', np.array([1., 0.6]),)], plot=False)
+    half_wingspan = m3l.norm(left_wing_tip_quarter_chord_ish - left_wing_root_quarter_chord_ish)    # NOTE: Consider adding dot operation to m3l
+
+    print('new half wingspan', half_wingspan)
     # THEN REVISIT ACTUATIONS
     # -- Do I want to create the framework of creating actuators, etc.?
 
