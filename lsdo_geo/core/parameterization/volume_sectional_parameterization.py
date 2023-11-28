@@ -305,6 +305,7 @@ class VolumeSectionalParameterization:
                                                      angles=angle).reshape((-1,))
 
         # self.parameterized_points = updated_points
+        self.updated_points = updated_points
         if plot:    # Note: plot the surfaces for each section. (if 3d)
             # plot the updated ffd block in section form with the updated points.
             self.plot()
@@ -319,7 +320,8 @@ class VolumeSectionalParameterization:
         '''
         plotting_elements = additional_plotting_elements.copy()
 
-        plotting_points = self.parameterized_points.value.reshape(self.parameterized_points_shape)
+        # plotting_points = self.parameterized_points.value.reshape(self.parameterized_points_shape)
+        plotting_points = self.updated_points.value.reshape(self.parameterized_points_shape)
         plotting_points = np.swapaxes(plotting_points, 0, self.principal_parametric_dimension)
         for i in range(self.num_sections):
             section_points = plotting_points[i,:,:,:]

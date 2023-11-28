@@ -489,7 +489,7 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
 
         dconstraint_penalty_dx = {}  # dictionary across states (contract different constraints with their lagrange multipliers)
         for state_name, declared_state in self.declared_states.items():
-            dconstraint_penalty_dx[state_name] = np.zeros((state_vector.shape[0],))     # Preallocating so I can += the dict element later
+            dconstraint_penalty_dx[state_name] = np.zeros((declared_state.shape[0],))     # Preallocating so I can += the dict element later
             for constraint_name, constraint_value in self.declared_inputs.items():
                 constraint_lagrange_multipliers = outputs[constraint_name+'_lagrange_multipliers']
                 input_dict_name = constraint_value.operation.name+'.'+constraint_value.name
@@ -509,6 +509,8 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
             residuals[state_name] = dobjective_dstate[state_name] + dconstraint_penalty_dx[state_name]
         for constraint_name, constraint_value in self.declared_inputs.items():
             residuals[constraint_name+'_lagrange_multipliers'] = constraint_values[constraint_name]
+
+        print("CONSTRAINT VALUES", constraint_values)
 
 
         # # inputs
@@ -619,7 +621,7 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
         computed_derivatives = self.evaluation_simulator.compute_totals(of=input_variable_names, wrt=state_variable_names)
 
         # Get second derivatives of nonlinear operations
-        constraint_nonlinear_second_derivatives = {}
+        constraint_nonlinear_second_derivatives_dict = {}
         for constraint_name, declared_constraint_variable in self.declared_inputs.items():
             nonlinear_operation = declared_constraint_variable.operation
             nonlinear_operation_derivative_model = nonlinear_operation.compute_derivatives()
@@ -643,7 +645,7 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
 
             nonlinear_second_derivatives = nonlinear_derivative_simulator.compute_totals(of=derivative_names,
                                                                                         wrt=list(nonlinear_operation.arguments.keys()))
-            constraint_nonlinear_second_derivatives[constraint_name] = nonlinear_second_derivatives
+            constraint_nonlinear_second_derivatives_dict[constraint_name] = nonlinear_second_derivatives
         
         ## Use simulator-computed values to assemble/compute the blocks of the Hessian
         # d^2F_dx^2
@@ -663,6 +665,7 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                     state_simulator_name = state_name
                 dc_dx[constraint_name, state_name] = computed_derivatives[(constraint_simulator_name, state_simulator_name)]
 
+        # d2c_dx2
         d2constraint_penalty_dx2 = {}  # dictionary across states (contract different constraints with their lagrange multipliers)
         for state_name_i, declared_state_i in self.declared_states.items():
             if declared_state_i.operation is not None:
@@ -674,7 +677,7 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                 for constraint_name, constraint_value in self.declared_inputs.items():
                     constraint_lagrange_multipliers = outputs[constraint_name+'_lagrange_multipliers']
 
-                    constraint_nonlinear_second_derivatives = constraint_nonlinear_second_derivatives[constraint_name]
+                    constraint_nonlinear_second_derivatives = constraint_nonlinear_second_derivatives_dict[constraint_name]
                     constraint_simulator_name = constraint_value.operation.name+'.'+constraint_value.name
                     # nonlinear_derivatve_name = 'd'+constraint_simulator_name+'_d'+nonlinear_operation_argument_name # This corresponds to state_i?
                     # nonlinear_derivatve_name = 'd'+constraint_simulator_name+'_dx' # NOTE: Hardcoded for norm operation for now.
@@ -696,9 +699,9 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                     # linear_map_i = self.linear_maps[constraint_name, state_name_i]
                     # linear_map_j = self.linear_maps[constraint_name, state_name_j]
                     first_term = np.tensordot(d2NL_dx2, linear_map_j, axes=([2, 0]))
-                    d2c_dx2 = np.tensordot(first_term, linear_map_i, axes=([1, 0]))
+                    d2c_dx2 = np.tensordot(linear_map_i, first_term, axes=([0, 1]))
 
-                    d2constraint_penalty_dx2[state_name_i, state_name_j] += np.tensordot(constraint_lagrange_multipliers, d2c_dx2, axes=([0, 0]))
+                    d2constraint_penalty_dx2[state_name_i, state_name_j] += np.tensordot(constraint_lagrange_multipliers, d2c_dx2, axes=([0, 1]))
 
         # -- Assigning Hessian --
         # Assigning upper-left block of Hessian
@@ -708,7 +711,7 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                     derivatives[state_name_i, state_name_j] = d2objective_dstate2[state_name_i, state_name_j] + \
                         d2constraint_penalty_dx2[state_name_i, state_name_j]
                 else:
-                    derivatives[state_name_i, state_name_j] = d2c_dx2[state_name_i, state_name_j]
+                    derivatives[state_name_i, state_name_j] = d2constraint_penalty_dx2[state_name_i, state_name_j]
         # Assigning the off-block-diagonal entries of the Hessian
         for state_name, state in self.declared_states.items():
             for constraint_name, constraint in self.declared_inputs.items():
@@ -729,7 +732,7 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                 if constraint_name == input_name:
                     derivatives[constraint_name+'_lagrange_multipliers', input_name] = -np.eye(constraint.shape[0])
                 else:
-                    derivatives[constraint_name+'_lagrange_multipliers', input_name] = np.zeors((constraint.shape[0],declared_input.shape[0]))
+                    derivatives[constraint_name+'_lagrange_multipliers', input_name] = np.zeros((constraint.shape[0],declared_input.shape[0]))
 
 
         # for state_name in self.declared_states:

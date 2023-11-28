@@ -531,28 +531,33 @@ if __name__ == "__main__":
     left_wing_root_trailing_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([0., 1.]),)], plot=False)
     left_wing_tip_leading_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([1., 0.]),)], plot=False)
     left_wing_tip_trailing_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([1., 1.]),)], plot=False)
+    left_wing_mid_leading_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([0.5, 0.]),)], plot=False)
+    left_wing_mid_trailing_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([0.5, 1.]),)], plot=False)
     root_chord = m3l.norm(left_wing_root_leading_edge - left_wing_root_trailing_edge)
     tip_chord = m3l.norm(left_wing_tip_leading_edge - left_wing_tip_trailing_edge)
+    mid_chord = m3l.norm(left_wing_mid_leading_edge - left_wing_mid_trailing_edge)
 
     from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver
     left_wing_parameterization_solver = ParameterizationSolver()
 
     left_wing_parameterization_solver.declare_state('left_wing_wingspan_stretch_coefficients', left_wing_wingspan_stretch_coefficients)
-    # left_wing_parameterization_solver.declare_state('left_wing_chord_stretch_coefficients', left_wing_chord_stretch_coefficients)
+    left_wing_parameterization_solver.declare_state('left_wing_chord_stretch_coefficients', left_wing_chord_stretch_coefficients)
 
     left_wing_parameterization_solver.declare_input(name='half_wingspan', input=half_wingspan)
-    # left_wing_parameterization_solver.declare_input(name='root_chord', input=root_chord)
-    # left_wing_parameterization_solver.declare_input(name='tip_chord', input=tip_chord)
+    left_wing_parameterization_solver.declare_input(name='root_chord', input=root_chord)
+    left_wing_parameterization_solver.declare_input(name='tip_chord', input=tip_chord)
+    left_wing_parameterization_solver.declare_input(name='mid_chord', input=mid_chord)
 
     half_wingspan_input = m3l.Variable(name='half_wingspan', shape=(1,), value=np.array([10.]))
     root_chord_input = m3l.Variable(name='root_chord', shape=(1,), value=np.array([4.]))
-    tip_chord_input = m3l.Variable(name='tip_chord', shape=(1,), value=np.array([2.]))
+    tip_chord_input = m3l.Variable(name='tip_chord', shape=(1,), value=np.array([0.5]))
+    mid_chord_input = m3l.Variable(name='mid_chord', shape=(1,), value=np.array([2.5]))
 
     parameterization_inputs = {
         'half_wingspan':half_wingspan_input,
-        # 'root_chord':root_chord_input,
-        # 'tip_chord':tip_chord_input,
-    
+        'root_chord':root_chord_input,
+        'tip_chord':tip_chord_input,
+        'mid_chord':mid_chord_input
     }
     outputs_dict = left_wing_parameterization_solver.evaluate(inputs=parameterization_inputs, plot=False)
     
@@ -574,8 +579,7 @@ if __name__ == "__main__":
     left_wing_wingspan_stretch_b_spline = bsp.BSpline(name='left_wing_wingspan_stretch_b_spline', space=linear_b_spline_curve_2_dof_space,
                                                      coefficients=left_wing_wingspan_stretch_coefficients, num_physical_dimensions=1)
     
-    left_wing_chord_stretch_coefficients = m3l.Variable(name='left_wing_chord_stretch_coefficients', shape=(3,), 
-                                                        value=np.array([-0.5, -0.1, 0.]))
+    left_wing_chord_stretch_coefficients = outputs_dict['left_wing_chord_stretch_coefficients']
     left_wing_chord_stretch_b_spline = bsp.BSpline(name='left_wing_chord_stretch_b_spline', space=linear_b_spline_curve_3_dof_space,
                                                     coefficients=left_wing_chord_stretch_coefficients, num_physical_dimensions=1)
     
@@ -604,7 +608,7 @@ if __name__ == "__main__":
 
     left_wing_ffd_block_coefficients = left_wing_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=True)
 
-    left_wing_coefficients = left_wing_ffd_block.evaluate(left_wing_ffd_block_coefficients, plot=False)
+    left_wing_coefficients = left_wing_ffd_block.evaluate(left_wing_ffd_block_coefficients, plot=True)
 
     geometry5.assign_coefficients(coefficients=left_wing_coefficients, b_spline_names=left_wing.b_spline_names)
 
@@ -621,7 +625,15 @@ if __name__ == "__main__":
     left_wing_tip_quarter_chord_ish = geometry5.evaluate([('WingGeom, 1, 8', np.array([1., 0.6]),)], plot=False)
     half_wingspan = m3l.norm(left_wing_tip_quarter_chord_ish - left_wing_root_quarter_chord_ish)    # NOTE: Consider adding dot operation to m3l
 
+    left_wing_root_leading_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([0., 0.]),)], plot=False)
+    left_wing_root_trailing_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([0., 1.]),)], plot=False)
+    left_wing_tip_leading_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([1., 0.]),)], plot=False)
+    left_wing_tip_trailing_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([1., 1.]),)], plot=False)
+    root_chord = m3l.norm(left_wing_root_leading_edge - left_wing_root_trailing_edge)
+    tip_chord = m3l.norm(left_wing_tip_leading_edge - left_wing_tip_trailing_edge)
+
     print('new half wingspan', half_wingspan)
+    print('new root chord', root_chord)
     # THEN REVISIT ACTUATIONS
     # -- Do I want to create the framework of creating actuators, etc.?
 
