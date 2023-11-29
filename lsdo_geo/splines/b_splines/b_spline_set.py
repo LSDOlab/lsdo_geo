@@ -1190,34 +1190,127 @@ class BSplineSet(m3l.Function):
         show : bool
             A boolean on whether to show the plot or not. If the plot is not shown, the Vedo plotting element is returned.
         '''
+        from lsdo_geo.splines.b_splines.b_spline_functions import plot_surface, plot_volume
         
         plotting_elements = additional_plotting_elements.copy()
 
         if b_splines is None or len(b_splines) == 0:
             b_splines = list(self.coefficient_indices.keys())
 
+        num_evaluated_points = 15
 
-        for b_spline_name in b_splines:
-            b_spline_object_for_plotting = BSpline(name=b_spline_name, space=self.space.spaces[self.space.b_spline_to_space[b_spline_name]],
-                                                    coefficients=self.coefficients[self.coefficient_indices[b_spline_name]],
-                                                    num_physical_dimensions=self.num_physical_dimensions[b_spline_name])
+        for point_type in point_types:
+            if point_type == 'evaluated_points':
+                plotting_points, plotting_points_indices = self.evaluate_grid(b_spline_names=b_splines, grid_resolution=(num_evaluated_points,),
+                                                    parametric_derivative_order=None, return_flattened=False)
+                if type(color) is BSplineSet:
+                    plotting_colors, plotting_colors_indices = color.evaluate_grid(b_spline_names=b_splines, grid_resolution=(num_evaluated_points,),
+                                                            parametric_derivative_order=None, return_flattened=False)
             
-            if type(color) is BSplineSet:
-                color_coefficients = color.coefficients[color.coefficient_indices[b_spline_name]]
-                color_b_spline = BSpline(name=b_spline_name, space=color.space.spaces[self.space.b_spline_to_space[b_spline_name]],
-                                            coefficients=color_coefficients,
-                                            num_physical_dimensions=color.num_physical_dimensions[b_spline_name])
+            elif point_type == 'coefficients':
+                coefficients = self.coefficients.value
+                plotting_coefficients = []
+                plotting_points_indices = {}
+                index_counter = 0
+                for b_spline_name in b_splines:
+                    b_spline_coefficient_indices = self.coefficient_indices[b_spline_name]
+                    b_spline_coefficients = coefficients[b_spline_coefficient_indices]
+                    plotting_coefficients.append(b_spline_coefficients)
 
-                b_spline_plot_color = color_b_spline
-            else:
-                b_spline_plot_color = color
-            plotting_elements = b_spline_object_for_plotting.plot(point_types=point_types, plot_types=plot_types, opacity=opacity, 
-                                                                    color=b_spline_plot_color, surface_texture=surface_texture,
-                                                                    additional_plotting_elements=plotting_elements, show=False)
+                plotting_points = np.hstack(plotting_coefficients)
+                plotting_points_indices[b_spline_name] = np.arange(plotting_points.shape[0]) + index_counter
+                index_counter += plotting_points.shape[0]
+
+                if type(color) is BSplineSet:
+                    color_coefficients = color.coefficients.value
+                    plotting_color_coefficients = []
+                    plotting_color_points_indices = {}
+                    index_counter = 0
+                    for b_spline_name in b_splines:
+                        b_spline_coefficient_indices = color.coefficient_indices[b_spline_name]
+                        b_spline_coefficients = color_coefficients[b_spline_coefficient_indices]
+                        plotting_color_coefficients.append(b_spline_coefficients)
+
+                    plotting_colors = np.hstack(plotting_color_coefficients)
+                    plotting_color_points_indices[b_spline_name] = np.arange(plotting_points.shape[0]) + index_counter
+                    index_counter += plotting_points.shape[0]
+
+            
+            for b_spline_name in b_splines:
+                b_spline_space = self.space.spaces[self.space.b_spline_to_space[b_spline_name]]
+                if point_type == 'evaluated_points':
+                    # plotting_points_shape = (num_evaluated_points, num_evaluated_points, self.num_physical_dimensions[b_spline_name])
+                    plotting_points_shape = (num_evaluated_points,)*b_spline_space.num_parametric_dimensions \
+                        + (self.num_physical_dimensions[b_spline_name],)
+                elif point_type == 'coefficients':
+                    plotting_points_shape = self.space.spaces[self.space.b_spline_to_space[b_spline_name]].parametric_coefficients_shape + \
+                        (self.num_physical_dimensions[b_spline_name],)
+                b_spline_plotting_points = plotting_points[plotting_points_indices[b_spline_name]].reshape(plotting_points_shape)
+                if type(color) is BSplineSet:
+                    b_spline_plotting_colors = plotting_colors[plotting_colors_indices[b_spline_name]].reshape(plotting_points_shape)
+                elif type(color) is str:
+                    b_spline_plotting_colors = color
+
+
+                if b_spline_space.num_parametric_dimensions == 2:
+                    plotting_elements = plot_surface(points=b_spline_plotting_points, plot_types=plot_types, opacity=opacity, 
+                                                     color=b_spline_plotting_colors, surface_texture=surface_texture, 
+                                                     additional_plotting_elements=plotting_elements, show=False)
+                elif b_spline_space.num_parametric_dimensions == 3:
+                    plotting_elements = plot_volume(points=b_spline_plotting_points, plot_types=plot_types, opacity=opacity,
+                                                    color=b_spline_plotting_colors, surface_texture=surface_texture,
+                                                    additional_plotting_elements=plotting_elements, show=False)
+
+        # for b_spline_name in b_splines:
+
+        #     b_spline_space = self.space.spaces[self.space.b_spline_to_space[b_spline_name]]
+        #     if b_spline_space.num_parametric_dimensions == 2:
+        #         for point_type in point_types:
+        #             if point_type == 'evaluated_points':
+        #                 num_points_u = 25
+        #                 num_points_v = 25
+        #                 u_vec = np.einsum('i,j->ij', np.linspace(0., 1., num_points_u), np.ones(num_points_v)).reshape((-1,1))
+        #                 v_vec = np.einsum('i,j->ij', np.ones(num_points_u), np.linspace(0., 1., num_points_v)).reshape((-1,1))
+        #                 parametric_coordinates = np.hstack((u_vec, v_vec))
+        #                 num_plotting_points = num_points_u * num_points_v
+
+        #                 set_parametric_coordinates = []
+        #                 for i in range(num_plotting_points):
+        #                     set_parametric_coordinates.append((b_spline_name, parametric_coordinates[i,:]))
+
+        #                 plotting_points, _ = self.evaluate_grid(b_spline_names=[b_spline_name], grid_resolution=(num_points_u, num_points_v),
+        #                                                     parametric_derivative_order=None, return_flattened=True)
+        #                 plotting_points_shape = (num_points_u, num_points_v, self.num_physical_dimensions[b_spline_name])
+
+        #                 if type(color) is BSplineSet:
+        #                     plotting_colors, _ = color.evaluate_grid(b_spline_names=[b_spline_name], grid_resolution=(num_points_u, num_points_v),
+        #                                                             parametric_derivative_order=None, return_flattened=True)
+
+        #             plotting_elements = plot_surface()
+
+
+
+        #     t1 = time.time()
+        #     b_spline_object_for_plotting = BSpline(name=b_spline_name, space=self.space.spaces[self.space.b_spline_to_space[b_spline_name]],
+        #                                             coefficients=self.coefficients[self.coefficient_indices[b_spline_name]],
+        #                                             num_physical_dimensions=self.num_physical_dimensions[b_spline_name])
+        #     time_creating_b_splines += (time.time() - t1)
+        #     if type(color) is BSplineSet:
+        #         color_coefficients = color.coefficients[color.coefficient_indices[b_spline_name]]
+        #         color_b_spline = BSpline(name=b_spline_name, space=color.space.spaces[self.space.b_spline_to_space[b_spline_name]],
+        #                                     coefficients=color_coefficients,
+        #                                     num_physical_dimensions=color.num_physical_dimensions[b_spline_name])
+
+        #         b_spline_plot_color = color_b_spline
+        #     else:
+        #         b_spline_plot_color = color
+        #     plotting_elements = b_spline_object_for_plotting.plot(point_types=point_types, plot_types=plot_types, opacity=opacity, 
+        #                                                             color=b_spline_plot_color, surface_texture=surface_texture,
+        #                                                             additional_plotting_elements=plotting_elements, show=False)
 
         if show:
-            
-            plotter = vedo.Plotter(size=(800,800), )
+            # plotter = vedo.Plotter(size=(800,800), )
+            plotter = vedo.Plotter()
             plotter.show(plotting_elements, f'Geometry: {self.name}', axes=1, viewup="z", interactive=True)
             return plotting_elements
         else:

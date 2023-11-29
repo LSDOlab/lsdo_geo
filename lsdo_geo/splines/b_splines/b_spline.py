@@ -319,8 +319,8 @@ class BSpline(m3l.Function):
 
         for point_type in point_types:
             if point_type == 'evaluated_points':
-                num_points_u = 25
-                num_points_v = 25
+                num_points_u = 15
+                num_points_v = 15
                 u_vec = np.einsum('i,j->ij', np.linspace(0., 1., num_points_u), np.ones(num_points_v)).reshape((-1,1))
                 v_vec = np.einsum('i,j->ij', np.ones(num_points_u), np.linspace(0., 1., num_points_v)).reshape((-1,1))
                 parametric_coordinates = np.hstack((u_vec, v_vec))

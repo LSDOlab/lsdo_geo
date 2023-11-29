@@ -7,6 +7,7 @@ import scipy.sparse as sps
 import re
 import pandas as pd
 from joblib import Parallel, delayed
+from typing import Union
 import m3l
 
 from lsdo_geo.splines.b_splines.b_spline import BSpline
@@ -980,24 +981,125 @@ def create_cartesian_enclosure_block(name:str, points:np.ndarray, num_coefficien
     return hyper_volume
 
 
-def rotate(points:m3l.Variable, axis_vector:m3l.Variable, axis_origin:m3l.Variable, angles:m3l.Variable, units:str='radians'):
+def plot_surface(points:np.ndarray, plot_types:list=['surface'],
+              opacity:float=1., color:Union[str,np.ndarray]='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
     '''
-    Rotates a given set of points around an axis by an angles.
+    Plots the B-spline Surface.
 
     Parameters
-    ----------
-    points : m3l.Variable
-        The points to rotate.
-    axis : m3l.Variable
-        The axis to rotate about.
-    angles : m3l.Variable
-        The angles to rotate by.
-
-    Returns
-    -------
-    rotated_points : m3l.Variable
-        The rotated points. If angles has multiple values, rotated points will have an additional axis in the front of its shape.
+    -----------
+    points : np.ndarray
+        The structured grid of points to be plotted (shape=(nx,ny,3))
+    plot_types : list
+        The type of plot {surface, wireframe, point_cloud}
+    opactity : float
+        The opacity of the plot. 0 is fully transparent and 1 is fully opaque.
+    color : str
+        The 6 digit color code to plot the B-spline as.
+    surface_texture : str = "" {"metallic", "glossy", ...}, optional
+        The surface texture to determine how light bounces off the surface.
+        See https://github.com/marcomusy/vedo/blob/master/examples/basic/lightings.py for options.
+    additional_plotting_elemets : list
+        Vedo plotting elements that may have been returned from previous plotting functions that should be plotted with this plot.
+    show : bool
+        A boolean on whether to show the plot or not. If the plot is not shown, the Vedo plotting element is returned.
     '''
-    if units == 'degrees':
-        theta = theta * np.pi/180.
+    import vedo
     
+    plotting_elements = additional_plotting_elements.copy()
+
+    plotting_points = points
+    plotting_points_shape = plotting_points.shape
+
+    if 'point_cloud' in plot_types:
+        plotting_elements.append(vedo.Points(plotting_points, r=6).opacity(opacity).color('darkred'))
+
+    if 'surface' in plot_types or 'wireframe' in plot_types:
+        num_plot_u = plotting_points_shape[0]
+        num_plot_v = plotting_points_shape[1]
+
+        vertices = []
+        faces = []
+        plotting_points_reshaped = plotting_points.reshape(plotting_points_shape)
+        for u_index in range(num_plot_u):
+            for v_index in range(num_plot_v):
+                vertex = tuple(plotting_points_reshaped[u_index, v_index, :])
+                vertices.append(vertex)
+                if u_index != 0 and v_index != 0:
+                    face = tuple((
+                        (u_index-1)*num_plot_v+(v_index-1),
+                        (u_index-1)*num_plot_v+(v_index),
+                        (u_index)*num_plot_v+(v_index),
+                        (u_index)*num_plot_v+(v_index-1),
+                    ))
+                    faces.append(face)
+
+        mesh = vedo.Mesh([vertices, faces]).opacity(opacity).lighting(surface_texture)
+        if type(color) is str:
+            mesh.color(color)
+        elif type(color) is np.ndarray:
+            mesh.cmap('jet', color)
+    if 'surface' in plot_types:
+        plotting_elements.append(mesh)
+    if 'wireframe' in plot_types:
+        mesh = vedo.Mesh([vertices, faces]).opacity(opacity)
+        plotting_elements.append(mesh.wireframe())
+
+    if show:
+        plotter = vedo.Plotter()
+        # from vedo import Light
+        # light = Light([-1,0,0], c='w', intensity=1)
+        # plotter = vedo.Plotter(size=(3200,1000))
+        # plotter.show(plotting_elements, light, f'B-spline Surface: {self.name}', axes=1, viewup="z", interactive=True)
+        plotter.show(plotting_elements, f'Surface Plot', axes=1, viewup="z", interactive=True)
+        return plotting_elements
+    else:
+        return plotting_elements
+
+def plot_volume(points:np.ndarray, plot_types:list=['surface'],
+              opacity:float=1., color:str='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
+    '''
+    Plots the B-spline volume.
+
+    Parameters
+    -----------
+    points : np.ndarray
+        The structured grid of points to be plotted
+    plot_types : list
+        The type of plot {surface, wireframe, point_cloud}
+    opactity : float
+        The opacity of the plot. 0 is fully transparent and 1 is fully opaque.
+    color : str
+        The 6 digit color code to plot the B-spline as.
+    surface_texture : str = "" {"metallic", "glossy", ...}, optional
+        The surface texture to determine how light bounces off the surface.
+        See https://github.com/marcomusy/vedo/blob/master/examples/basic/lightings.py for options.
+    additional_plotting_elemets : list
+        Vedo plotting elements that may have been returned from previous plotting functions that should be plotted with this plot.
+    show : bool
+        A boolean on whether to show the plot or not. If the plot is not shown, the Vedo plotting element is returned.
+    '''
+    import vedo
+
+    # Plot the 6 sides of the volume
+    plotting_elements = additional_plotting_elements.copy()
+    
+    plotting_elements = plot_surface(points[:,:,0], plot_types=plot_types, opacity=opacity, color=color, surface_texture=surface_texture,
+                                            additional_plotting_elements=plotting_elements, show=False)
+    plotting_elements = plot_surface(points[:,:,-1], plot_types=plot_types, opacity=opacity, color=color, surface_texture=surface_texture,
+                                            additional_plotting_elements=plotting_elements, show=False)
+    plotting_elements = plot_surface(points[:,0,:], plot_types=plot_types, opacity=opacity, color=color, surface_texture=surface_texture,
+                                            additional_plotting_elements=plotting_elements, show=False)
+    plotting_elements = plot_surface(points[:,-1,:], plot_types=plot_types, opacity=opacity, color=color, surface_texture=surface_texture,
+                                            additional_plotting_elements=plotting_elements, show=False)
+    plotting_elements = plot_surface(points[0,:,:], plot_types=plot_types, opacity=opacity, color=color, surface_texture=surface_texture,
+                                            additional_plotting_elements=plotting_elements, show=False)
+    plotting_elements = plot_surface(points[-1,:,:], plot_types=plot_types, opacity=opacity, color=color, surface_texture=surface_texture,
+                                            additional_plotting_elements=plotting_elements, show=False)
+
+    if show:
+        plotter = vedo.Plotter()
+        plotter.show(plotting_elements, f'Volume Plot', axes=1, viewup="z", interactive=True)
+        return plotting_elements
+    else:
+        return plotting_elements
