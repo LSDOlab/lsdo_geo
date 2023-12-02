@@ -634,7 +634,7 @@ class BSplineSet(m3l.Function):
 
                 coarse_grid_search_density_parameter = 5
                 fine_grid_search_density_parameter = 25*grid_search_density_parameter
-                projection_grid_search_density_parameter = 10*grid_search_density_parameter
+                projection_grid_search_density_parameter = 30*grid_search_density_parameter
 
                 points_shape = points.shape
 
