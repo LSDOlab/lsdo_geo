@@ -97,7 +97,7 @@ class FFDBlock(BSpline):
                 embedded_entity.coefficients = updated_embedded_entity_points
                 outputs[embedded_entity.name + '_coefficients'] = updated_embedded_entity_points
             elif type(embedded_entity) is BSplineSubSet:
-                embedded_entity.assign_coefficients(updated_embedded_entity_points)
+                # embedded_entity.assign_coefficients(updated_embedded_entity_points)
                 outputs[embedded_entity.name + '_coefficients'] = updated_embedded_entity_points
 
         self.embedded_points = updated_points.value

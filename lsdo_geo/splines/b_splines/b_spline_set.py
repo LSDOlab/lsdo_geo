@@ -191,6 +191,7 @@ class BSplineSet(m3l.Function):
             b_spline_indices = self.coefficient_indices[b_spline_name]
             b_spline_num_coefficients = len(b_spline_indices)
             assignment_indices = np.arange(index_counter, index_counter+b_spline_num_coefficients)
+            # below takes long time 
             self.coefficients[b_spline_indices] = coefficients[assignment_indices]
 
             index_counter += b_spline_num_coefficients
