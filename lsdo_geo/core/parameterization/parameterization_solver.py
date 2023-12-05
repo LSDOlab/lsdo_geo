@@ -338,6 +338,17 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
         evaluation_model = evaluation_m3l_model.assemble()
         self.evaluation_simulator = Simulator(evaluation_model)
 
+        variable_names = []
+        for constraint_name, constraint in self.declared_inputs.items():
+            variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
+            variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
+                                                                +variable_that_is_linearly_mapped_to.name
+            variable_names.append(variable_that_is_linearly_mapped_to_simulator_name)
+
+        self.evaluation_simulator.run()
+
+        self.linear_derivatives = self.evaluation_simulator.compute_totals(of=variable_names, wrt=list(self.declared_states.keys()))
+
         # self.linear_maps = {}
         # for state_name, state in self.declared_states.items():
         #     # Perform graph searching to precompute total linear maps.
@@ -479,7 +490,28 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
             else:
                 state_variable_names.append(state.name)
         # derivatives = self.evaluation_simulator.compute_totals(of=list(self.declared_inputs.keys()), wrt=list(self.declared_states.keys()))
-        derivatives = self.evaluation_simulator.compute_totals(of=input_variable_names, wrt=state_variable_names)
+        # derivatives = self.evaluation_simulator.compute_totals(of=input_variable_names, wrt=state_variable_names)
+        nonlinear_derivatives = {}
+        total_derivatives = {}
+        for constraint_name, constraint in self.declared_inputs.items():
+            nonlinear_operation = constraint.operation
+            constraint_csdl_name = constraint.operation.name+'.'+constraint.name
+            nonlinear_derivatives[constraint_name] = self.evaluation_simulator.compute_totals(of=constraint_csdl_name, 
+                                        wrt=nonlinear_operation.name + '.x')[(constraint_csdl_name, nonlinear_operation.name + '.x')]
+            
+            variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
+            variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
+                                                                +variable_that_is_linearly_mapped_to.name
+            
+            for state_name, state in self.declared_states.items():
+                if declared_state.operation is not None:
+                    state_dict_name = declared_state.operation.name+'.'+state_name
+                else:
+                    state_dict_name = state_name
+                    
+                total_derivatives[(constraint_name,state_name)] = \
+                    nonlinear_derivatives[constraint_name].dot(
+                        self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)])
 
         dobjective_dstate = {}
         for state_name, declared_state in self.declared_states.items():
@@ -497,7 +529,8 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                     state_dict_name = declared_state.operation.name+'.'+state_name
                 else:
                     state_dict_name = state_name
-                dc_dx = derivatives[(input_dict_name, state_dict_name)]
+                # dc_dx = derivatives[(input_dict_name, state_dict_name)]
+                dc_dx = total_derivatives[(constraint_name, state_name)]
                 dconstraint_penalty_dx[state_name] += constraint_lagrange_multipliers.dot(dc_dx)
 
         constraint_values = {}
@@ -509,8 +542,6 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
             residuals[state_name] = dobjective_dstate[state_name] + dconstraint_penalty_dx[state_name]
         for constraint_name, constraint_value in self.declared_inputs.items():
             residuals[constraint_name+'_lagrange_multipliers'] = constraint_values[constraint_name]
-
-        print("CONSTRAINT VALUES", constraint_values)
 
 
         # # inputs
@@ -613,11 +644,11 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                 state_variable_names.append(state.operation.name+'.'+state.name)
             else:
                 state_variable_names.append(state.name)
-        variables_for_linear_maps = []
-        for input_name, input in self.declared_inputs.items():
-            variable_that_is_linearly_mapped_to = input.operation.arguments['x']
-            variables_for_linear_maps.append(variable_that_is_linearly_mapped_to.operation.name+'.'+variable_that_is_linearly_mapped_to.name)
-        input_variable_names.extend(variables_for_linear_maps)
+        # variables_for_linear_maps = []
+        # for input_name, input in self.declared_inputs.items():
+        #     variable_that_is_linearly_mapped_to = input.operation.arguments['x']
+        #     variables_for_linear_maps.append(variable_that_is_linearly_mapped_to.operation.name+'.'+variable_that_is_linearly_mapped_to.name)
+        # input_variable_names.extend(variables_for_linear_maps)
         computed_derivatives = self.evaluation_simulator.compute_totals(of=input_variable_names, wrt=state_variable_names)
 
         # Get second derivatives of nonlinear operations
@@ -694,8 +725,11 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                     variable_that_is_linearly_mapped_to = constraint_value.operation.arguments['x']
                     variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
                         +variable_that_is_linearly_mapped_to.name
-                    linear_map_i = computed_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_i)]
-                    linear_map_j = computed_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_j)]
+                    # linear_map_i = computed_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_i)]
+                    # linear_map_j = computed_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_j)]
+                    linear_map_i = self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_i)]
+                    linear_map_j = self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_j)]
+
                     # linear_map_i = self.linear_maps[constraint_name, state_name_i]
                     # linear_map_j = self.linear_maps[constraint_name, state_name_j]
                     first_term = np.tensordot(d2NL_dx2, linear_map_j, axes=([2, 0]))
