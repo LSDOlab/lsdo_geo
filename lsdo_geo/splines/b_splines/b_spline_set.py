@@ -600,7 +600,7 @@ class BSplineSet(m3l.Function):
         #       - If yes, get the short name space and load the projections from the corresponding pickle file
         #       - If no, proceed with projection 
 
-
+        do_projections = False
         name_space_dict_file_path = Path(PROJECTIONS_FOLDER / f'name_space_dict.pickle')
         if name_space_dict_file_path.is_file():
             with open(PROJECTIONS_FOLDER / 'name_space_dict.pickle', 'rb') as handle:
@@ -608,13 +608,21 @@ class BSplineSet(m3l.Function):
             if long_name_space in name_space_dict.keys():
                 short_name_space = name_space_dict[long_name_space]
                 saved_projections = PROJECTIONS_FOLDER / f'{short_name_space}.pickle'
-                with open(saved_projections, 'rb') as handle:
-                    projections_dict = pickle.load(handle)
-                    parametric_coordinates = projections_dict['parametric_coordinates']
+                if saved_projections.is_file():
+                    with open(saved_projections, 'rb') as handle:
+                        projections_dict = pickle.load(handle)
+                        parametric_coordinates = projections_dict['parametric_coordinates']
+                        self.evaluate(parametric_coordinates=parametric_coordinates, plot=plot)
+                else:
+                    del name_space_dict[long_name_space]
+                    pickle.dump(name_space_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                    do_projections = True
 
-                self.evaluate(parametric_coordinates=parametric_coordinates, plot=plot)
-                
-            else: 
+            else:
+                do_projections = True
+                    
+
+            if do_projections: 
                 short_name_space = generate_random_string(6)
                 name_space_dict[long_name_space] = short_name_space
                 with open(PROJECTIONS_FOLDER / 'name_space_dict.pickle', 'wb+') as handle:
