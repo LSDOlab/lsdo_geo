@@ -196,7 +196,7 @@ class BSplineSet(m3l.Function):
 
             index_counter += b_spline_num_coefficients
 
-        return self.coefficients
+        return self.coefficients.copy()
 
 
     # def evaluate(self, b_spline_name:str, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> m3l.Variable:
@@ -248,7 +248,7 @@ class BSplineSet(m3l.Function):
         else:
             coefficients = self.coefficients
 
-        output = m3l.matvec(evaluation_map, coefficients)
+        output = m3l.matvec(evaluation_map, coefficients.copy())
         # matvec_operation = m3l.MatVec()
         # output = matvec_operation.evaluate(evaluation_map, coefficients)
 
@@ -1051,13 +1051,14 @@ class BSplineSet(m3l.Function):
             b_spline_coefficients_indices = self.coefficient_indices[b_splines[i]]
             point_indices_list.append(b_spline_coefficients_indices)
         points_indices = np.hstack(point_indices_list)
-        rotating_points = self.coefficients[points_indices]
+        rotating_points = self.coefficients.copy()[points_indices]
 
         rotated_points = m3l.rotate(points=rotating_points, axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units)
 
         rotated_points = rotated_points.reshape((-1,))
 
         self.coefficients[points_indices] = rotated_points
+        return self.coefficients.copy()
 
 
     # def plot(self, b_splines:list[str]=None, point_types:list=['evaluated_points'], plot_types:list=['surface'],
