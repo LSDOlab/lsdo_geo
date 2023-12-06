@@ -235,8 +235,11 @@ class BSplineSet(m3l.Function):
                 
                 b_spline_indices = self.coefficient_indices[b_spline_name]
                 indices.append(b_spline_indices)
-            
-        coefficients = m3l.vstack(tuple(coefficients))
+        
+        if len(coefficients) != 1:
+            coefficients = m3l.vstack(tuple(coefficients))
+        else:
+            coefficients = coefficients[0]
 
         indices = np.hstack(indices)
         self.coefficients[indices] = coefficients
