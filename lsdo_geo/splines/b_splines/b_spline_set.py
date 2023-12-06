@@ -180,6 +180,8 @@ class BSplineSet(m3l.Function):
         coefficients : m3l.Variable
             The coefficients for the given B-splines.
         '''
+        import time
+
         if b_spline_names is None:
             b_spline_names = list(self.space.b_spline_to_space.keys())
 
@@ -188,11 +190,18 @@ class BSplineSet(m3l.Function):
             if b_spline_name not in self.space.b_spline_to_space.keys():
                 raise ValueError(f'The B-spline {b_spline_name} is not in this B-spline set.')
             
+            # t1 = time.time()
             b_spline_indices = self.coefficient_indices[b_spline_name]
+            # t2 = time.time()
+            # print('ASSIGN COEFFICIENTS: TIME FOR self.coefficient_indices[b_spline_name]-----', t2-t1)
             b_spline_num_coefficients = len(b_spline_indices)
             assignment_indices = np.arange(index_counter, index_counter+b_spline_num_coefficients)
             # below takes long time 
+            # t3 = time.time()
             self.coefficients[b_spline_indices] = coefficients[assignment_indices]
+            # t4 = time.time()
+            # print('ASSIGN COEFFICIENTS: TIME FOR self.coefficients[b_spline_indices] = coefficients[assignment_indices]-----', t4-t3)
+
 
             index_counter += b_spline_num_coefficients
 
