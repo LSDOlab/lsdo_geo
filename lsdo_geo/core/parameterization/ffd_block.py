@@ -97,7 +97,7 @@ class FFDBlock(BSpline):
                 embedded_entity.coefficients = updated_embedded_entity_points
                 outputs[embedded_entity.name + '_coefficients'] = updated_embedded_entity_points
             elif type(embedded_entity) is BSplineSubSet:
-                # embedded_entity.assign_coefficients(updated_embedded_entity_points)
+                # embedded_entity.assign_coefficients(updated_embedded_entity_points)   # NOTE: DON'T DO THIS. CAUSES CYCLIC GRAPH. 
                 outputs[embedded_entity.name + '_coefficients'] = updated_embedded_entity_points
 
         self.embedded_points = updated_points.value
@@ -127,7 +127,7 @@ class FFDBlock(BSpline):
                 if type(embedded_entity) is m3l.Variable:
                     updated_entity_points = self.embedded_points[self.embedded_points_indices[embedded_entity.name]]
                     plotting_elements.append(vedo.Points(updated_entity_points, r=5, c='green'))
-                elif type(embedded_entity) is BSpline or type(embedded_entity) is BSplineSet or type(embedded_entity) is Geometry\
+                elif type(embedded_entity) is BSpline or type(embedded_entity) is BSplineSet or type(embedded_entity) is Geometry \
                     or type(embedded_entity) is BSplineSubSet:
                     plotting_elements.append(embedded_entity.plot(plot_types=['surface'], opacity=1., 
                                                                   additional_plotting_elements=plotting_elements, show=False))

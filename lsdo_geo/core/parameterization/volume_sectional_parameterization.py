@@ -239,7 +239,8 @@ class VolumeSectionalParameterization:
         # self.assemble()
 
         # Perform update
-        updated_points = self.parameterized_points.reshape((-1,))
+        # updated_points = self.parameterized_points.reshape((-1,))
+        updated_points = self.parameterized_points
         for parameter_name, parameter_map in self.linear_parameter_maps.items():
             if parameter_name not in sectional_parameters.keys():
                 raise Exception(f"Please pass in a sectional parameter for {parameter_name}.")
