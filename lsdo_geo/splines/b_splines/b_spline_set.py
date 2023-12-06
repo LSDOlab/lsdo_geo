@@ -164,7 +164,7 @@ class BSplineSet(m3l.Function):
         return indexed_coefficients
     
 
-    def assign_coefficients(self, coefficients:m3l.Variable, b_spline_names:list[str]=None) -> m3l.Variable:
+    def assign_coefficients(self, coefficients:Union[m3l.Variable,list[m3l.Variable]], b_spline_names:list[str]=None) -> m3l.Variable:
         '''
         Gets the coefficients for the given B-splines.
 
@@ -180,20 +180,66 @@ class BSplineSet(m3l.Function):
         coefficients : m3l.Variable
             The coefficients for the given B-splines.
         '''
-        if b_spline_names is None:
-            b_spline_names = list(self.space.b_spline_to_space.keys())
+        # if b_spline_names is None:
+        #     b_spline_names = list(self.space.b_spline_to_space.keys())
 
-        index_counter = 0
-        for b_spline_name in b_spline_names:
-            if b_spline_name not in self.space.b_spline_to_space.keys():
-                raise ValueError(f'The B-spline {b_spline_name} is not in this B-spline set.')
+        # index_counter = 0
+        # for b_spline_name in b_spline_names:
+        #     if b_spline_name not in self.space.b_spline_to_space.keys():
+        #         raise ValueError(f'The B-spline {b_spline_name} is not in this B-spline set.')
             
-            b_spline_indices = self.coefficient_indices[b_spline_name]
-            b_spline_num_coefficients = len(b_spline_indices)
-            assignment_indices = np.arange(index_counter, index_counter+b_spline_num_coefficients)
-            self.coefficients[b_spline_indices] = coefficients[assignment_indices]
+        #     b_spline_indices = self.coefficient_indices[b_spline_name]
+        #     b_spline_num_coefficients = len(b_spline_indices)
+        #     assignment_indices = np.arange(index_counter, index_counter+b_spline_num_coefficients)
+        #     self.coefficients[b_spline_indices] = coefficients[assignment_indices]
 
-            index_counter += b_spline_num_coefficients
+        #     index_counter += b_spline_num_coefficients
+
+        # return self.coefficients.copy()
+
+        if type(coefficients) is list:
+            flat_b_spline_names_list = [item for sublist in b_spline_names for item in sublist]
+        else:
+            flat_b_spline_names_list = b_spline_names
+
+        # If all coefficients are being assigned (in correct order), then just assign it
+        if b_spline_names is None or flat_b_spline_names_list == list(self.space.b_spline_to_space.keys()):
+            if type(coefficients) is list:
+                coefficients = m3l.vstack(coefficients)
+            self.coefficients = coefficients.copy()
+            return
+
+        if type(coefficients) is not list:
+            coefficients = [coefficients]
+            b_spline_names = [b_spline_names]
+
+        # if set(list(self.coefficient_indices.keys())) == set(flat_b_spline_names_list): 
+        #     # Want to stack list of component coefficients in correct order (what if comp coeff are not consecutive though?)
+        #     stacking_indices = []
+        #     for b_spline_name in flat_b_spline_names_list:
+        #         stacking_indices.append(list(self.coefficient_indices.keys()).index(b_spline_name))
+        #     stacking_indices = np.hstack(stacking_indices)
+
+        #     coefficients_stacking_list = []
+        #     for stacking_index in stacking_indices:
+        #         coefficients_stacking_list.append(coefficients[stacking_index])
+        #     coefficients = m3l.vstack(coefficients_stacking_list)
+        #     self.coefficients = coefficients.copy()     # Do I need/want this copy?
+        
+        
+        indices = []
+        for component_coefficients, b_spline_name_set in zip(coefficients, b_spline_names):
+            for b_spline_name in b_spline_name_set:
+                if b_spline_name not in self.space.b_spline_to_space.keys():
+                    raise ValueError(f'The B-spline {b_spline_name} is not in this B-spline set.')
+                
+                b_spline_indices = self.coefficient_indices[b_spline_name]
+                indices.append(b_spline_indices)
+            
+        coefficients = m3l.vstack(coefficients)
+
+        indices = np.hstack(indices)
+        self.coefficients[indices] = coefficients
 
         return self.coefficients.copy()
 
@@ -247,7 +293,7 @@ class BSplineSet(m3l.Function):
         else:
             coefficients = self.coefficients
 
-        output = m3l.matvec(evaluation_map, coefficients.copy())
+        output = m3l.matvec(evaluation_map, coefficients)
         # matvec_operation = m3l.MatVec()
         # output = matvec_operation.evaluate(evaluation_map, coefficients)
 
