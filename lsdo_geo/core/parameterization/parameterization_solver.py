@@ -66,7 +66,7 @@ class ParameterizationSolver:
 
         if self.declared_inputs is None:
             self.declared_inputs = {}
-        self.declared_inputs[name] = input
+        self.declared_inputs[name] = input.copy()
 
         if penalty_factor is not None:
             if self.residual_penalties is None:
@@ -90,7 +90,7 @@ class ParameterizationSolver:
 
         if self.declared_states is None:
             self.declared_states = {}
-        self.declared_states[name] = state
+        self.declared_states[name] = state.copy()
 
         if self.state_penalties is None:
             self.state_penalties = {}
@@ -349,6 +349,21 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
 
         self.linear_derivatives = self.evaluation_simulator.compute_totals(of=variable_names, wrt=list(self.declared_states.keys()))
 
+        # Create simulator objects for nonlinear operations
+        for constraint_name, constraint in self.declared_inputs.items():
+            nonlinear_operation = constraint.operation
+            nonlinear_operation.compute_derivatives()
+
+        # self.linear_derivatives = {}
+        # for constraint_name, constraint in self.declared_inputs.items():
+        #     vector = constraint.operation.arguments['x']
+        #     geometry_coefficients = vector.operation.arguments['x']
+        #     vector_map = vector.operation.map
+        #     geometry_coefficients_map = 
+        #     for state_name, state in self.declared_states.items():
+        #         variable = constraint.operation.arguments['x']
+                
+
         # self.linear_maps = {}
         # for state_name, state in self.declared_states.items():
         #     # Perform graph searching to precompute total linear maps.
@@ -476,32 +491,37 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
 
 
     def evaluate_residuals(self, inputs, outputs, residuals):
-        for state_name, declared_state in self.declared_states.items():
-            self.evaluation_simulator[state_name] = outputs[state_name]
-
-        self.evaluation_simulator.run()
-        input_variable_names = []
-        for input_name, input in self.declared_inputs.items():
-            input_variable_names.append(input.operation.name+'.'+input.name)
-        state_variable_names = []
-        for state_name, state in self.declared_states.items():
-            if state.operation is not None:
-                state_variable_names.append(state.operation.name+'.'+state.name)
-            else:
-                state_variable_names.append(state.name)
-        # derivatives = self.evaluation_simulator.compute_totals(of=list(self.declared_inputs.keys()), wrt=list(self.declared_states.keys()))
-        # derivatives = self.evaluation_simulator.compute_totals(of=input_variable_names, wrt=state_variable_names)
-        nonlinear_derivatives = {}
+        constraint_values = {}
         total_derivatives = {}
         for constraint_name, constraint in self.declared_inputs.items():
-            nonlinear_operation = constraint.operation
-            constraint_csdl_name = constraint.operation.name+'.'+constraint.name
-            nonlinear_derivatives[constraint_name] = self.evaluation_simulator.compute_totals(of=constraint_csdl_name, 
-                                        wrt=nonlinear_operation.name + '.x')[(constraint_csdl_name, nonlinear_operation.name + '.x')]
-            
+            # NOTE: NEXT LINE IS PROBLEMATIC IF GEOMETRY WAS DEFORMED WHEN THIS WAS EVALUATED
+            vectors_for_constraints = constraint.operation.arguments['x'].value.copy() 
+
             variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
             variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
                                                                 +variable_that_is_linearly_mapped_to.name
+            for state_name, declared_state in self.declared_states.items():
+                if declared_state.operation is not None:
+                    state_dict_name = declared_state.operation.name+'.'+state_name
+                else:
+                    state_dict_name = state_name
+
+                vectors_for_constraints += self.linear_derivatives[
+                    (variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)].dot(outputs[state_name])
+                
+            nonlinear_operation = constraint.operation
+            nonlinear_operation_simulator = nonlinear_operation.sim
+            nonlinear_operation_simulator['x'] = vectors_for_constraints
+            nonlinear_operation_simulator.run()
+            vector_norms_for_constraints = nonlinear_operation_simulator[constraint.name]
+
+            # vector_norms_for_constraints = np.linalg.norm(vectors_for_constraints)
+
+            constraint_values[constraint_name] = vector_norms_for_constraints - inputs[constraint_name]
+
+            nonlinear_derivative = nonlinear_operation_simulator.compute_totals(of=constraint.name, 
+                                        wrt='x')[(constraint.name, 'x')]
+            
             
             for state_name, state in self.declared_states.items():
                 if declared_state.operation is not None:
@@ -510,8 +530,49 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                     state_dict_name = state_name
                     
                 total_derivatives[(constraint_name,state_name)] = \
-                    nonlinear_derivatives[constraint_name].dot(
+                    nonlinear_derivative.dot(
                         self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)])
+
+        # NOTE: KEEP THIS METHOD AROUND BEACUSE IT CAN ACCOUNT FOR OTHER NON-FREE DOF PARAMETERS
+
+        # for state_name, declared_state in self.declared_states.items():
+        #     self.evaluation_simulator[state_name] = outputs[state_name]
+
+        # self.evaluation_simulator.run()
+        # input_variable_names = []
+        # for input_name, input in self.declared_inputs.items():
+        #     input_variable_names.append(input.operation.name+'.'+input.name)
+        # state_variable_names = []
+        # for state_name, state in self.declared_states.items():
+        #     if state.operation is not None:
+        #         state_variable_names.append(state.operation.name+'.'+state.name)
+        #     else:
+        #         state_variable_names.append(state.name)
+        # # derivatives = self.evaluation_simulator.compute_totals(of=list(self.declared_inputs.keys()), wrt=list(self.declared_states.keys()))
+        # # derivatives = self.evaluation_simulator.compute_totals(of=input_variable_names, wrt=state_variable_names)
+        # nonlinear_derivatives = {}
+        # total_derivatives = {}
+        # for constraint_name, constraint in self.declared_inputs.items():
+        #     nonlinear_operation = constraint.operation
+        #     constraint_csdl_name = constraint.operation.name+'.'+constraint.name
+        #     nonlinear_derivatives[constraint_name] = self.evaluation_simulator.compute_totals(of=constraint_csdl_name, 
+        #                                 wrt=nonlinear_operation.name + '.x')[(constraint_csdl_name, nonlinear_operation.name + '.x')]
+        #     # nonlinear_derivatives[constraint_name] = constraint.operation.sim.compute_totals(of=constraint_csdl_name, 
+        #     #                             wrt=nonlinear_operation.name + '.x')[(constraint_csdl_name, nonlinear_operation.name + '.x')]
+            
+        #     variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
+        #     variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
+        #                                                         +variable_that_is_linearly_mapped_to.name
+            
+        #     for state_name, state in self.declared_states.items():
+        #         if declared_state.operation is not None:
+        #             state_dict_name = declared_state.operation.name+'.'+state_name
+        #         else:
+        #             state_dict_name = state_name
+                    
+        #         total_derivatives[(constraint_name,state_name)] = \
+        #             nonlinear_derivatives[constraint_name].dot(
+        #                 self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)])
 
         dobjective_dstate = {}
         for state_name, declared_state in self.declared_states.items():
@@ -524,160 +585,80 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
             dconstraint_penalty_dx[state_name] = np.zeros((declared_state.shape[0],))     # Preallocating so I can += the dict element later
             for constraint_name, constraint_value in self.declared_inputs.items():
                 constraint_lagrange_multipliers = outputs[constraint_name+'_lagrange_multipliers']
-                input_dict_name = constraint_value.operation.name+'.'+constraint_value.name
-                if declared_state.operation is not None:
-                    state_dict_name = declared_state.operation.name+'.'+state_name
-                else:
-                    state_dict_name = state_name
-                # dc_dx = derivatives[(input_dict_name, state_dict_name)]
                 dc_dx = total_derivatives[(constraint_name, state_name)]
                 dconstraint_penalty_dx[state_name] += constraint_lagrange_multipliers.dot(dc_dx)
 
-        constraint_values = {}
-        for constraint_name, declared_constraint_variable in self.declared_inputs.items():
-            input_dict_name = declared_constraint_variable.operation.name+'.'+declared_constraint_variable.name
-            constraint_values[constraint_name] = self.evaluation_simulator[input_dict_name] - inputs[constraint_name]
+        # constraint_values = {}
+        # for constraint_name, declared_constraint_variable in self.declared_inputs.items():
+        #     input_dict_name = declared_constraint_variable.operation.name+'.'+declared_constraint_variable.name
+        #     constraint_values[constraint_name] = self.evaluation_simulator[input_dict_name] - inputs[constraint_name]
         
         for state_name, declared_state in self.declared_states.items():
             residuals[state_name] = dobjective_dstate[state_name] + dconstraint_penalty_dx[state_name]
         for constraint_name, constraint_value in self.declared_inputs.items():
             residuals[constraint_name+'_lagrange_multipliers'] = constraint_values[constraint_name]
 
-
-        # # inputs
-        # system_parameterization = self.parameters['system_parameterization']
-        # system_representation = system_parameterization.system_representation
-
-        # geometry_parameterizations = system_parameterization.geometry_parameterizations
-
-        # # Collect the parameterizations which have free dof (one parameterization is like one FFDSet)
-        # free_geometry_parameterizations = {}
-        # for geometry_parameterization_name, geometry_parameterization in geometry_parameterizations.items():
-        #     if geometry_parameterization.num_affine_free_dof != 0:
-        #         free_geometry_parameterizations[geometry_parameterization_name] = geometry_parameterization
-        #         # NOTE! Hardcoding for one FFDSet as the only geometry parameterization
-        #         ffd_set = geometry_parameterization
-
-        # parameterization_inputs = inputs['parameterization_inputs']
-        # num_inputs = len(parameterization_inputs)
-        # ffd_free_dof = outputs['ffd_free_dof']
-        # lagrange_multipliers = outputs['parameterization_lagrange_multipliers']
-
-        # NUM_PARAMETRIC_DIMENSIONS = 3       # This type of FFD block has 3 parametric dimensions by definition.
-        # affine_section_properties = ffd_set.evaluate_affine_section_properties(free_affine_dof=ffd_free_dof)
-        # rotational_section_properties = ffd_set.evaluate_rotational_section_properties()
-        # affine_deformed_ffd_control_points = ffd_set.evaluate_affine_block_deformations(
-        #     affine_section_properties=affine_section_properties, plot=True)
-        # rotated_ffd_control_points = ffd_set.evaluate_rotational_block_deformations(
-        #     affine_deformed_control_points=affine_deformed_ffd_control_points, plot=False)
-        # ffd_control_points = ffd_set.evaluate_control_points(rotated_control_points_local_frame=rotated_ffd_control_points)
-        # ffd_embedded_entities = ffd_set.evaluate_embedded_entities(control_points=ffd_control_points, plot=True)
-
-        # # Assemble geometry from FFD outputs
-        # initial_system_representation_geometry = system_representation.spatial_representation.control_points['geometry'].copy()
-        # system_representation_geometry = initial_system_representation_geometry.copy()
-        # parameterization_indices = []
-        # for ffd_block in list(geometry_parameterization.active_ffd_blocks.values()):
-        #     ffd_block_embedded_primitive_names = list(ffd_block.embedded_entities.keys())
-        #     ffd_block_embedded_primitive_indices = []
-        #     for primitive_name in ffd_block_embedded_primitive_names:
-        #         ffd_block_embedded_primitive_indices.extend(list(
-        #             system_representation.spatial_representation.primitive_indices[primitive_name]['geometry']))
-        #     parameterization_indices.extend(ffd_block_embedded_primitive_indices)
-
-        # system_representation_geometry[parameterization_indices,:] = ffd_embedded_entities
-
-        # # geometric_calculations evaluation
-        # c = np.zeros((num_inputs,))   # for displacement, may need to insert more rows since that's 3 constraints.
-        # dc_dx = np.zeros(((num_inputs,) + ffd_free_dof.shape))
-
-        # constraint_counter = 0
-        # for input_name, parameterization_input in system_parameterization.inputs.items():
-        #     quantity = parameterization_input.quantity
-        #     quantity_num_constraints = np.prod(quantity.shape)
-
-        #     mapped_array_map_ind = self.mapped_array_indices[input_name]
-
-        #     if type(quantity) is am.MappedArray: # displacement constraint
-        #         c[constraint_counter:constraint_counter+quantity_num_constraints] = \
-        #             quantity.evaluate(system_representation_geometry) \
-        #             - parameterization_inputs[constraint_counter:constraint_counter+quantity_num_constraints]
-            
-        #         dc_dx[constraint_counter:constraint_counter+quantity_num_constraints,:] = \
-        #             self.ffd_free_dof_to_mapped_arrays.toarray()[mapped_array_map_ind,:]
-        #     else:
-        #         nonlinear_operation_input = quantity.input.evaluate(system_representation_geometry)
-        #         c[constraint_counter:constraint_counter+quantity_num_constraints] = \
-        #             quantity.evaluate(system_representation_geometry, evaluate_input=True) \
-        #                 - parameterization_inputs[constraint_counter:constraint_counter+quantity_num_constraints]
-                
-        #         nonlinear_derivative = quantity.evaluate_derivative(nonlinear_operation_input, evaluate_input=False)
-        #         dc_dx[constraint_counter:constraint_counter+quantity_num_constraints,:] = \
-        #             nonlinear_derivative.dot(self.ffd_free_dof_to_mapped_arrays.toarray()[mapped_array_map_ind,:])
-
-        #     constraint_counter += quantity_num_constraints
-
-        # dObjective_dx = 2*ffd_set.cost_matrix.dot(ffd_free_dof)
-
-        # num_affine_free_dof = geometry_parameterization.num_affine_free_dof
-
-        # residuals['ffd_free_dof'] = dObjective_dx + np.tensordot(lagrange_multipliers, dc_dx, axes=([-1],[0]))
-        # residuals['parameterization_lagrange_multipliers'] = c.T
+        print('CONSTRAINT VALUES: ', constraint_values)
 
 
     def compute_derivatives(self, inputs, outputs, derivatives):
-        ## Run simulators to get values and derivatives and second derivatives
-        # Get second derivative of nonlinear operation.
-        for state_name, declared_state in self.declared_states.items():
-            self.evaluation_simulator[state_name] = outputs[state_name]
-
-        # Get variable values for computation of second derivatives
-        self.evaluation_simulator.run()
-
-        # Get dc_dx values
-        input_variable_names = []
-        for input_name, input in self.declared_inputs.items():
-            input_variable_names.append(input.operation.name+'.'+input.name)
-        state_variable_names = []
-        for state_name, state in self.declared_states.items():
-            if state.operation is not None:
-                state_variable_names.append(state.operation.name+'.'+state.name)
-            else:
-                state_variable_names.append(state.name)
-        # variables_for_linear_maps = []
-        # for input_name, input in self.declared_inputs.items():
-        #     variable_that_is_linearly_mapped_to = input.operation.arguments['x']
-        #     variables_for_linear_maps.append(variable_that_is_linearly_mapped_to.operation.name+'.'+variable_that_is_linearly_mapped_to.name)
-        # input_variable_names.extend(variables_for_linear_maps)
-        computed_derivatives = self.evaluation_simulator.compute_totals(of=input_variable_names, wrt=state_variable_names)
-
-        # Get second derivatives of nonlinear operations
+        total_derivatives = {}
         constraint_nonlinear_second_derivatives_dict = {}
-        for constraint_name, declared_constraint_variable in self.declared_inputs.items():
-            nonlinear_operation = declared_constraint_variable.operation
-            nonlinear_operation_derivative_model = nonlinear_operation.compute_derivatives()
-            nonlinear_derivative_simulator = Simulator(nonlinear_operation_derivative_model)
-            for nonlinear_operation_argument_name, nonlinear_operation_input in nonlinear_operation.arguments.items():
-                # Get input value from evaluation simulator
-                nonlinear_operation_input_name = nonlinear_operation_input.operation.name+'.'+nonlinear_operation_input.name
-                nonlinear_operation_input_value = self.evaluation_simulator[nonlinear_operation_input_name]
-                
-                # Place input value into derivative simulator
-                nonlinear_derivative_simulator[nonlinear_operation_argument_name] = nonlinear_operation_input_value
-            
-            nonlinear_derivative_simulator.run()
-            
-            declared_constraint_simulator_name = declared_constraint_variable.operation.name+'.'+declared_constraint_variable.name
-            derivative_names = []
-            for nonlinear_operation_argument_name, nonlinear_operation_input in nonlinear_operation.arguments.items():
-                # derivatve_name = 'd'+declared_constraint_simulator_name+'_d'+nonlinear_operation_argument_name
-                derivatve_name = 'd'+declared_constraint_variable.name+'_d'+nonlinear_operation_argument_name
-                derivative_names.append(derivatve_name)
+        for constraint_name, constraint in self.declared_inputs.items():
+            vectors_for_constraints = constraint.operation.arguments['x'].value.copy()
+            variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
+            variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
+                                                                +variable_that_is_linearly_mapped_to.name
+            for state_name, declared_state in self.declared_states.items():
+                if declared_state.operation is not None:
+                    state_dict_name = declared_state.operation.name+'.'+state_name
+                else:
+                    state_dict_name = state_name
 
-            nonlinear_second_derivatives = nonlinear_derivative_simulator.compute_totals(of=derivative_names,
-                                                                                        wrt=list(nonlinear_operation.arguments.keys()))
+                vectors_for_constraints += self.linear_derivatives[
+                    (variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)].dot(outputs[state_name])
+                
+            nonlinear_operation = constraint.operation
+            nonlinear_operation_simulator = nonlinear_operation.sim
+            nonlinear_operation_simulator['x'] = vectors_for_constraints
+            nonlinear_operation_simulator.run()
+
+            # nonlinear_derivatives[constraint_name] = nonlinear_operation_simulator.compute_totals(of=constraint.name, 
+            #                             wrt='x')[(constraint.name, 'x')]
+            
+            # for state_name, state in self.declared_states.items():
+            #     if declared_state.operation is not None:
+            #         state_dict_name = declared_state.operation.name+'.'+state_name
+            #     else:
+            #         state_dict_name = state_name
+                    
+            #     total_derivatives[(constraint_name,state_name)] = \
+            #         nonlinear_derivatives[constraint_name].dot(
+            #             self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)])
+                
+
+            # Get second derivatives of nonlinear operations
+            nonlinear_derivative_simulator = nonlinear_operation.derivative_sim
+            nonlinear_operation_input_value = vectors_for_constraints
+            nonlinear_derivative_simulator['x'] = nonlinear_operation_input_value
+            nonlinear_derivative_simulator.run()
+
+            nonlinear_derivatives = nonlinear_derivative_simulator[f'd{constraint.name}_dx']
+
+            for state_name, state in self.declared_states.items():
+                if declared_state.operation is not None:
+                    state_dict_name = declared_state.operation.name+'.'+state_name
+                else:
+                    state_dict_name = state_name
+                    
+                total_derivatives[(constraint_name,state_name)] = \
+                    nonlinear_derivatives.dot(
+                        self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)])
+
+            nonlinear_second_derivatives = nonlinear_derivative_simulator.compute_totals(of=f'd{constraint.name}_dx',
+                                                                                        wrt='x')
             constraint_nonlinear_second_derivatives_dict[constraint_name] = nonlinear_second_derivatives
-        
+
         ## Use simulator-computed values to assemble/compute the blocks of the Hessian
         # d^2F_dx^2
         d2objective_dstate2 = {}
@@ -694,7 +675,7 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                     state_simulator_name = declared_state.operation.name+'.'+state_name
                 else:
                     state_simulator_name = state_name
-                dc_dx[constraint_name, state_name] = computed_derivatives[(constraint_simulator_name, state_simulator_name)]
+                dc_dx[constraint_name, state_name] = total_derivatives[(constraint_name, state_name)]
 
         # d2c_dx2
         d2constraint_penalty_dx2 = {}  # dictionary across states (contract different constraints with their lagrange multipliers)
@@ -768,6 +749,154 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                 else:
                     derivatives[constraint_name+'_lagrange_multipliers', input_name] = np.zeros((constraint.shape[0],declared_input.shape[0]))
 
+
+
+
+
+        # ## Run simulators to get values and derivatives and second derivatives
+        # # Get second derivative of nonlinear operation.
+        # for state_name, declared_state in self.declared_states.items():
+        #     self.evaluation_simulator[state_name] = outputs[state_name]
+
+        # # Get variable values for computation of second derivatives
+        # self.evaluation_simulator.run()
+
+        # # Get dc_dx values
+        # input_variable_names = []
+        # for input_name, input in self.declared_inputs.items():
+        #     input_variable_names.append(input.operation.name+'.'+input.name)
+        # state_variable_names = []
+        # for state_name, state in self.declared_states.items():
+        #     if state.operation is not None:
+        #         state_variable_names.append(state.operation.name+'.'+state.name)
+        #     else:
+        #         state_variable_names.append(state.name)
+        # # variables_for_linear_maps = []
+        # # for input_name, input in self.declared_inputs.items():
+        # #     variable_that_is_linearly_mapped_to = input.operation.arguments['x']
+        # #     variables_for_linear_maps.append(variable_that_is_linearly_mapped_to.operation.name+'.'+variable_that_is_linearly_mapped_to.name)
+        # # input_variable_names.extend(variables_for_linear_maps)
+        # computed_derivatives = self.evaluation_simulator.compute_totals(of=input_variable_names, wrt=state_variable_names)
+
+        # # Get second derivatives of nonlinear operations
+        # constraint_nonlinear_second_derivatives_dict = {}
+        # for constraint_name, declared_constraint_variable in self.declared_inputs.items():
+        #     nonlinear_operation = declared_constraint_variable.operation
+        #     nonlinear_operation_derivative_model = nonlinear_operation.compute_derivatives()
+        #     nonlinear_derivative_simulator = Simulator(nonlinear_operation_derivative_model)
+        #     for nonlinear_operation_argument_name, nonlinear_operation_input in nonlinear_operation.arguments.items():
+        #         # Get input value from evaluation simulator
+        #         nonlinear_operation_input_name = nonlinear_operation_input.operation.name+'.'+nonlinear_operation_input.name
+        #         nonlinear_operation_input_value = self.evaluation_simulator[nonlinear_operation_input_name]
+                
+        #         # Place input value into derivative simulator
+        #         nonlinear_derivative_simulator[nonlinear_operation_argument_name] = nonlinear_operation_input_value
+            
+        #     nonlinear_derivative_simulator.run()
+            
+        #     declared_constraint_simulator_name = declared_constraint_variable.operation.name+'.'+declared_constraint_variable.name
+        #     derivative_names = []
+        #     for nonlinear_operation_argument_name, nonlinear_operation_input in nonlinear_operation.arguments.items():
+        #         # derivatve_name = 'd'+declared_constraint_simulator_name+'_d'+nonlinear_operation_argument_name
+        #         derivatve_name = 'd'+declared_constraint_variable.name+'_d'+nonlinear_operation_argument_name
+        #         derivative_names.append(derivatve_name)
+
+        #     nonlinear_second_derivatives = nonlinear_derivative_simulator.compute_totals(of=derivative_names,
+        #                                                                                 wrt=list(nonlinear_operation.arguments.keys()))
+        #     constraint_nonlinear_second_derivatives_dict[constraint_name] = nonlinear_second_derivatives
+        
+        # ## Use simulator-computed values to assemble/compute the blocks of the Hessian
+        # # d^2F_dx^2
+        # d2objective_dstate2 = {}
+        # for state_name, declared_state in self.declared_states.items():
+        #     state_vector = outputs[state_name]
+        #     d2objective_dstate2[state_name,state_name] = np.diag(np.ones(declared_state.shape)*2*self.state_penalties[state_name].value)
+
+        # # dc_dx
+        # dc_dx = {}  # dictionary across constraints and states for the off-diagonal entries of the Hessian
+        # for state_name, declared_state in self.declared_states.items():
+        #     for constraint_name, constraint_value in self.declared_inputs.items():
+        #         constraint_simulator_name = constraint_value.operation.name+'.'+constraint_value.name
+        #         if declared_state.operation is not None:
+        #             state_simulator_name = declared_state.operation.name+'.'+state_name
+        #         else:
+        #             state_simulator_name = state_name
+        #         dc_dx[constraint_name, state_name] = computed_derivatives[(constraint_simulator_name, state_simulator_name)]
+
+        # # d2c_dx2
+        # d2constraint_penalty_dx2 = {}  # dictionary across states (contract different constraints with their lagrange multipliers)
+        # for state_name_i, declared_state_i in self.declared_states.items():
+        #     if declared_state_i.operation is not None:
+        #         state_simulator_name_i = declared_state_i.operation.name+'.'+state_name_i
+        #     else:
+        #         state_simulator_name_i = state_name_i
+        #     for state_name_j, declared_state_j in self.declared_states.items():
+        #         d2constraint_penalty_dx2[state_name_i, state_name_j] = np.zeros((declared_state_i.shape[0],declared_state_j.shape[0]))
+        #         for constraint_name, constraint_value in self.declared_inputs.items():
+        #             constraint_lagrange_multipliers = outputs[constraint_name+'_lagrange_multipliers']
+
+        #             constraint_nonlinear_second_derivatives = constraint_nonlinear_second_derivatives_dict[constraint_name]
+        #             constraint_simulator_name = constraint_value.operation.name+'.'+constraint_value.name
+        #             # nonlinear_derivatve_name = 'd'+constraint_simulator_name+'_d'+nonlinear_operation_argument_name # This corresponds to state_i?
+        #             # nonlinear_derivatve_name = 'd'+constraint_simulator_name+'_dx' # NOTE: Hardcoded for norm operation for now.
+        #             nonlinear_derivatve_name = 'd'+constraint_value.name+'_dx' # NOTE: Hardcoded for norm operation for now.
+        #             if declared_state_j.operation is not None:
+        #                 state_simulator_name_j = declared_state_j.operation.name+'.'+state_name_j
+        #             else:
+        #                 state_simulator_name_j = state_name_j
+        #             # d2NL_dx2 = constraint_nonlinear_second_derivatives[(nonlinear_derivatve_name, state_simulator_name_j)]
+        #             d2NL_dx2 = constraint_nonlinear_second_derivatives[(nonlinear_derivatve_name, 'x')] # NOTE: HARDCODED FOR NORM RIGHT NOW
+        #             # d2NL_dx2 = d2NL_dx2.reshape((constraint_lagrange_multipliers.shape[0], declared_state_i.shape[0], declared_state_j.shape[0]))
+        #             d2NL_dx2 = d2NL_dx2.reshape((constraint_lagrange_multipliers.shape[0], 3, 3))   # NOTE: HARDCODED FOR NORM (x.shape)
+
+        #             variable_that_is_linearly_mapped_to = constraint_value.operation.arguments['x']
+        #             variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
+        #                 +variable_that_is_linearly_mapped_to.name
+        #             # linear_map_i = computed_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_i)]
+        #             # linear_map_j = computed_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_j)]
+        #             linear_map_i = self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_i)]
+        #             linear_map_j = self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_j)]
+
+        #             # linear_map_i = self.linear_maps[constraint_name, state_name_i]
+        #             # linear_map_j = self.linear_maps[constraint_name, state_name_j]
+        #             first_term = np.tensordot(d2NL_dx2, linear_map_j, axes=([2, 0]))
+        #             d2c_dx2 = np.tensordot(linear_map_i, first_term, axes=([0, 1]))
+
+        #             d2constraint_penalty_dx2[state_name_i, state_name_j] += np.tensordot(constraint_lagrange_multipliers, d2c_dx2, axes=([0, 1]))
+
+        # # -- Assigning Hessian --
+        # # Assigning upper-left block of Hessian
+        # for state_name_i, state_i in self.declared_states.items():
+        #     for state_name_j, state_j in self.declared_states.items():
+        #         if state_name_i == state_name_j:
+        #             derivatives[state_name_i, state_name_j] = d2objective_dstate2[state_name_i, state_name_j] + \
+        #                 d2constraint_penalty_dx2[state_name_i, state_name_j]
+        #         else:
+        #             derivatives[state_name_i, state_name_j] = d2constraint_penalty_dx2[state_name_i, state_name_j]
+        # # Assigning the off-block-diagonal entries of the Hessian
+        # for state_name, state in self.declared_states.items():
+        #     for constraint_name, constraint in self.declared_inputs.items():
+        #         derivatives[state_name, constraint_name+'_lagrange_multipliers'] = dc_dx[constraint_name, state_name]
+        #         derivatives[constraint_name+'_lagrange_multipliers', state_name] = dc_dx[constraint_name, state_name].T
+        # # Assigning the lower-right block of the Hessian
+        # for constraint_name_i, constraint_i in self.declared_inputs.items():
+        #     for constraint_name_j, constraint_j in self.declared_inputs.items():
+        #         derivatives[constraint_name_i+'_lagrange_multipliers', constraint_name_j+'_lagrange_multipliers'] = \
+        #             np.zeros((constraint_i.shape[0],constraint_j.shape[0]))
+
+        # # -- Assigning derivatives for adjoint method --
+        # for state_name, state in self.declared_states.items():
+        #     for input_name, declared_input in self.declared_inputs.items():
+        #         derivatives[state_name, input_name] = np.zeros((state.shape[0],declared_input.shape[0]))
+        # for constraint_name, constraint in self.declared_inputs.items():
+        #     for input_name, declared_input in self.declared_inputs.items():
+        #         if constraint_name == input_name:
+        #             derivatives[constraint_name+'_lagrange_multipliers', input_name] = -np.eye(constraint.shape[0])
+        #         else:
+        #             derivatives[constraint_name+'_lagrange_multipliers', input_name] = np.zeros((constraint.shape[0],declared_input.shape[0]))
+
+
+        ## NOTE: OLD ATTEMPT
 
         # for state_name in self.declared_states:
         #     self.derivative_evaluation_simulator[state_name] = outputs[state_name]
@@ -844,115 +973,6 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
         #             derivatives[constraint_name+'_lagrange_multipliers', input_name] = -np.eye(constraint.shape[0])
         #         else:
         #             derivatives[constraint_name+'_lagrange_multipliers', input_name] = 0.
-
-
-        # # inputs
-        # system_parameterization = self.parameters['system_parameterization']
-        # system_representation = system_parameterization.system_representation
-
-        # geometry_parameterizations = system_parameterization.geometry_parameterizations
-
-        # # Collect the parameterizations which have free dof (one parameterization is like one FFDSet)
-        # free_geometry_parameterizations = {}
-        # for geometry_parameterization_name, geometry_parameterization in geometry_parameterizations.items():
-        #     if geometry_parameterization.num_affine_free_dof != 0:
-        #         free_geometry_parameterizations[geometry_parameterization_name] = geometry_parameterization
-        #         # NOTE! Hardcoding for one FFDSet as the only geometry parameterization
-        #         ffd_set = geometry_parameterization
-
-        # parameterization_inputs = inputs['parameterization_inputs']
-        # num_inputs = len(parameterization_inputs)
-        # ffd_free_dof = outputs['ffd_free_dof']
-        # lagrange_multipliers = outputs['parameterization_lagrange_multipliers']
-
-        # NUM_PARAMETRIC_DIMENSIONS = 3       # This type of FFD block has 3 parametric dimensions by definition.
-        # affine_section_properties = ffd_set.evaluate_affine_section_properties(free_affine_dof=ffd_free_dof)
-        # rotational_section_properties = ffd_set.evaluate_rotational_section_properties()
-        # affine_deformed_ffd_control_points = ffd_set.evaluate_affine_block_deformations(
-        #     affine_section_properties=affine_section_properties)
-        # rotated_ffd_control_points = ffd_set.evaluate_rotational_block_deformations(
-        #     affine_deformed_control_points=affine_deformed_ffd_control_points)
-        # ffd_control_points = ffd_set.evaluate_control_points(rotated_control_points_local_frame=rotated_ffd_control_points)
-        # ffd_embedded_entities = ffd_set.evaluate_embedded_entities(control_points=ffd_control_points)
-
-        # # Assemble geometry from FFD outputs
-        # initial_system_representation_geometry = system_representation.spatial_representation.control_points['geometry'].copy()
-        # system_representation_geometry = initial_system_representation_geometry.copy()
-        # parameterization_indices = []
-        # for ffd_block in list(geometry_parameterization.active_ffd_blocks.values()):
-        #     ffd_block_embedded_primitive_names = list(ffd_block.embedded_entities.keys())
-        #     ffd_block_embedded_primitive_indices = []
-        #     for primitive_name in ffd_block_embedded_primitive_names:
-        #         ffd_block_embedded_primitive_indices.extend(list(
-        #             system_representation.spatial_representation.primitive_indices[primitive_name]['geometry']))
-        #     parameterization_indices.extend(ffd_block_embedded_primitive_indices)
-
-        # system_representation_geometry[parameterization_indices,:] = ffd_embedded_entities
-
-        # # quantity evaluation
-        # # c = np.zeros((num_geometric_outputs,))   # Don't need c for Hessian.
-        # dc_dx = np.zeros(((num_inputs,) + ffd_free_dof.shape))
-        # d2c_dx2 = np.zeros(((num_inputs,)  + ffd_free_dof.shape + ffd_free_dof.shape))
-
-        # constraint_counter = 0
-        # for input_name, parameterization_input in system_parameterization.inputs.items():
-        #     quantity = parameterization_input.quantity
-        #     quantity_num_constraints = np.prod(quantity.shape)
-
-        #     mapped_array_map_ind = self.mapped_array_indices[input_name]
-        #     ffd_free_dof_to_mapped_array = self.ffd_free_dof_to_mapped_arrays.toarray()[mapped_array_map_ind,:]
-            
-        #     if type(quantity) is am.MappedArray:
-        #         dc_dx[constraint_counter:constraint_counter+quantity_num_constraints,:] = ffd_free_dof_to_mapped_array
-
-        #         d2c_dx2[constraint_counter:constraint_counter+quantity_num_constraints,:,:] = 0.
-        #     else:
-        #         nonlinear_operation_input = quantity.input.evaluate(system_representation_geometry)
-        #         mapped_array_size = np.prod(nonlinear_operation_input.shape)
-
-        #         nonlinear_derivative = quantity.evaluate_derivative(nonlinear_operation_input, evaluate_input=False)
-        #         dc_dx[constraint_counter:constraint_counter+quantity_num_constraints,:] = \
-        #             nonlinear_derivative.dot(ffd_free_dof_to_mapped_array)
-                
-        #         nonlinear_second_derivative = quantity.evaluate_second_derivative(nonlinear_operation_input, evaluate_input=False).reshape(
-        #             (quantity_num_constraints, mapped_array_size, mapped_array_size))
-
-        #         first_term = np.tensordot(nonlinear_second_derivative, ffd_free_dof_to_mapped_array, axes=([2, 0]))
-        #         total_second_derivative = np.tensordot(first_term, ffd_free_dof_to_mapped_array, axes=([1, 0]))
-        #         d2c_dx2[constraint_counter:constraint_counter+quantity_num_constraints,:,:] = total_second_derivative
-
-        #     constraint_counter += quantity_num_constraints
-
-        # d2objective_dx2 = 2*ffd_set.cost_matrix
-
-        # num_affine_free_dof = ffd_set.num_affine_free_dof
-        # hessian = np.zeros((num_affine_free_dof+num_inputs,num_affine_free_dof+num_inputs))
-        # hessian[:num_affine_free_dof, :num_affine_free_dof] = \
-        #     d2objective_dx2 + np.tensordot(lagrange_multipliers, d2c_dx2, axes=([-1],[0]))    # upper left block
-        # hessian[:num_affine_free_dof, num_affine_free_dof:] = dc_dx.T   # uper right block
-        # hessian[num_affine_free_dof:, :num_affine_free_dof] = dc_dx # lower left block
-        # # hessian[num_affine_free_dof:, num_affine_free_dof:] = 0.  lower right block preallocated to zeroes
-
-        # derivatives['ffd_free_dof', 'ffd_free_dof'] = hessian[:num_affine_free_dof, :num_affine_free_dof]
-        # derivatives['ffd_free_dof', 'parameterization_lagrange_multipliers'] = hessian[:num_affine_free_dof, num_affine_free_dof:]
-        # derivatives['parameterization_lagrange_multipliers', 'ffd_free_dof'] = hessian[num_affine_free_dof:, :num_affine_free_dof]
-        # derivatives['parameterization_lagrange_multipliers', 'parameterization_lagrange_multipliers'] = \
-        #     hessian[num_affine_free_dof:, num_affine_free_dof:]
-        
-        # # df_dx = pf_px - pf_py.dot(pr_py**-1).dot(pr_px)
-        # pr_px = np.zeros((num_inputs+num_affine_free_dof, num_inputs))
-        # # pr_px[:num_affine_free_dof,:] = 0.
-        # pr_px[num_affine_free_dof:,:] = -np.eye(num_inputs)
-        # # pr_py = -hessian
-        # # dy_dx = np.linalg.solve(pr_py, pr_px)   # solve using direct method since num inputs < num outputs
-        # # df_dx = dy_dx   # df_dy = I since f=y, also_pf_py = 0, so df_dx = 0 - I.dot(dy_dx)
-        # # dffddof_dinputsandconstraints = df_dx[:num_affine_free_dof]
-        # # # dlagrangemultipliers_dinputsandconstraints = df_dx[num_affine_free_dof:]
-        # # # derivatives['ffd_free_dof', 'inputs_and_constraints'] = dffddof_dinputsandconstraints
-        # # # derivatives['parameterization_lagrange_multipliers', 'inputs_and_constraints'] = dlagrangemultipliers_dinputsandconstraints    # don't care about variations in lagrange multipliers
-
-        # derivatives['ffd_free_dof', 'parameterization_inputs'] = pr_px[:num_affine_free_dof,:]
-        # derivatives['parameterization_lagrange_multipliers', 'parameterization_inputs'] = pr_px[num_affine_free_dof:,:]
 
 
     '''
