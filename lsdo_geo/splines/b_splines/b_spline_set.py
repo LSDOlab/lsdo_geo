@@ -296,7 +296,7 @@ class BSplineSet(m3l.Function):
         else:
             coefficients = self.coefficients
 
-        output = m3l.matvec(evaluation_map, coefficients)
+        output = m3l.matvec(evaluation_map, coefficients.copy())
         # matvec_operation = m3l.MatVec()
         # output = matvec_operation.evaluate(evaluation_map, coefficients)
 
@@ -663,9 +663,10 @@ class BSplineSet(m3l.Function):
                         parametric_coordinates = projections_dict['parametric_coordinates']
                         self.evaluate(parametric_coordinates=parametric_coordinates, plot=plot)
                 else:
-                    del name_space_dict[long_name_space]
-                    pickle.dump(name_space_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
-                    do_projections = True
+                    raise Exception('Projection storing error- Delete all projections and reproject')
+                    # del name_space_dict[long_name_space]
+                    # pickle.dump(name_space_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                    # do_projections = True
 
             else:
                 do_projections = True
