@@ -330,48 +330,49 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
         self.linear_solver = csdl.DirectSolver()
         self.nonlinear_solver = csdl.NewtonSolver(maxiter=10)
 
-        # # Construct CSDL model for evaluation
-        # evaluation_m3l_model = m3l.Model()
-        # # for forward_model_output_name, forward_model_output in self.declared_inputs.items():
-        # #     evaluation_m3l_model.register_output(forward_model_output)
-        # evaluation_m3l_model.register_output(self.declared_inputs)
-        # evaluation_model = evaluation_m3l_model.assemble()
-        # self.evaluation_simulator = Simulator(evaluation_model)
+        # Construct CSDL model for evaluation
+        evaluation_m3l_model = m3l.Model()
+        # for forward_model_output_name, forward_model_output in self.declared_inputs.items():
+        #     evaluation_m3l_model.register_output(forward_model_output)
+        evaluation_m3l_model.register_output(self.declared_inputs)
+        evaluation_model = evaluation_m3l_model.assemble()
+        self.evaluation_simulator = Simulator(evaluation_model)
 
-        # variable_names = []
-        # for constraint_name, constraint in self.declared_inputs.items():
-        #     variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
-        #     variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
-        #                                                         +variable_that_is_linearly_mapped_to.name
-        #     variable_names.append(variable_that_is_linearly_mapped_to_simulator_name)
-
-        # self.evaluation_simulator.run()
-
-        # self.linear_derivatives = self.evaluation_simulator.compute_totals(of=variable_names, wrt=list(self.declared_states.keys()))
-
-        # Precompute linear maps for memory and time saving
-        from m3l import check_if_variable_is_upstream
-        from m3l import compute_mapping_from_upstream_variable
-        self.linear_derivatives = {}
+        variable_names = []
         for constraint_name, constraint in self.declared_inputs.items():
-            linear_output = constraint.operation.arguments['x']
-            for state_name, state in self.declared_states.items():
-                # # search graph to see if state is in constraint graph
-                # is_state_upstream = check_if_variable_is_upstream(linear_output, state)
-                # if not is_state_upstream:
-                #     continue          
+            variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
+            variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
+                                                                +variable_that_is_linearly_mapped_to.name
+            variable_names.append(variable_that_is_linearly_mapped_to_simulator_name)
 
-                # if state is in constraint graph, then compute linear map
-                linear_map = compute_mapping_from_upstream_variable(linear_output, state)
-                if linear_map is None:
-                    linear_map = sps.lil_matrix((linear_output.shape[0], state.shape[0]))
-                self.linear_derivatives[(constraint_name,state_name)] = linear_map.toarray()
+        self.evaluation_simulator.run()
+
+        self.linear_derivatives = self.evaluation_simulator.compute_totals(of=variable_names, wrt=list(self.declared_states.keys()))
+
+        # # Precompute linear maps for memory and (definitely NOT time saving)
+        # # from m3l import check_if_variable_is_upstream
+        # from m3l import compute_mapping_from_upstream_variable
+        # self.linear_derivatives = {}
+        # for constraint_name, constraint in self.declared_inputs.items():
+        #     linear_output = constraint.operation.arguments['x']
+        #     for state_name, state in self.declared_states.items():
+        #         # # search graph to see if state is in constraint graph
+        #         # is_state_upstream = check_if_variable_is_upstream(linear_output, state)
+        #         # if not is_state_upstream:
+        #         #     continue          
+
+        #         # if state is in constraint graph, then compute linear map
+        #         linear_map = compute_mapping_from_upstream_variable(linear_output, state)
+        #         if linear_map is None:
+        #             linear_map = sps.lil_matrix((linear_output.shape[0], state.shape[0]))
+        #         self.linear_derivatives[(constraint_name,state_name)] = linear_map.toarray()
 
 
         # Create simulator objects for nonlinear operations
         for constraint_name, constraint in self.declared_inputs.items():
             nonlinear_operation = constraint.operation
-            nonlinear_operation.compute_derivatives()
+            if type(nonlinear_operation) is m3l.Norm:
+                nonlinear_operation.compute_derivatives()
 
         # self.linear_derivatives = {}
         # for constraint_name, constraint in self.declared_inputs.items():
@@ -513,47 +514,68 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
         constraint_values = {}
         total_derivatives = {}
         for constraint_name, constraint in self.declared_inputs.items():
-            # NOTE: NEXT LINE IS PROBLEMATIC IF GEOMETRY WAS DEFORMED WHEN THIS WAS EVALUATED
-            vectors_for_constraints = constraint.operation.arguments['x'].value.copy() 
+            if type(constraint.operation) is m3l.Norm:
+                # NOTE: NEXT LINE IS PROBLEMATIC IF GEOMETRY WAS DEFORMED WHEN THIS WAS EVALUATED
+                vectors_for_constraints = constraint.operation.arguments['x'].value.copy() 
 
-            variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
-            variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
-                                                                +variable_that_is_linearly_mapped_to.name
-            for state_name, declared_state in self.declared_states.items():
-                if declared_state.operation is not None:
-                    state_dict_name = declared_state.operation.name+'.'+state_name
-                else:
-                    state_dict_name = state_name
+                variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
+                variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
+                                                                    +variable_that_is_linearly_mapped_to.name
+                for state_name, declared_state in self.declared_states.items():
+                    if declared_state.operation is not None:
+                        state_dict_name = declared_state.operation.name+'.'+state_name
+                    else:
+                        state_dict_name = state_name
 
-                # vectors_for_constraints += self.linear_derivatives[
-                #     (variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)].dot(outputs[state_name])
-                vectors_for_constraints += self.linear_derivatives[
-                    (constraint_name,state_name)].dot(outputs[state_name])
-                
-            nonlinear_operation = constraint.operation
-            nonlinear_operation_simulator = nonlinear_operation.sim
-            nonlinear_operation_simulator['x'] = vectors_for_constraints
-            nonlinear_operation_simulator.run()
-            vector_norms_for_constraints = nonlinear_operation_simulator[constraint.name]
+                    vectors_for_constraints += self.linear_derivatives[
+                        (variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)].dot(outputs[state_name])
+                    # vectors_for_constraints += self.linear_derivatives[
+                    #     (constraint_name,state_name)].dot(outputs[state_name])
+                    
+                nonlinear_operation = constraint.operation
+                nonlinear_operation_simulator = nonlinear_operation.sim
+                nonlinear_operation_simulator['x'] = vectors_for_constraints
+                nonlinear_operation_simulator.run()
+                vector_norms_for_constraints = nonlinear_operation_simulator[constraint.name]
 
-            # vector_norms_for_constraints = np.linalg.norm(vectors_for_constraints)
+                # vector_norms_for_constraints = np.linalg.norm(vectors_for_constraints)
 
-            constraint_values[constraint_name] = vector_norms_for_constraints - inputs[constraint_name]
+                constraint_values[constraint_name] = vector_norms_for_constraints - inputs[constraint_name]
 
-            nonlinear_derivative = nonlinear_operation_simulator.compute_totals(of=constraint.name, 
-                                        wrt='x')[(constraint.name, 'x')]
-            
+                nonlinear_derivative = nonlinear_operation_simulator.compute_totals(of=constraint.name, 
+                                            wrt='x')[(constraint.name, 'x')]
+            else:   # no nonlinear operation. The vector itself is the constraint
+                # NOTE: NEXT LINE IS PROBLEMATIC IF GEOMETRY WAS DEFORMED WHEN THIS WAS EVALUATED
+                vectors_for_constraints = constraint.value.copy() 
+
+                variable_that_is_linearly_mapped_to = constraint
+                variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
+                                                                    +variable_that_is_linearly_mapped_to.name
+                for state_name, declared_state in self.declared_states.items():
+                    if declared_state.operation is not None:
+                        state_dict_name = declared_state.operation.name+'.'+state_name
+                    else:
+                        state_dict_name = state_name
+
+                    vectors_for_constraints += self.linear_derivatives[
+                        (variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)].dot(outputs[state_name])
+                    # vectors_for_constraints += self.linear_derivatives[
+                    #     (constraint_name,state_name)].dot(outputs[state_name])
+
+                constraint_values[constraint_name] = vectors_for_constraints - inputs[constraint_name]
+
+                nonlinear_derivative = np.eye((constraint.shape[0],))
             
             for state_name, state in self.declared_states.items():
                 if declared_state.operation is not None:
                     state_dict_name = declared_state.operation.name+'.'+state_name
                 else:
                     state_dict_name = state_name
-                    
+
                 total_derivatives[(constraint_name,state_name)] = \
                     nonlinear_derivative.dot(
-                        self.linear_derivatives[(constraint_name,state_name)])
-                        # self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)])
+                        # self.linear_derivatives[(constraint_name,state_name)])
+                        self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)])
 
         # NOTE: KEEP THIS METHOD AROUND BEACUSE IT CAN ACCOUNT FOR OTHER NON-FREE DOF PARAMETERS
 
@@ -627,62 +649,96 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
         total_derivatives = {}
         constraint_nonlinear_second_derivatives_dict = {}
         for constraint_name, constraint in self.declared_inputs.items():
-            vectors_for_constraints = constraint.operation.arguments['x'].value.copy()
-            variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
-            variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
-                                                                +variable_that_is_linearly_mapped_to.name
-            for state_name, declared_state in self.declared_states.items():
-                if declared_state.operation is not None:
-                    state_dict_name = declared_state.operation.name+'.'+state_name
-                else:
-                    state_dict_name = state_name
+            if type(constraint.operation) is m3l.Norm:
+                vectors_for_constraints = constraint.operation.arguments['x'].value.copy()
+                variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
+                variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
+                                                                    +variable_that_is_linearly_mapped_to.name
+                for state_name, declared_state in self.declared_states.items():
+                    if declared_state.operation is not None:
+                        state_dict_name = declared_state.operation.name+'.'+state_name
+                    else:
+                        state_dict_name = state_name
 
-                # vectors_for_constraints += self.linear_derivatives[
-                #     (variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)].dot(outputs[state_name])
-                vectors_for_constraints += self.linear_derivatives[
-                    (constraint_name,state_name)].dot(outputs[state_name])
+                    vectors_for_constraints += self.linear_derivatives[
+                        (variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)].dot(outputs[state_name])
+                    # vectors_for_constraints += self.linear_derivatives[
+                    #     (constraint_name,state_name)].dot(outputs[state_name])
+                    
+                nonlinear_operation = constraint.operation
+                nonlinear_operation_simulator = nonlinear_operation.sim
+                nonlinear_operation_simulator['x'] = vectors_for_constraints
+                nonlinear_operation_simulator.run()
+
+                # nonlinear_derivatives[constraint_name] = nonlinear_operation_simulator.compute_totals(of=constraint.name, 
+                #                             wrt='x')[(constraint.name, 'x')]
                 
-            nonlinear_operation = constraint.operation
-            nonlinear_operation_simulator = nonlinear_operation.sim
-            nonlinear_operation_simulator['x'] = vectors_for_constraints
-            nonlinear_operation_simulator.run()
+                # for state_name, state in self.declared_states.items():
+                #     if declared_state.operation is not None:
+                #         state_dict_name = declared_state.operation.name+'.'+state_name
+                #     else:
+                #         state_dict_name = state_name
+                        
+                #     total_derivatives[(constraint_name,state_name)] = \
+                #         nonlinear_derivatives[constraint_name].dot(
+                #             self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)])
+                    
 
-            # nonlinear_derivatives[constraint_name] = nonlinear_operation_simulator.compute_totals(of=constraint.name, 
-            #                             wrt='x')[(constraint.name, 'x')]
+                # Get second derivatives of nonlinear operations
+                nonlinear_derivative_simulator = nonlinear_operation.derivative_sim
+                nonlinear_operation_input_value = vectors_for_constraints
+                nonlinear_derivative_simulator['x'] = nonlinear_operation_input_value
+                nonlinear_derivative_simulator.run()
+
+                nonlinear_derivatives = nonlinear_derivative_simulator[f'd{constraint.name}_dx']
+
+                for state_name, state in self.declared_states.items():
+                    if declared_state.operation is not None:
+                        state_dict_name = declared_state.operation.name+'.'+state_name
+                    else:
+                        state_dict_name = state_name
+                        
+                    total_derivatives[(constraint_name,state_name)] = \
+                        nonlinear_derivatives.dot(
+                            # self.linear_derivatives[(constraint_name,state_name)])
+                            self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)])
+
+                nonlinear_second_derivatives = nonlinear_derivative_simulator.compute_totals(of=f'd{constraint.name}_dx',
+                                                                                            wrt='x')
+                constraint_nonlinear_second_derivatives_dict[constraint_name] = nonlinear_second_derivatives
+
             
-            # for state_name, state in self.declared_states.items():
-            #     if declared_state.operation is not None:
-            #         state_dict_name = declared_state.operation.name+'.'+state_name
-            #     else:
-            #         state_dict_name = state_name
-                    
-            #     total_derivatives[(constraint_name,state_name)] = \
-            #         nonlinear_derivatives[constraint_name].dot(
-            #             self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)])
-                
+            else:   # Assuming the vector itself is the constraint
+                vectors_for_constraints = constraint.value.copy()
+                variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
+                variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
+                                                                    +variable_that_is_linearly_mapped_to.name
+                for state_name, declared_state in self.declared_states.items():
+                    if declared_state.operation is not None:
+                        state_dict_name = declared_state.operation.name+'.'+state_name
+                    else:
+                        state_dict_name = state_name
 
-            # Get second derivatives of nonlinear operations
-            nonlinear_derivative_simulator = nonlinear_operation.derivative_sim
-            nonlinear_operation_input_value = vectors_for_constraints
-            nonlinear_derivative_simulator['x'] = nonlinear_operation_input_value
-            nonlinear_derivative_simulator.run()
+                    vectors_for_constraints += self.linear_derivatives[
+                        (variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)].dot(outputs[state_name])
+                    # vectors_for_constraints += self.linear_derivatives[
+                    #     (constraint_name,state_name)].dot(outputs[state_name])
 
-            nonlinear_derivatives = nonlinear_derivative_simulator[f'd{constraint.name}_dx']
+                    nonlinear_derivatives = np.eye((constraint.shape[0],))
 
-            for state_name, state in self.declared_states.items():
-                if declared_state.operation is not None:
-                    state_dict_name = declared_state.operation.name+'.'+state_name
-                else:
-                    state_dict_name = state_name
-                    
-                total_derivatives[(constraint_name,state_name)] = \
-                    nonlinear_derivatives.dot(
-                        self.linear_derivatives[(constraint_name,state_name)])
-                        # self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)])
+                    for state_name, state in self.declared_states.items():
+                        if declared_state.operation is not None:
+                            state_dict_name = declared_state.operation.name+'.'+state_name
+                        else:
+                            state_dict_name = state_name
+                            
+                        total_derivatives[(constraint_name,state_name)] = \
+                            nonlinear_derivatives.dot(
+                                # self.linear_derivatives[(constraint_name,state_name)])
+                                self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)])
 
-            nonlinear_second_derivatives = nonlinear_derivative_simulator.compute_totals(of=f'd{constraint.name}_dx',
-                                                                                        wrt='x')
-            constraint_nonlinear_second_derivatives_dict[constraint_name] = nonlinear_second_derivatives
+                    constraint_nonlinear_second_derivatives_dict[constraint_name] = np.zeros((constraint.shape[0],  # d2NL
+                                                                                              constraint.shape[0],constraint.shape[0])) # dNL2
 
         ## Use simulator-computed values to assemble/compute the blocks of the Hessian
         # d^2F_dx^2
@@ -733,10 +789,10 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                         +variable_that_is_linearly_mapped_to.name
                     # linear_map_i = computed_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_i)]
                     # linear_map_j = computed_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_j)]
-                    # linear_map_i = self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_i)]
-                    # linear_map_j = self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_j)]
-                    linear_map_i = self.linear_derivatives[(constraint_name, state_name_i)]
-                    linear_map_j = self.linear_derivatives[(constraint_name, state_name_j)]
+                    linear_map_i = self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_i)]
+                    linear_map_j = self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_j)]
+                    # linear_map_i = self.linear_derivatives[(constraint_name, state_name_i)]
+                    # linear_map_j = self.linear_derivatives[(constraint_name, state_name_j)]
 
                     # linear_map_i = self.linear_maps[constraint_name, state_name_i]
                     # linear_map_j = self.linear_maps[constraint_name, state_name_j]
