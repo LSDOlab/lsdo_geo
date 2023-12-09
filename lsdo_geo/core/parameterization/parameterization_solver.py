@@ -300,10 +300,10 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
         self.state_penalties = self.parameters['state_penalties'].copy()
 
         for input_name, input in self.declared_inputs.items():
-            self.add_input(name=input_name, val=input.value)
+            self.add_input(name=input_name, val=input.copy().value)
 
         for state_name, state in self.declared_states.items():
-            self.add_output(name=state_name, shape=state.shape)
+            self.add_output(name=state_name, shape=state.shape, val=state.copy().value)
         for input_name, input in self.declared_inputs.items():
             self.add_output(input_name+'_lagrange_multipliers', shape=input.shape)
 
@@ -340,7 +340,10 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
 
         variable_names = []
         for constraint_name, constraint in self.declared_inputs.items():
-            variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
+            if type(constraint.operation) is m3l.Norm:
+                variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
+            else:   # Assume it is a linear constraint
+                variable_that_is_linearly_mapped_to = constraint
             variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
                                                                 +variable_that_is_linearly_mapped_to.name
             variable_names.append(variable_that_is_linearly_mapped_to_simulator_name)
@@ -564,7 +567,7 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
 
                 constraint_values[constraint_name] = vectors_for_constraints - inputs[constraint_name]
 
-                nonlinear_derivative = np.eye((constraint.shape[0],))
+                nonlinear_derivative = np.eye(constraint.shape[0])
             
             for state_name, state in self.declared_states.items():
                 if declared_state.operation is not None:
@@ -710,7 +713,10 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
             
             else:   # Assuming the vector itself is the constraint
                 vectors_for_constraints = constraint.value.copy()
-                variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
+                # if type(constraint.operation) is m3l.Norm:
+                #     variable_that_is_linearly_mapped_to = constraint.operation.arguments['x']
+                # else:   # Assume it is a linear constraint
+                variable_that_is_linearly_mapped_to = constraint
                 variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
                                                                     +variable_that_is_linearly_mapped_to.name
                 for state_name, declared_state in self.declared_states.items():
@@ -724,7 +730,7 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                     # vectors_for_constraints += self.linear_derivatives[
                     #     (constraint_name,state_name)].dot(outputs[state_name])
 
-                    nonlinear_derivatives = np.eye((constraint.shape[0],))
+                    nonlinear_derivatives = np.eye(constraint.shape[0])
 
                     for state_name, state in self.declared_states.items():
                         if declared_state.operation is not None:
@@ -737,8 +743,8 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                                 # self.linear_derivatives[(constraint_name,state_name)])
                                 self.linear_derivatives[(variable_that_is_linearly_mapped_to_simulator_name,state_dict_name)])
 
-                    constraint_nonlinear_second_derivatives_dict[constraint_name] = np.zeros((constraint.shape[0],  # d2NL
-                                                                                              constraint.shape[0],constraint.shape[0])) # dNL2
+                    nonlinear_second_derivatives = np.zeros((constraint.shape[0],constraint.shape[0],constraint.shape[0]))
+                    constraint_nonlinear_second_derivatives_dict[constraint_name] = {('d'+constraint.name+'_dx','x'): nonlinear_second_derivatives}
 
         ## Use simulator-computed values to assemble/compute the blocks of the Hessian
         # d^2F_dx^2
@@ -784,7 +790,12 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
                     # d2NL_dx2 = d2NL_dx2.reshape((constraint_lagrange_multipliers.shape[0], declared_state_i.shape[0], declared_state_j.shape[0]))
                     d2NL_dx2 = d2NL_dx2.reshape((constraint_lagrange_multipliers.shape[0], 3, 3))   # NOTE: HARDCODED FOR NORM (x.shape)
 
-                    variable_that_is_linearly_mapped_to = constraint_value.operation.arguments['x']
+                    if type(constraint_value.operation) is m3l.Norm:
+                        variable_that_is_linearly_mapped_to = constraint_value.operation.arguments['x']
+                    else:  # Assume it is a linear constraint
+                        variable_that_is_linearly_mapped_to = constraint_value
+
+                    # variable_that_is_linearly_mapped_to = constraint_value.operation.arguments['x']
                     variable_that_is_linearly_mapped_to_simulator_name = variable_that_is_linearly_mapped_to.operation.name+'.'\
                         +variable_that_is_linearly_mapped_to.name
                     # linear_map_i = computed_derivatives[(variable_that_is_linearly_mapped_to_simulator_name, state_simulator_name_i)]
@@ -813,8 +824,8 @@ class GeometryParameterizationSolverOperation(csdl.CustomImplicitOperation):
         # Assigning the off-block-diagonal entries of the Hessian
         for state_name, state in self.declared_states.items():
             for constraint_name, constraint in self.declared_inputs.items():
-                derivatives[state_name, constraint_name+'_lagrange_multipliers'] = dc_dx[constraint_name, state_name]
-                derivatives[constraint_name+'_lagrange_multipliers', state_name] = dc_dx[constraint_name, state_name].T
+                derivatives[state_name, constraint_name+'_lagrange_multipliers'] = dc_dx[constraint_name, state_name].T
+                derivatives[constraint_name+'_lagrange_multipliers', state_name] = dc_dx[constraint_name, state_name]
         # Assigning the lower-right block of the Hessian
         for constraint_name_i, constraint_i in self.declared_inputs.items():
             for constraint_name_j, constraint_j in self.declared_inputs.items():
