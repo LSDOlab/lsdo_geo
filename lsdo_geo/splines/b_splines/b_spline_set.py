@@ -1611,7 +1611,7 @@ if __name__ == "__main__":
     projected_points1 = b_spline_set.project(np.array([[0.2, 1., 10.], [0.5, 1., 1.]]), plot=True, direction=np.array([0., 0., -1.]))
     projected_points2 = b_spline_set.project(np.array([[0.2, 0., 1.], [0.5, 1., 1.]]), plot=True, max_iterations=100)
 
-    print('hi')
+    # print('hi')
 
 
 
