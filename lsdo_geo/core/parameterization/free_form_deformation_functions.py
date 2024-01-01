@@ -36,6 +36,7 @@ def construct_ffd_block_around_entities(name:str, entities:list[Union[np.ndarray
                                                              num_coefficients=num_coefficients, order=order, knot_vectors=None,
                                                              num_parametric_dimensions=num_physical_dimensions, # NOTE: THIS MIGHT NOT WORK?
                                                              num_physical_dimensions=num_physical_dimensions)
+    b_spline_hyper_volume.coefficients.name = entities[0].name + '_ffd_block_coefficients'
     
     ffd_block = FFDBlock(name=name, space=b_spline_hyper_volume.space, coefficients=b_spline_hyper_volume.coefficients,
                          num_physical_dimensions=num_physical_dimensions, embedded_entities=entities)
