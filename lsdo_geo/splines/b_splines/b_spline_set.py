@@ -1080,11 +1080,11 @@ class BSplineSet(m3l.Function):
             raise ValueError('The B-splines must be a list of strings.')
         
         if type(axis_origin) is np.ndarray:
-            axis_origin = m3l.Variable(name='axis_origin', shape=axis_origin.shape, value=axis_origin)
+            axis_origin = m3l.Variable(shape=axis_origin.shape, value=axis_origin)
         if type(axis_vector) is np.ndarray:
-            axis_vector = m3l.Variable(name='axis_vector', shape=axis_vector.shape, value=axis_vector)
+            axis_vector = m3l.Variable(shape=axis_vector.shape, value=axis_vector)
         if type(angles) is np.ndarray:
-            angles = m3l.Variable(name='angles', shape=angles.shape, value=angles)
+            angles = m3l.Variable(shape=angles.shape, value=angles)
 
         point_indices_list = []
         for i in range(len(b_splines)):
