@@ -244,7 +244,7 @@ class BSplineSet(m3l.Function):
         indices = np.hstack(indices)
         self.coefficients[indices] = coefficients
 
-        return self.coefficients.copy()
+        # return self.coefficients.copy()
 
 
     # def evaluate(self, b_spline_name:str, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> m3l.Variable:
@@ -296,7 +296,7 @@ class BSplineSet(m3l.Function):
         else:
             coefficients = self.coefficients
 
-        output = m3l.matvec(evaluation_map, coefficients)
+        output = m3l.matvec(evaluation_map, coefficients.copy())
         # matvec_operation = m3l.MatVec()
         # output = matvec_operation.evaluate(evaluation_map, coefficients)
 

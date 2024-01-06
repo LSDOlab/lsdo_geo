@@ -5,14 +5,11 @@ from lsdo_geo.core.geometry.geometry_functions import import_geometry
 import m3l
 import numpy as np
 from python_csdl_backend import Simulator
-from caddee import GEOMETRY_FILES_FOLDER
-import lsdo_geo as lg
-from caddee.api import make_rotor_mesh
 # t02 = time.time()
 # print(t02-t01)
 
 t1 = time.time()
-geometry = lg.import_geometry(GEOMETRY_FILES_FOLDER / 'LPC_final_custom_blades.stp', parallelize=True)
+geometry = import_geometry('lsdo_geo/splines/b_splines/sample_geometries/lift_plus_cruise_final.stp', parallelize=False)
 t2 = time.time()
 geometry.refit(parallelize=True)
 t3 = time.time()
@@ -161,9 +158,6 @@ fro_boom = geometry.declare_component(component_name='fro_boom', b_spline_search
 fro_components = [fro_disk, fro_blade_1, fro_blade_2, fro_hub]
 lift_rotor_related_components = [rlo_components, rli_components, rri_components, rro_components, 
                                  flo_components, fli_components, fri_components, fro_components]
-
-boom_components = [rlo_boom, rli_boom, rri_boom, rro_boom, flo_boom, fli_boom, fri_boom, fro_boom]
-
 # endregion
 
 # region Defining key points
@@ -225,264 +219,28 @@ flo_disk_center_on_wing = wing.project(flo_disk_pt)
 fli_disk_center_on_wing = wing.project(fli_disk_pt)
 fri_disk_center_on_wing = wing.project(fri_disk_pt)
 fro_disk_center_on_wing = wing.project(fro_disk_pt)
-
-boom_fro = fro_boom.project(fro_boom_pt)
-boom_fri = fri_boom.project(fri_boom_pt)
-boom_flo = flo_boom.project(flo_boom_pt)
-boom_fli = fli_boom.project(fli_boom_pt)
-boom_rro = rro_boom.project(rro_boom_pt)
-boom_rri = rri_boom.project(rri_boom_pt)
-boom_rli = rli_boom.project(rli_boom_pt)
-boom_rlo = rlo_boom.project(rlo_boom_pt)
-
-wing_boom_fro = wing.project(fro_boom_pt)
-wing_boom_fri = wing.project(fri_boom_pt)
-wing_boom_flo = wing.project(flo_boom_pt)
-wing_boom_fli = wing.project(fli_boom_pt)
-wing_boom_rro = wing.project(rro_boom_pt)
-wing_boom_rri = wing.project(rri_boom_pt)
-wing_boom_rli = wing.project(rli_boom_pt)
-wing_boom_rlo = wing.project(rlo_boom_pt)
-
-fuselage_nose = np.array([2.464, 0., 5.113])
-fuselage_rear = np.array([31.889, 0., 7.798])
-fuselage_nose_points_parametric = fuselage.project(fuselage_nose, grid_search_density_parameter=20)
-fueslage_rear_points_parametric = fuselage.project(fuselage_rear)
-fuselage_rear_point_on_pusher_disk_parametric = pp_disk.project(fuselage_rear)
-
-# endregion
-
-# region rotor meshes
-num_radial = 30
-num_spanwise_vlm_rotor = 8
-num_chord_vlm_rotor = 2
-
-# Pusher prop
-pp_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=pp_disk,
-    origin=np.array([32.625, 0., 7.79]),
-    y1=np.array([31.94, 0.00, 3.29]),
-    y2=np.array([31.94, 0.00, 12.29]),
-    z1=np.array([31.94, -4.50, 7.78]),
-    z2=np.array([31.94, 4.45, 7.77]),
-    create_disk_mesh=False,
-    plot=False,
-)
-
-
-# Rear left outer
-rlo_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=rlo_disk,
-    origin=np.array([19.2, -18.75, 9.01]),
-    y1=np.array([19.2, -13.75, 9.01]),
-    y2=np.array([19.2, -23.75, 9.01]),
-    z1=np.array([14.2, -18.75, 9.01]),
-    z2=np.array([24.2, -18.75, 9.01]),
-    create_disk_mesh=False,
-    plot=False,
-)
-
-rlo_disk_origin_para = rlo_disk.project(np.array([19.2, -18.75, 9.01]))
-rlo_disk_y1_para = rlo_disk.project(np.array([19.2, -13.75, 9.01]))
-rlo_disk_y2_para = rlo_disk.project(np.array([19.2, -23.75, 9.01]))
-rlo_disk_z1_para = rlo_disk.project(np.array([14.2, -18.75, 9.01]))
-rlo_disk_z2_para = rlo_disk.project(np.array([24.2, -18.75, 9.01]))
-
-rlo_r1 = m3l.norm((geometry.evaluate(rlo_disk_y1_para) - geometry.evaluate(rlo_disk_y2_para))) 
-rlo_r2 = m3l.norm((geometry.evaluate(rlo_disk_z1_para) - geometry.evaluate(rlo_disk_z2_para)))
-
-# Rear right outer 
-rro_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=rro_disk,
-    origin=np.array([19.2, 18.75, 9.01]),
-    y1=np.array([19.2, 23.75, 9.01]),
-    y2=np.array([19.2, 13.75, 9.01]),
-    z1=np.array([14.2, 18.75, 9.01]),
-    z2=np.array([24.2, 18.75, 9.01]),
-    create_disk_mesh=False,
-    plot=False,
-)
-
-rro_disk_origin_para = rro_disk.project(np.array([19.2, 18.75, 9.01]))
-rro_disk_y1_para = rro_disk.project(np.array([19.2, 23.75, 9.01]))
-rro_disk_y2_para = rro_disk.project(np.array([19.2, 13.75, 9.01]))
-rro_disk_z1_para = rro_disk.project(np.array([14.2, 18.75, 9.01]))
-rro_disk_z2_para = rro_disk.project(np.array([24.2, 18.75, 9.01]))
-
-rro_r1 = m3l.norm((geometry.evaluate(rro_disk_y1_para) - geometry.evaluate(rro_disk_y2_para))) 
-rro_r2 = m3l.norm((geometry.evaluate(rro_disk_z1_para) - geometry.evaluate(rro_disk_z2_para)))
-
-# Front left outer 
-flo_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=flo_disk,
-    origin=np.array([5.07, -18.75, 6.73]),
-    y1=np.array([5.070, -13.750, 6.730]),
-    y2=np.array([5.070, -23.750, 6.730]),
-    z1=np.array([0.070, -18.750, 6.730]),
-    z2=np.array([10.070, -18.750, 6.730]),
-    create_disk_mesh=False,
-    plot=False,
-)
-
-flo_disk_origin_para = flo_disk.project(np.array([5.07, -18.75, 6.73]))
-flo_disk_y1_para = flo_disk.project(np.array([5.070, -13.750, 6.730]))
-flo_disk_y2_para = flo_disk.project(np.array([5.070, -23.750, 6.730]))
-flo_disk_z1_para = flo_disk.project(np.array([0.070, -18.750, 6.730]))
-flo_disk_z2_para = flo_disk.project(np.array([10.070, -18.750, 6.730]))
-
-flo_r1 = m3l.norm((geometry.evaluate(flo_disk_y1_para) - geometry.evaluate(flo_disk_y2_para))) 
-flo_r2 = m3l.norm((geometry.evaluate(flo_disk_z1_para) - geometry.evaluate(flo_disk_z2_para)))
-
-# Front right outer 
-fro_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=fro_disk,
-    origin=np.array([5.07, 18.75, 6.73]),
-    y1=np.array([5.070, 23.750, 6.730]),
-    y2=np.array([5.070, 13.750, 6.730]),
-    z1=np.array([0.070, 18.750, 6.730]),
-    z2=np.array([10.070, 18.750, 6.730]),
-    create_disk_mesh=False,
-    plot=False,
-)
-
-fro_disk_origin_para = fro_disk.project(np.array([5.07, 18.75, 6.73]))
-fro_disk_y1_para = fro_disk.project(np.array([5.070, 23.750, 6.730]))
-fro_disk_y2_para = fro_disk.project(np.array([5.070, 13.750, 6.730]))
-fro_disk_z1_para = fro_disk.project(np.array([0.070, 18.750, 6.730]))
-fro_disk_z2_para = fro_disk.project(np.array([10.070, 18.750, 6.730]))
-
-fro_r1 = m3l.norm((geometry.evaluate(fro_disk_y1_para) - geometry.evaluate(fro_disk_y2_para))) 
-fro_r2 = m3l.norm((geometry.evaluate(fro_disk_z1_para) - geometry.evaluate(fro_disk_z2_para)))
-
-# Rear left inner
-rli_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=rli_disk,
-    origin=np.array([18.760, -8.537, 9.919]),
-    y1=np.array([18.760, -3.499, 9.996]),
-    y2=np.array([18.760, -13.401, 8.604]),
-    z1=np.array([13.760, -8.450, 9.300]),
-    z2=np.array([23.760, -8.450, 9.300]),
-    create_disk_mesh=False,
-    plot=False,
-)
-
-rli_disk_origin_para = rli_disk.project(np.array([18.760, -8.537, 9.919]))
-rli_disk_y1_para = rli_disk.project(np.array([18.760, -3.499, 9.996]))
-rli_disk_y2_para = rli_disk.project(np.array([18.760, -13.401, 8.604]))
-rli_disk_z1_para = rli_disk.project(np.array([13.760, -8.450, 9.30]))
-rli_disk_z2_para = rli_disk.project(np.array([23.760, -8.450, 9.300]))
-
-rli_r1 = m3l.norm((geometry.evaluate(rli_disk_y1_para) - geometry.evaluate(rli_disk_y2_para))) 
-rli_r2 = m3l.norm((geometry.evaluate(rli_disk_z1_para) - geometry.evaluate(rli_disk_z2_para)))
-
-# Rear right inner
-rri_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=rri_disk,
-    origin=np.array([18.760, 8.537, 9.919]),
-    y1=np.array([18.760, 13.401, 8.604]),
-    y2=np.array([18.760, 3.499, 9.996]),
-    z1=np.array([13.760, 8.450, 9.300]),
-    z2=np.array([23.760, 8.450, 9.300]),
-    create_disk_mesh=False,
-    plot=False,
-)
-
-rri_disk_origin_para = rri_disk.project(np.array([18.760, 8.537, 9.919]))
-rri_disk_y1_para = rri_disk.project(np.array([18.760, 13.401, 8.60]))
-rri_disk_y2_para = rri_disk.project(np.array([18.760, 3.499, 9.996]))
-rri_disk_z1_para = rri_disk.project(np.array([13.760, 8.450, 9.300]))
-rri_disk_z2_para = rri_disk.project(np.array([23.760, 8.450, 9.300]))
-
-rri_r1 = m3l.norm((geometry.evaluate(rri_disk_y1_para) - geometry.evaluate(rri_disk_y2_para))) 
-rri_r2 = m3l.norm((geometry.evaluate(rri_disk_z1_para) - geometry.evaluate(rri_disk_z2_para)))
-
-# Front left inner
-fli_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=fli_disk,
-    origin=np.array([4.630, -8.217, 7.659]),
-    y1=np.array([4.630, -3.179, 7.736]),
-    y2=np.array([4.630, -13.081, 6.344]),
-    z1=np.array([-0.370, -8.130, 7.040]),
-    z2=np.array([9.630, -8.130, 7.040]),
-    create_disk_mesh=False,
-    plot=False,
-)
-
-fli_disk_origin_para = fli_disk.project(np.array([4.630, -8.217, 7.659]))
-fli_disk_y1_para = fli_disk.project(np.array([4.630, -3.179, 7.736]))
-fli_disk_y2_para = fli_disk.project(np.array([4.630, -13.081, 6.344]))
-fli_disk_z1_para = fli_disk.project(np.array([-0.370, -8.130, 7.040]))
-fli_disk_z2_para = fli_disk.project(np.array([9.630, -8.130, 7.040]))
-
-fli_r1 = m3l.norm((geometry.evaluate(fli_disk_y1_para) - geometry.evaluate(fli_disk_y2_para))/2) 
-fli_r2 = m3l.norm((geometry.evaluate(fli_disk_z1_para) - geometry.evaluate(fli_disk_z2_para))/2)
-
-# Front right inner
-fri_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=fri_disk,
-    origin=np.array([4.630, 8.217, 7.659]), 
-    y1=np.array([4.630, 13.081, 6.344]),
-    y2=np.array([4.630, 3.179, 7.736]),
-    z1=np.array([-0.370, 8.130, 7.040]),
-    z2=np.array([9.630, 8.130, 7.040]),
-    create_disk_mesh=False,
-    plot=False,
-)
-
-fri_disk_origin_para = fri_disk.project(np.array([4.630, 8.217, 7.659]))
-fri_disk_y1_para = fri_disk.project(np.array([4.630, 13.081, 6.344]))
-fri_disk_y2_para = fri_disk.project(np.array([4.630, 3.179, 7.736]))
-fri_disk_z1_para = fri_disk.project(np.array([-0.370, 8.130, 7.040]))
-fri_disk_z2_para = fri_disk.project(np.array([9.630, 8.130, 7.04]))
-
-fri_r1 = m3l.norm((geometry.evaluate(fri_disk_y1_para) - geometry.evaluate(fri_disk_y2_para))/2) 
-fri_r2 = m3l.norm((geometry.evaluate(fri_disk_z1_para) - geometry.evaluate(fri_disk_z2_para))/2)
-
-radius_1_list = [rlo_r1, rli_r1, rri_r1, rro_r1,
-                 flo_r1, fli_r1, fri_r1, fro_r1]
-
-radius_2_list = [rlo_r2, rli_r2, rri_r2, rro_r2,
-                 flo_r2, fli_r2, fri_r2, fro_r2]
 # endregion
 
 # region Projection for meshes
 num_spanwise_vlm = 17
 num_chordwise_vlm = 5
 leading_edge_line_parametric = wing.project(np.linspace(np.array([8.356, -26., 7.618]), np.array([8.356, 26., 7.618]), num_spanwise_vlm), 
-                                 direction=np.array([0., 0., -1.]), grid_search_density_parameter=20.)
+                                 direction=np.array([0., 0., -1.]))
 trailing_edge_line_parametric = wing.project(np.linspace(np.array([15.4, -25.250, 7.5]), np.array([15.4, 25.250, 7.5]), num_spanwise_vlm), 
-                                  direction=np.array([0., 0., -1.]), grid_search_density_parameter=20.)
+                                  direction=np.array([0., 0., -1.]))
 leading_edge_line = geometry.evaluate(leading_edge_line_parametric)
 trailing_edge_line = geometry.evaluate(trailing_edge_line_parametric)
 chord_surface = m3l.linspace(leading_edge_line, trailing_edge_line, num_chordwise_vlm)
 upper_surface_wireframe_parametric = wing.project(chord_surface.value.reshape((num_chordwise_vlm,num_spanwise_vlm,3))+np.array([0., 0., 1.]), 
-                                       direction=np.array([0., 0., -1.]), plot=False, grid_search_density_parameter=40.)
+                                       direction=np.array([0., 0., -1.]), plot=False)
 lower_surface_wireframe_parametric = wing.project(chord_surface.value.reshape((num_chordwise_vlm,num_spanwise_vlm,3))+np.array([0., 0., -1.]), 
-                                       direction=np.array([0., 0., 1.]), plot=False, grid_search_density_parameter=40.)
+                                       direction=np.array([0., 0., 1.]), plot=False)
 upper_surface_wireframe = geometry.evaluate(upper_surface_wireframe_parametric)
 lower_surface_wireframe = geometry.evaluate(lower_surface_wireframe_parametric)
 camber_surface = m3l.linspace(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((num_chordwise_vlm, num_spanwise_vlm, 3))
 # geometry.plot_meshes([camber_surface])
 # endregion
-# exit()
+
 # region Parameterization
 from lsdo_geo.core.parameterization.free_form_deformation_functions import construct_ffd_block_around_entities
 from lsdo_geo.core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization
@@ -507,8 +265,6 @@ wing_ffd_block_sectional_parameterization = VolumeSectionalParameterization(name
 wing_ffd_block_sectional_parameterization.add_sectional_stretch(name='sectional_wing_chord_stretch', axis=0)
 wing_ffd_block_sectional_parameterization.add_sectional_translation(name='sectional_wingspan_stretch', axis=1)
 # wing_ffd_block_sectional_parameterization.add_sectional_rotation(name='sectional_wing_twist', axis=1)
-wing_ffd_block_sectional_parameterization.add_sectional_translation(name='sectional_wing_translation_x', axis=0)
-wing_ffd_block_sectional_parameterization.add_sectional_translation(name='sectional_wing_translation_z', axis=2)
 
 wing_chord_stretch_coefficients = m3l.Variable(name='wing_chord_stretch_coefficients', shape=(3,), value=np.array([0., 0., 0.]))
 wing_chord_stretch_b_spline = bsp.BSpline(name='wing_chord_stretch_b_spline', space=linear_b_spline_curve_3_dof_space, 
@@ -522,18 +278,9 @@ wing_wingspan_stretch_b_spline = bsp.BSpline(name='wing_wingspan_stretch_b_splin
 # wing_twist_b_spline = bsp.BSpline(name='wing_twist_b_spline', space=cubic_b_spline_curve_5_dof_space,
 #                                           coefficients=wing_twist_coefficients, num_physical_dimensions=1)
 
-wing_translation_x_coefficients = m3l.Variable(name='wing_translation_x_coefficients', shape=(1,), value=np.array([0.]))
-wing_translation_x_b_spline = bsp.BSpline(name='wing_translation_x_b_spline', space=constant_b_spline_curve_1_dof_space,
-                                          coefficients=wing_translation_x_coefficients, num_physical_dimensions=1)
-
-wing_translation_z_coefficients = m3l.Variable(name='wing_translation_z_coefficients', shape=(1,), value=np.array([0.]))
-wing_translation_z_b_spline = bsp.BSpline(name='wing_translation_z_b_spline', space=constant_b_spline_curve_1_dof_space,
-                                          coefficients=wing_translation_z_coefficients, num_physical_dimensions=1)
-
 parameterization_solver.declare_state(name='wing_chord_stretch_coefficients', state=wing_chord_stretch_coefficients)
 parameterization_solver.declare_state(name='wing_wingspan_stretch_coefficients', state=wing_wingspan_stretch_coefficients, penalty_factor=1.e3)
-parameterization_solver.declare_state(name='wing_translation_x_coefficients', state=wing_translation_x_coefficients)
-parameterization_solver.declare_state(name='wing_translation_z_coefficients', state=wing_translation_z_coefficients)
+
 # endregion
 
 # region Horizontal Stabilizer setup
@@ -574,6 +321,19 @@ parameterization_solver.declare_state(name='h_tail_translation_x_coefficients', 
 parameterization_solver.declare_state(name='h_tail_translation_z_coefficients', state=h_tail_translation_z_coefficients)
 # endregion
 
+# # # region Vertical Stabilizer setup
+# # v_tail_ffd_block = construct_ffd_block_around_entities('v_tail_ffd_block', entities=v_tail, num_coefficients=(2,2,2), order=(2,2,2))
+# # v_tail_ffd_block_sectional_parameterization = VolumeSectionalParameterization(name='v_tail_sectional_parameterization',
+# #                                                                             parameterized_points=v_tail_ffd_block.coefficients,
+# #                                                                             parameterized_points_shape=v_tail_ffd_block.coefficients_shape,
+# #                                                                             principal_parametric_dimension=0)
+# # v_tail_ffd_block_sectional_parameterization.add_sectional_translation(name='v_tail_stretch', axis=0)
+
+# # v_tail_stretch_coefficients = m3l.Variable(name='v_tail_stretch_coefficients', shape=(2,), value=np.array([0., 0.]))
+# # v_tail_stretch_b_spline = bsp.BSpline(name='v_tail_stretch_b_spline', space=linear_b_spline_curve_2_dof_space, 
+# #                                           coefficients=v_tail_stretch_coefficients, num_physical_dimensions=1)
+# # # endregion
+
 # region Fuselage setup
 fuselage_ffd_block = construct_ffd_block_around_entities('fuselage_ffd_block', entities=[fuselage, nose_hub], num_coefficients=(2,2,2), order=(2,2,2))
 fuselage_ffd_block.coefficients.name = 'fuselage_ffd_block_coefficients'
@@ -591,53 +351,41 @@ parameterization_solver.declare_state(name='fuselage_stretch_coefficients', stat
 # endregion
 
 # region Lift Rotors setup
-def add_rigid_body_translation(components_name, components, principal_parametric_dimension=0, change_radius=False):
+def add_rigid_body_translation(components_name, components):
     components_ffd_block = construct_ffd_block_around_entities(f'{components_name}_ffd_block', entities=components, num_coefficients=(2,2,2),
                                                                order=(2,2,2))
     components_ffd_block.coefficients.name = components_name + '_coefficients'
     components_ffd_block_sectional_parameterization = VolumeSectionalParameterization(name=f'{components_name}_sectional_parameterization',
                                                                                 parameterized_points=components_ffd_block.coefficients,
                                                                                 parameterized_points_shape=components_ffd_block.coefficients_shape,
-                                                                                principal_parametric_dimension=principal_parametric_dimension)
+                                                                                principal_parametric_dimension=0)
     components_ffd_block_sectional_parameterization.add_sectional_translation(name=f'{components_name}_translation_x', axis=0)
     components_ffd_block_sectional_parameterization.add_sectional_translation(name=f'{components_name}_translation_y', axis=1)
     components_ffd_block_sectional_parameterization.add_sectional_translation(name=f'{components_name}_translation_z', axis=2)
 
-    if change_radius is True:
-        components_ffd_block_sectional_parameterization.add_sectional_stretch(name=f'{components_name}_stretch_y', axis=1)
-
-        components_translation_x_coefficients = m3l.Variable(name=f'{components_name}_translation_x_coefficients', shape=(2,), value=np.array([0., 0.]))
-        components_translation_x_b_spline = bsp.BSpline(name=f'{components_name}_translation_x_b_spline', space=linear_b_spline_curve_2_dof_space, 
-                                                coefficients=components_translation_x_coefficients, num_physical_dimensions=1)
-    
-        components_stretch_y_coefficients = m3l.Variable(name=f'{components_name}_stretch_y_coefficients', shape=(1, ), value=np.array([0.]))
-        components_stretch_y_b_spline = bsp.BSpline(name=f'{components_name}_stretch_y_b_spline', space=constant_b_spline_curve_1_dof_space, 
-                                                    coefficients=components_stretch_y_coefficients, num_physical_dimensions=1)
-    else:
-        components_translation_x_coefficients = m3l.Variable(name=f'{components_name}_translation_x_coefficients', shape=(1,), value=np.array([0.]))
-        components_translation_x_b_spline = bsp.BSpline(name=f'{components_name}_translation_x_b_spline', space=constant_b_spline_curve_1_dof_space, 
-                                                coefficients=components_translation_x_coefficients, num_physical_dimensions=1)
-    
+    components_translation_x_coefficients = m3l.Variable(name=f'{components_name}_translation_x_coefficients', shape=(1,), value=np.array([0.]))
+    components_translation_x_b_spline = bsp.BSpline(name=f'{components_name}_translation_x_b_spline', space=constant_b_spline_curve_1_dof_space, 
+                                            coefficients=components_translation_x_coefficients, num_physical_dimensions=1)
     components_translation_y_coefficients = m3l.Variable(name=f'{components_name}_translation_y_coefficients', shape=(1,), value=np.array([0.]))
     components_translation_y_b_spline = bsp.BSpline(name=f'{components_name}_translation_y_b_spline', space=constant_b_spline_curve_1_dof_space, 
                                             coefficients=components_translation_y_coefficients, num_physical_dimensions=1)
-    
     components_translation_z_coefficients = m3l.Variable(name=f'{components_name}_translation_z_coefficients', shape=(1,), value=np.array([0.]))
     components_translation_z_b_spline = bsp.BSpline(name=f'{components_name}_translation_z_b_spline', space=constant_b_spline_curve_1_dof_space, 
                                             coefficients=components_translation_z_coefficients, num_physical_dimensions=1)
 
-    if change_radius is False:
-        return [components_translation_x_b_spline, components_translation_y_b_spline, components_translation_z_b_spline], \
-            components_ffd_block_sectional_parameterization, components_ffd_block
-    else:
-        return [components_translation_x_b_spline, components_translation_y_b_spline, components_translation_z_b_spline, components_stretch_y_b_spline], \
-            components_ffd_block_sectional_parameterization, components_ffd_block
+    return [components_translation_x_b_spline, components_translation_y_b_spline, components_translation_z_b_spline], \
+        components_ffd_block_sectional_parameterization, components_ffd_block
 
 lift_rotor_parameterization_objects = {}
 for component_set in lift_rotor_related_components:
     components_name = component_set[0].name[:3] + '_lift_rotor_components'
+    # for component in component_set:
+    #     component_parameterization_b_splines, component_sectional_parameterization, component_ffd_block = add_rigid_body_translation(component)
+    #     lift_rotor_parameterization_objects[f'{component.name}_parameterization_b_splines'] = component_parameterization_b_splines
+    #     lift_rotor_parameterization_objects[f'{component.name}_sectional_parameterization'] = component_sectional_parameterization
+    #     lift_rotor_parameterization_objects[f'{component.name}_ffd_block'] = component_ffd_block
     component_parameterization_b_splines, component_sectional_parameterization, component_ffd_block = add_rigid_body_translation(
-                                                                                                                components_name, component_set, change_radius=True)
+                                                                                                                components_name, component_set)
     lift_rotor_parameterization_objects[f'{components_name}_parameterization_b_splines'] = component_parameterization_b_splines
     lift_rotor_parameterization_objects[f'{components_name}_sectional_parameterization'] = component_sectional_parameterization
     lift_rotor_parameterization_objects[f'{components_name}_ffd_block'] = component_ffd_block
@@ -645,81 +393,27 @@ for component_set in lift_rotor_related_components:
     parameterization_solver.declare_state(name=f'{components_name}_translation_x_coefficients', state=component_parameterization_b_splines[0].coefficients)
     parameterization_solver.declare_state(name=f'{components_name}_translation_y_coefficients', state=component_parameterization_b_splines[1].coefficients)
     parameterization_solver.declare_state(name=f'{components_name}_translation_z_coefficients', state=component_parameterization_b_splines[2].coefficients)
-    parameterization_solver.declare_state(name=f'{components_name}_stretch_y_coefficients', state=component_parameterization_b_splines[3].coefficients)
 
-# endregion
-
-# region booms
-boom_parameterization_objects = {}
-for component in boom_components:
-    components_name = component.name
-    component_parameterization_b_splines, component_sectional_parameterization, component_ffd_block = add_rigid_body_translation(
-                                                                                                                components_name, component)
-    boom_parameterization_objects[f'{components_name}_parameterization_b_splines'] = component_parameterization_b_splines
-    boom_parameterization_objects[f'{components_name}_sectional_parameterization'] = component_sectional_parameterization
-    boom_parameterization_objects[f'{components_name}_ffd_block'] = component_ffd_block
-
-    parameterization_solver.declare_state(name=f'{components_name}_translation_x_coefficients', state=component_parameterization_b_splines[0].coefficients)
-    parameterization_solver.declare_state(name=f'{components_name}_translation_y_coefficients', state=component_parameterization_b_splines[1].coefficients)
-    parameterization_solver.declare_state(name=f'{components_name}_translation_z_coefficients', state=component_parameterization_b_splines[2].coefficients)
-# endregion
-
-# region pusher
-pusher_parameterization_objects = {}
-component_set = pp_components
-components_name = component_set[0].name[:3] + '_pusher_rotor_components'
-component_parameterization_b_splines, component_sectional_parameterization, component_ffd_block = add_rigid_body_translation(
-                                                                                                    components_name, component_set)
-pusher_parameterization_objects[f'{components_name}_parameterization_b_splines'] = component_parameterization_b_splines
-pusher_parameterization_objects[f'{components_name}_sectional_parameterization'] = component_sectional_parameterization
-pusher_parameterization_objects[f'{components_name}_ffd_block'] = component_ffd_block
-
-parameterization_solver.declare_state(name=f'{components_name}_translation_x_coefficients', state=component_parameterization_b_splines[0].coefficients)
-parameterization_solver.declare_state(name=f'{components_name}_translation_y_coefficients', state=component_parameterization_b_splines[1].coefficients)
-parameterization_solver.declare_state(name=f'{components_name}_translation_z_coefficients', state=component_parameterization_b_splines[2].coefficients)
-# endregion
-
-# region Vertical Stabilizer setup
-vtail_parameterization_objects = {}
-component_set = v_tail
-components_name = v_tail.name
-component_parameterization_b_splines, component_sectional_parameterization, component_ffd_block = add_rigid_body_translation(
-                                                                                                    components_name, component_set, principal_parametric_dimension=2)
-vtail_parameterization_objects[f'{components_name}_parameterization_b_splines'] = component_parameterization_b_splines
-vtail_parameterization_objects[f'{components_name}_sectional_parameterization'] = component_sectional_parameterization
-vtail_parameterization_objects[f'{components_name}_ffd_block'] = component_ffd_block
-
-parameterization_solver.declare_state(name=f'{components_name}_translation_x_coefficients', state=component_parameterization_b_splines[0].coefficients)
-parameterization_solver.declare_state(name=f'{components_name}_translation_y_coefficients', state=component_parameterization_b_splines[1].coefficients)
-parameterization_solver.declare_state(name=f'{components_name}_translation_z_coefficients', state=component_parameterization_b_splines[2].coefficients)
 # endregion
 
 # endregion
 
 # region Parameterization Solver Setup Evaluations
 
-coefficients_list = []
-b_spline_names_list = []
 # region Wing Parameterization Evaluation for Parameterization Solver
 section_parametric_coordinates = np.linspace(0., 1., wing_ffd_block_sectional_parameterization.num_sections).reshape((-1,1))
 sectional_wing_chord_stretch = wing_chord_stretch_b_spline.evaluate(section_parametric_coordinates)
 sectional_wing_wingspan_stretch = wing_wingspan_stretch_b_spline.evaluate(section_parametric_coordinates)
 # sectional_wing_twist = wing_twist_b_spline.evaluate(section_parametric_coordinates)
-sectional_wing_translation_x = wing_translation_x_b_spline.evaluate(section_parametric_coordinates)
-sectional_wing_translation_z = wing_translation_z_b_spline.evaluate(section_parametric_coordinates)
 
 sectional_parameters = {
     'sectional_wing_chord_stretch':sectional_wing_chord_stretch,
     'sectional_wingspan_stretch':sectional_wing_wingspan_stretch,
     # 'sectional_wing_twist':sectional_wing_twist,
-    'sectional_wing_translation_x' : sectional_wing_translation_x, 
-    'sectional_wing_translation_z' : sectional_wing_translation_z,
                         }
 
 wing_ffd_block_coefficients = wing_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=False)
 wing_coefficients = wing_ffd_block.evaluate(wing_ffd_block_coefficients, plot=False)
-# coefficients_list.append(wing_coefficients)
-# b_spline_names_list.append(wing.b_spline_names)
 geometry.assign_coefficients(coefficients=wing_coefficients, b_spline_names=wing.b_spline_names)
 # geometry.plot()
 # endregion
@@ -742,9 +436,6 @@ sectional_parameters = {
 
 h_tail_ffd_block_coefficients = h_tail_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=False)
 h_tail_coefficients = h_tail_ffd_block.evaluate(h_tail_ffd_block_coefficients, plot=False)
-
-# coefficients_list.append(h_tail_coefficients)
-# b_spline_names_list.append(h_tail.b_spline_names)
 geometry.assign_coefficients(coefficients=h_tail_coefficients, b_spline_names=h_tail.b_spline_names)
 # geometry.plot()
 # endregion
@@ -759,21 +450,33 @@ fuselage_ffd_block_coefficients = fuselage_ffd_block_sectional_parameterization.
 fuselage_and_nose_hub_coefficients = fuselage_ffd_block.evaluate(fuselage_ffd_block_coefficients, plot=False)
 fuselage_coefficients = fuselage_and_nose_hub_coefficients['fuselage_coefficients']
 nose_hub_coefficients = fuselage_and_nose_hub_coefficients['weird_nose_hub_coefficients']
-
-# coefficients_list.append(fuselage_coefficients)
-# coefficients_list.append(nose_hub_coefficients)
-# b_spline_names_list.append(fuselage.b_spline_names)
-# b_spline_names_list.append(nose_hub.b_spline_names)
 geometry.assign_coefficients(coefficients=fuselage_coefficients, b_spline_names=fuselage.b_spline_names)
 geometry.assign_coefficients(coefficients=nose_hub_coefficients, b_spline_names=nose_hub.b_spline_names)
 # geometry.plot()
 # endregion
 
-
 # region Lift Rotor Evaluation for Parameterization Solver
 for component_set in lift_rotor_related_components:
     components_name = component_set[0].name[:3] + '_lift_rotor_components'
-   
+    # for component in component_set:
+        # component_parameterization_b_splines = lift_rotor_parameterization_objects[f'{component.name}_parameterization_b_splines']
+        # component_sectional_parameterization = lift_rotor_parameterization_objects[f'{component.name}_sectional_parameterization']
+        # component_ffd_block = lift_rotor_parameterization_objects[f'{component.name}_ffd_block']
+
+        # section_parametric_coordinates = np.linspace(0., 1., component_sectional_parameterization.num_sections).reshape((-1,1))
+        # sectional_translation_x = component_parameterization_b_splines[0].evaluate(section_parametric_coordinates)
+        # sectional_translation_y = component_parameterization_b_splines[1].evaluate(section_parametric_coordinates)
+        # sectional_translation_z = component_parameterization_b_splines[2].evaluate(section_parametric_coordinates)
+
+        # sectional_parameters = {
+        #     f'{component.name}_translation_x':sectional_translation_x,
+        #     f'{component.name}_translation_y':sectional_translation_y,
+        #     f'{component.name}_translation_z':sectional_translation_z,
+        #                         }
+        
+        # component_ffd_block_coefficients = component_sectional_parameterization.evaluate(sectional_parameters, plot=True)
+        # component_coefficients = component_ffd_block.evaluate(component_ffd_block_coefficients, plot=True)
+        # geometry.assign_coefficients(coefficients=component_coefficients, b_spline_names=component.b_spline_names)
     component_parameterization_b_splines = lift_rotor_parameterization_objects[f'{components_name}_parameterization_b_splines']
     component_sectional_parameterization = lift_rotor_parameterization_objects[f'{components_name}_sectional_parameterization']
     component_ffd_block = lift_rotor_parameterization_objects[f'{components_name}_ffd_block']
@@ -782,13 +485,11 @@ for component_set in lift_rotor_related_components:
     sectional_translation_x = component_parameterization_b_splines[0].evaluate(section_parametric_coordinates)
     sectional_translation_y = component_parameterization_b_splines[1].evaluate(section_parametric_coordinates)
     sectional_translation_z = component_parameterization_b_splines[2].evaluate(section_parametric_coordinates)
-    sectional_stretch_y = component_parameterization_b_splines[3].evaluate(section_parametric_coordinates)
 
     sectional_parameters = {
         f'{components_name}_translation_x':sectional_translation_x,
         f'{components_name}_translation_y':sectional_translation_y,
         f'{components_name}_translation_z':sectional_translation_z,
-        f'{components_name}_stretch_y':sectional_stretch_y,
                             }
     
     component_ffd_block_coefficients = component_sectional_parameterization.evaluate(sectional_parameters, plot=False)
@@ -797,124 +498,21 @@ for component_set in lift_rotor_related_components:
     blade_1 = component_set[1]
     blade_2 = component_set[2]
     hub = component_set[3]
-
-    # coefficients_list.append(component_coefficients[disk.name+'_coefficients'])
-    # coefficients_list.append(component_coefficients[blade_1.name+'_coefficients'])
-    # coefficients_list.append(component_coefficients[blade_2.name+'_coefficients'])
-    # coefficients_list.append(component_coefficients[hub.name+'_coefficients'])
-    
-    # b_spline_names_list.append(disk.b_spline_names)
-    # b_spline_names_list.append(blade_1.b_spline_names)
-    # b_spline_names_list.append(blade_2.b_spline_names)
-    # b_spline_names_list.append(hub.b_spline_names)
-
+    # component_names = disk.b_spline_names + blade_1.b_spline_names + blade_2.b_spline_names + hub.b_spline_names
+    # component_names = [disk.b_spline_names, blade_1.b_spline_names,  blade_2.b_spline_names,  hub.b_spline_names]
+    # component_coefficients_list = list(component_coefficients.values())
+    # component_coefficients = [component_coefficients_list[0], component_coefficients_list[1], component_coefficients_list[2], 
+    #                           component_coefficients_list[3]]
+    # component_coefficients_list = []
+    # for i in range(len(component_coefficients)):
+    #     component_coefficients_list.extend(list(component_coefficients.values())[i])    
+    # geometry.assign_coefficients(coefficients=component_coefficients_list, b_spline_names=component_names)
     geometry.assign_coefficients(coefficients=component_coefficients[disk.name+'_coefficients'], b_spline_names=disk.b_spline_names)
     geometry.assign_coefficients(coefficients=component_coefficients[blade_1.name+'_coefficients'], b_spline_names=blade_1.b_spline_names)
     geometry.assign_coefficients(coefficients=component_coefficients[blade_2.name+'_coefficients'], b_spline_names=blade_2.b_spline_names)
     geometry.assign_coefficients(coefficients=component_coefficients[hub.name+'_coefficients'], b_spline_names=hub.b_spline_names)
 
 # endregion
-
-# region booms
-for component in boom_components:
-    components_name = component.name
-    component_parameterization_b_splines = boom_parameterization_objects[f'{components_name}_parameterization_b_splines']
-    component_sectional_parameterization = boom_parameterization_objects[f'{components_name}_sectional_parameterization']
-    component_ffd_block = boom_parameterization_objects[f'{components_name}_ffd_block']
-
-    section_parametric_coordinates = np.linspace(0., 1., component_sectional_parameterization.num_sections).reshape((-1,1))
-    sectional_translation_x = component_parameterization_b_splines[0].evaluate(section_parametric_coordinates)
-    sectional_translation_y = component_parameterization_b_splines[1].evaluate(section_parametric_coordinates)
-    sectional_translation_z = component_parameterization_b_splines[2].evaluate(section_parametric_coordinates)
-
-    sectional_parameters = {
-        f'{components_name}_translation_x':sectional_translation_x,
-        f'{components_name}_translation_y':sectional_translation_y,
-        f'{components_name}_translation_z':sectional_translation_z,
-                            }
-    
-    component_ffd_block_coefficients = component_sectional_parameterization.evaluate(sectional_parameters, plot=False)
-    component_coefficients = component_ffd_block.evaluate(component_ffd_block_coefficients, plot=False)
-
-    # coefficients_list.append(component_coefficients)
-    # b_spline_names_list.append(component.b_spline_names)
-
-    geometry.assign_coefficients(coefficients=component_coefficients, b_spline_names=component.b_spline_names)
-# endregion
-
-# region pusher
-component_set = pp_components
-components_name = component_set[0].name[:3] + '_pusher_rotor_components'
-component_parameterization_b_splines = pusher_parameterization_objects[f'{components_name}_parameterization_b_splines']
-component_sectional_parameterization = pusher_parameterization_objects[f'{components_name}_sectional_parameterization']
-component_ffd_block = pusher_parameterization_objects[f'{components_name}_ffd_block']
-
-section_parametric_coordinates = np.linspace(0., 1., component_sectional_parameterization.num_sections).reshape((-1,1))
-sectional_translation_x = component_parameterization_b_splines[0].evaluate(section_parametric_coordinates)
-sectional_translation_y = component_parameterization_b_splines[1].evaluate(section_parametric_coordinates)
-sectional_translation_z = component_parameterization_b_splines[2].evaluate(section_parametric_coordinates)
-
-sectional_parameters = {
-    f'{components_name}_translation_x':sectional_translation_x,
-    f'{components_name}_translation_y':sectional_translation_y,
-    f'{components_name}_translation_z':sectional_translation_z,
-                        }
-
-component_ffd_block_coefficients = component_sectional_parameterization.evaluate(sectional_parameters, plot=False)
-component_coefficients = component_ffd_block.evaluate(component_ffd_block_coefficients, plot=False)
-disk = component_set[0]
-blade_1 = component_set[1]
-blade_2 = component_set[2]
-blade_3 = component_set[3]
-blade_4 = component_set[4]
-hub = component_set[5]
-
-# coefficients_list.append(component_coefficients[disk.name+'_coefficients'])
-# coefficients_list.append(component_coefficients[blade_1.name+'_coefficients'])
-# coefficients_list.append(component_coefficients[blade_2.name+'_coefficients'])
-# coefficients_list.append(component_coefficients[blade_3.name+'_coefficients'])
-# coefficients_list.append(component_coefficients[blade_4.name+'_coefficients'])
-# coefficients_list.append(component_coefficients[hub.name+'_coefficients'])
-# b_spline_names_list.append(disk.b_spline_names)
-# b_spline_names_list.append(blade_1.b_spline_names)
-# b_spline_names_list.append(blade_2.b_spline_names)
-# b_spline_names_list.append(blade_3.b_spline_names)
-# b_spline_names_list.append(blade_4.b_spline_names)
-# b_spline_names_list.append(hub.b_spline_names)
-
-geometry.assign_coefficients(coefficients=component_coefficients[disk.name+'_coefficients'], b_spline_names=disk.b_spline_names)
-geometry.assign_coefficients(coefficients=component_coefficients[blade_1.name+'_coefficients'], b_spline_names=blade_1.b_spline_names)
-geometry.assign_coefficients(coefficients=component_coefficients[blade_2.name+'_coefficients'], b_spline_names=blade_2.b_spline_names)
-geometry.assign_coefficients(coefficients=component_coefficients[blade_3.name+'_coefficients'], b_spline_names=blade_3.b_spline_names)
-geometry.assign_coefficients(coefficients=component_coefficients[blade_4.name+'_coefficients'], b_spline_names=blade_4.b_spline_names)
-geometry.assign_coefficients(coefficients=component_coefficients[hub.name+'_coefficients'], b_spline_names=hub.b_spline_names)
-# endregion
-
-# region v-tail Parameterization Evaluation for Parameterization Solver
-components_name = v_tail.name
-component_parameterization_b_splines = vtail_parameterization_objects[f'{components_name}_parameterization_b_splines']
-component_sectional_parameterization = vtail_parameterization_objects[f'{components_name}_sectional_parameterization']
-component_ffd_block = vtail_parameterization_objects[f'{components_name}_ffd_block']
-
-section_parametric_coordinates = np.linspace(0., 1., component_sectional_parameterization.num_sections).reshape((-1,1))
-sectional_translation_x = component_parameterization_b_splines[0].evaluate(section_parametric_coordinates)
-sectional_translation_y = component_parameterization_b_splines[1].evaluate(section_parametric_coordinates)
-sectional_translation_z = component_parameterization_b_splines[2].evaluate(section_parametric_coordinates)
-
-sectional_parameters = {
-    f'{components_name}_translation_x':sectional_translation_x,
-    f'{components_name}_translation_y':sectional_translation_y,
-    f'{components_name}_translation_z':sectional_translation_z,
-                        }
-
-component_ffd_block_coefficients = component_sectional_parameterization.evaluate(sectional_parameters, plot=False)
-component_coefficients = component_ffd_block.evaluate(component_ffd_block_coefficients, plot=False)
-# coefficients_list.append(component_coefficients)
-# b_spline_names_list.append(v_tail.b_spline_names)
-geometry.assign_coefficients(coefficients=component_coefficients, b_spline_names=v_tail.b_spline_names)
-# endregion
-
-# geometry.assign_coefficients(coefficients=coefficients_list, b_spline_names=b_spline_names_list)
 
 # endregion
 
@@ -949,8 +547,8 @@ parameterization_solver.declare_input(name='h_tail_root_chord', input=h_tail_roo
 parameterization_solver.declare_input(name='h_tail_tip_chord_left', input=h_tail_tip_chord_left)
 parameterization_solver.declare_input(name='h_tail_tip_chord_right', input=h_tail_tip_chord_right)
 
-parameterization_inputs['h_tail_span'] = m3l.Variable(name='h_tail_span', shape=(1,), value=np.array([12.]), dv_flag=True)
-parameterization_inputs['h_tail_root_chord'] = m3l.Variable(name='h_tail_root_chord', shape=(1,), value=np.array([3.]), dv_flag=True)
+parameterization_inputs['h_tail_span'] = m3l.Variable(name='h_tail_span', shape=(1,), value=np.array([10.]), dv_flag=True)
+parameterization_inputs['h_tail_root_chord'] = m3l.Variable(name='h_tail_root_chord', shape=(1,), value=np.array([5.]), dv_flag=True)
 parameterization_inputs['h_tail_tip_chord_left'] = m3l.Variable(name='h_tail_tip_chord_left', shape=(1,), value=np.array([2.]))
 parameterization_inputs['h_tail_tip_chord_right'] = m3l.Variable(name='h_tail_tip_chord_right', shape=(1,), value=np.array([2.]))
 # endregion
@@ -963,52 +561,54 @@ wing_fuselage_connection = geometry.evaluate(wing_te_center) - geometry.evaluate
 h_tail_fuselage_connection = geometry.evaluate(tail_te_center) - geometry.evaluate(fuselage_tail_te_center)
 
 parameterization_solver.declare_input(name='tail_moment_arm', input=tail_moment_arm)
-parameterization_solver.declare_input(name='wing_to_fuselage_connection', input=wing_fuselage_connection)
+# parameterization_solver.declare_input(name='wing_to_fuselage_connection', input=wing_fuselage_connection)
 parameterization_solver.declare_input(name='h_tail_to_fuselage_connection', input=h_tail_fuselage_connection)
 
-parameterization_inputs['tail_moment_arm'] = m3l.Variable(name='tail_moment_arm', shape=(1,), value=np.array([25.]), dv_flag=True)
-parameterization_inputs['wing_to_fuselage_connection'] = m3l.Variable(name='wing_to_fuselage_connection', shape=(3,), value=wing_fuselage_connection.value)
+parameterization_inputs['tail_moment_arm'] = m3l.Variable(name='tail_moment_arm', shape=(1,), value=np.array([20.]), dv_flag=True)
+# parameterization_inputs['wing_to_fuselage_connection'] = m3l.Variable(name='wing_to_fuselage_connection', shape=(3,), value=wing_fuselage_connection.value)
 parameterization_inputs['h_tail_to_fuselage_connection'] = m3l.Variable(name='h_tail_to_fuselage_connection', shape=(3,), value=h_tail_fuselage_connection.value)
 # endregion
 
-# region v-tail inputs
-vtail_parametric = geometry.evaluate(v_tail.project(np.array([30.543, 0., 8.231])))
-vtail_fuselage_connection = geometry.evaluate(fueslage_rear_points_parametric) - vtail_parametric
-parameterization_solver.declare_input(name='vtail_fuselage_connection', input=vtail_fuselage_connection)
-parameterization_inputs['vtail_fuselage_connection'] = m3l.Variable(name='vtail_fuselage_connection', shape=(3,), value=vtail_fuselage_connection.value)
-# endregion
+# region lift rotors inputs
+# for component_set in lift_rotor_related_components:
+#     connection = geometry.evaluate() - geometry.evaluate(wing_le_right)
 
-# region lift + pusher rotor parameterization inputs
-pusher_fuselage_connection = geometry.evaluate(fueslage_rear_points_parametric) - geometry.evaluate(fuselage_rear_point_on_pusher_disk_parametric)
-parameterization_solver.declare_input(name='fuselage_pusher_connection', input=pusher_fuselage_connection)
-parameterization_inputs['fuselage_pusher_connection'] = m3l.Variable(name='fuselage_pusher_connection', shape=(3,), value=pusher_fuselage_connection.value)
+#     parameterization_solver.declare_input(name='wingspan', input=wingspan)
+#     parameterization_solver.declare_input(name='root_chord', input=root_chord)
+#     parameterization_solver.declare_input(name='tip_chord_left', input=tip_chord_left)
+#     parameterization_solver.declare_input(name='tip_chord_right', input=tip_chord_right)
 
-flo_radius = fro_radius = front_outer_radius = m3l.Variable(name='front_outer_radius', shape=(1, ), value=10/2, dv_flag=False, lower=5/2, upper=15/2, scaler=1e-1)
-fli_radius = fri_radius = front_inner_radius = m3l.Variable(name='front_inner_radius', shape=(1, ), value=10/2, dv_flag=False, lower=5/2, upper=15/2, scaler=1e-1)
-rlo_radius = rro_radius = rear_outer_radius = m3l.Variable(name='rear_outer_radius',  shape=(1, ),value=10/2, dv_flag=False, lower=5/2, upper=15/2, scaler=1e-1)
-rli_radius = rri_radius = rear_inner_radius = m3l.Variable(name='rear_inner_radius', shape=(1, ), value=10/2, dv_flag=False, lower=5/2, upper=15/2, scaler=1e-1)
-dv_radius_list = [rlo_radius, rli_radius, rri_radius, rro_radius, flo_radius, fli_radius, fri_radius, fro_radius]
+#     parameterization_inputs['wingspan'] = m3l.Variable(name='wingspan', shape=(1,), value=np.array([100.]))
+#     parameterization_inputs['root_chord'] = m3l.Variable(name='root_chord', shape=(1,), value=np.array([20.]))
+#     parameterization_inputs['tip_chord_left'] = m3l.Variable(name='tip_chord_left', shape=(1,), value=np.array([5.]))
+#     parameterization_inputs['tip_chord_right'] = m3l.Variable(name='tip_chord_right', shape=(1,), value=np.array([5.]))  
 
-disk_centers = [rlo_disk_center, rli_disk_center, rri_disk_center, rro_disk_center, flo_disk_center, fli_disk_center, fri_disk_center, fro_disk_center]
-disk_centers_on_wing = [rlo_disk_center_on_wing, rli_disk_center_on_wing, rri_disk_center_on_wing, rro_disk_center_on_wing, flo_disk_center_on_wing, 
-                        fli_disk_center_on_wing, fri_disk_center_on_wing, fro_disk_center_on_wing]
-boom_points = [boom_rlo, boom_rli, boom_rri, boom_rro, boom_flo, boom_fli, boom_fri, boom_fro]
-rotor_prefixes = ['rlo', 'rli', 'rri', 'rro', 'flo', 'fli', 'fri', 'fro']
+rlo_connection = geometry.evaluate(rlo_disk_center) - geometry.evaluate(rlo_disk_center_on_wing)
+rli_connection = geometry.evaluate(rli_disk_center) - geometry.evaluate(rli_disk_center_on_wing)
+rri_connection = geometry.evaluate(rri_disk_center) - geometry.evaluate(rri_disk_center_on_wing)
+rro_connection = geometry.evaluate(rro_disk_center) - geometry.evaluate(rro_disk_center_on_wing)
+flo_connection = geometry.evaluate(flo_disk_center) - geometry.evaluate(flo_disk_center_on_wing)
+fli_connection = geometry.evaluate(fli_disk_center) - geometry.evaluate(fli_disk_center_on_wing)
+fri_connection = geometry.evaluate(fri_disk_center) - geometry.evaluate(fri_disk_center_on_wing)
+fro_connection = geometry.evaluate(fro_disk_center) - geometry.evaluate(fro_disk_center_on_wing)
 
-for i in range(len(disk_centers)):
-    disk_connection = geometry.evaluate(disk_centers[i]) - geometry.evaluate(disk_centers_on_wing[i])
-    boom_connection = geometry.evaluate(disk_centers[i]) - geometry.evaluate(boom_points[i])
-    
-    parameterization_solver.declare_input(name=rotor_prefixes[i]+'_lift_rotor_connection', input=disk_connection)
-    parameterization_solver.declare_input(name=rotor_prefixes[i]+'_wing_boom_connection', input=boom_connection)
-    parameterization_solver.declare_input(name=rotor_prefixes[i]+'_r1', input=radius_1_list[i])
-    parameterization_solver.declare_input(name=rotor_prefixes[i]+'_r2', input=radius_2_list[i])
-    
-    parameterization_inputs[rotor_prefixes[i]+'_lift_rotor_connection'] = m3l.Variable(name=rotor_prefixes[i]+'_lift_rotor_connection', shape=(3,), value=disk_connection.value)
-    parameterization_inputs[rotor_prefixes[i]+'_wing_boom_connection'] = m3l.Variable(name=rotor_prefixes[i]+'_wing_boom_connection', shape=(3,), value=boom_connection.value)
-    parameterization_inputs[rotor_prefixes[i]+'_r1'] = m3l.Variable(name=rotor_prefixes[i]+'_r1', shape=(1,), value=3.5)
-    parameterization_inputs[rotor_prefixes[i]+'_r2'] = m3l.Variable(name=rotor_prefixes[i]+'_r2', shape=(1,), value=3.5)
+parameterization_solver.declare_input(name='rlo_lift_rotor_connection', input=rlo_connection)
+parameterization_solver.declare_input(name='rli_lift_rotor_connection', input=rli_connection)
+parameterization_solver.declare_input(name='rri_lift_rotor_connection', input=rri_connection)
+parameterization_solver.declare_input(name='rro_lift_rotor_connection', input=rro_connection)
+parameterization_solver.declare_input(name='flo_lift_rotor_connection', input=flo_connection)
+parameterization_solver.declare_input(name='fli_lift_rotor_connection', input=fli_connection)
+parameterization_solver.declare_input(name='fri_lift_rotor_connection', input=fri_connection)
+parameterization_solver.declare_input(name='fro_lift_rotor_connection', input=fro_connection)
 
+parameterization_inputs['rlo_lift_rotor_connection'] = m3l.Variable(name='rlo_lift_rotor_connection', shape=(3,), value=rlo_connection.value)
+parameterization_inputs['rli_lift_rotor_connection'] = m3l.Variable(name='rli_lift_rotor_connection', shape=(3,), value=rli_connection.value)
+parameterization_inputs['rri_lift_rotor_connection'] = m3l.Variable(name='rri_lift_rotor_connection', shape=(3,), value=rri_connection.value)
+parameterization_inputs['rro_lift_rotor_connection'] = m3l.Variable(name='rro_lift_rotor_connection', shape=(3,), value=rro_connection.value)
+parameterization_inputs['flo_lift_rotor_connection'] = m3l.Variable(name='flo_lift_rotor_connection', shape=(3,), value=flo_connection.value)
+parameterization_inputs['fli_lift_rotor_connection'] = m3l.Variable(name='fli_lift_rotor_connection', shape=(3,), value=fli_connection.value)
+parameterization_inputs['fri_lift_rotor_connection'] = m3l.Variable(name='fri_lift_rotor_connection', shape=(3,), value=fri_connection.value)
+parameterization_inputs['fro_lift_rotor_connection'] = m3l.Variable(name='fro_lift_rotor_connection', shape=(3,), value=fro_connection.value)
 # endregion
 
 
@@ -1019,23 +619,27 @@ for i in range(len(disk_centers)):
 parameterization_solver_states = parameterization_solver.evaluate(parameterization_inputs)
 
 # region Wing Parameterization Evaluation for Parameterization Solver
-wing_chord_stretch_b_spline.coefficients = parameterization_solver_states['wing_chord_stretch_coefficients']
-wing_wingspan_stretch_b_spline.coefficients = parameterization_solver_states['wing_wingspan_stretch_coefficients']
-wing_translation_x_b_spline.coefficients = parameterization_solver_states['wing_translation_x_coefficients']
-wing_translation_z_b_spline.coefficients = parameterization_solver_states['wing_translation_z_coefficients']
+wing_chord_stretch_coefficients = parameterization_solver_states['wing_chord_stretch_coefficients']
+wing_chord_stretch_b_spline = bsp.BSpline(name='wing_chord_stretch_b_spline', space=linear_b_spline_curve_3_dof_space, 
+                                          coefficients=wing_chord_stretch_coefficients, num_physical_dimensions=1)
+
+wing_wingspan_stretch_coefficients = parameterization_solver_states['wing_wingspan_stretch_coefficients']
+wing_wingspan_stretch_b_spline = bsp.BSpline(name='wing_wingspan_stretch_b_spline', space=linear_b_spline_curve_2_dof_space, 
+                                          coefficients=wing_wingspan_stretch_coefficients, num_physical_dimensions=1)
+
+wing_twist_coefficients = m3l.Variable(name='wing_twist_coefficients', shape=(5,), value=np.array([0., 0., 0., 0., 0.]))
+wing_twist_b_spline = bsp.BSpline(name='wing_twist_b_spline', space=cubic_b_spline_curve_5_dof_space,
+                                          coefficients=wing_twist_coefficients, num_physical_dimensions=1)
 
 section_parametric_coordinates = np.linspace(0., 1., wing_ffd_block_sectional_parameterization.num_sections).reshape((-1,1))
 sectional_wing_chord_stretch = wing_chord_stretch_b_spline.evaluate(section_parametric_coordinates)
 sectional_wing_wingspan_stretch = wing_wingspan_stretch_b_spline.evaluate(section_parametric_coordinates)
-sectional_wing_translation_x = wing_translation_x_b_spline.evaluate(section_parametric_coordinates)
-sectional_wing_translation_z = wing_translation_z_b_spline.evaluate(section_parametric_coordinates)
-
+sectional_wing_twist = wing_twist_b_spline.evaluate(section_parametric_coordinates)
 
 sectional_parameters = {
     'sectional_wing_chord_stretch':sectional_wing_chord_stretch,
     'sectional_wingspan_stretch':sectional_wing_wingspan_stretch,
-    'sectional_wing_translation_x':sectional_wing_translation_x,
-    'sectional_wing_translation_z':sectional_wing_translation_z,
+    'sectional_wing_twist':sectional_wing_twist,
                         }
 
 wing_ffd_block_coefficients = wing_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=False)
@@ -1099,7 +703,6 @@ for component_set in lift_rotor_related_components:
     component_parameterization_b_splines[0].coefficients = parameterization_solver_states[f'{components_name}_translation_x_coefficients']
     component_parameterization_b_splines[1].coefficients = parameterization_solver_states[f'{components_name}_translation_y_coefficients']
     component_parameterization_b_splines[2].coefficients = parameterization_solver_states[f'{components_name}_translation_z_coefficients']
-    component_parameterization_b_splines[3].coefficients = parameterization_solver_states[f'{components_name}_stretch_y_coefficients']
     component_sectional_parameterization = lift_rotor_parameterization_objects[f'{components_name}_sectional_parameterization']
     component_ffd_block = lift_rotor_parameterization_objects[f'{components_name}_ffd_block']
 
@@ -1107,13 +710,11 @@ for component_set in lift_rotor_related_components:
     sectional_translation_x = component_parameterization_b_splines[0].evaluate(section_parametric_coordinates)
     sectional_translation_y = component_parameterization_b_splines[1].evaluate(section_parametric_coordinates)
     sectional_translation_z = component_parameterization_b_splines[2].evaluate(section_parametric_coordinates)
-    sectional_stretch_y = component_parameterization_b_splines[3].evaluate(section_parametric_coordinates)
 
     sectional_parameters = {
         f'{components_name}_translation_x':sectional_translation_x,
         f'{components_name}_translation_y':sectional_translation_y,
         f'{components_name}_translation_z':sectional_translation_z,
-        f'{components_name}_stretch_y':sectional_stretch_y,
                             }
     
     component_ffd_block_coefficients = component_sectional_parameterization.evaluate(sectional_parameters, plot=False)
@@ -1139,98 +740,8 @@ for component_set in lift_rotor_related_components:
 # geometry.plot()
 # endregion
 
-# region booms
-for component in boom_components:
-    components_name = component.name
-    component_parameterization_b_splines = boom_parameterization_objects[f'{components_name}_parameterization_b_splines']
-    component_parameterization_b_splines[0].coefficients = parameterization_solver_states[f'{components_name}_translation_x_coefficients']
-    component_parameterization_b_splines[1].coefficients = parameterization_solver_states[f'{components_name}_translation_y_coefficients']
-    component_parameterization_b_splines[2].coefficients = parameterization_solver_states[f'{components_name}_translation_z_coefficients']
-    component_sectional_parameterization = boom_parameterization_objects[f'{components_name}_sectional_parameterization']
-    component_ffd_block = boom_parameterization_objects[f'{components_name}_ffd_block']
-
-    section_parametric_coordinates = np.linspace(0., 1., component_sectional_parameterization.num_sections).reshape((-1,1))
-    sectional_translation_x = component_parameterization_b_splines[0].evaluate(section_parametric_coordinates)
-    sectional_translation_y = component_parameterization_b_splines[1].evaluate(section_parametric_coordinates)
-    sectional_translation_z = component_parameterization_b_splines[2].evaluate(section_parametric_coordinates)
-
-    sectional_parameters = {
-        f'{components_name}_translation_x':sectional_translation_x,
-        f'{components_name}_translation_y':sectional_translation_y,
-        f'{components_name}_translation_z':sectional_translation_z,
-                            }
-    
-    component_ffd_block_coefficients = component_sectional_parameterization.evaluate(sectional_parameters, plot=False)
-    component_coefficients = component_ffd_block.evaluate(component_ffd_block_coefficients, plot=False)
-
-    geometry.assign_coefficients(coefficients=component_coefficients, b_spline_names=component.b_spline_names)
 # endregion
-
-# region pusher
-component_set = pp_components
-components_name = component_set[0].name[:3] + '_pusher_rotor_components'
-component_parameterization_b_splines = pusher_parameterization_objects[f'{components_name}_parameterization_b_splines']
-component_parameterization_b_splines[0].coefficients = parameterization_solver_states[f'{components_name}_translation_x_coefficients']
-component_parameterization_b_splines[1].coefficients = parameterization_solver_states[f'{components_name}_translation_y_coefficients']
-component_parameterization_b_splines[2].coefficients = parameterization_solver_states[f'{components_name}_translation_z_coefficients']
-component_sectional_parameterization = pusher_parameterization_objects[f'{components_name}_sectional_parameterization']
-component_ffd_block = pusher_parameterization_objects[f'{components_name}_ffd_block']
-
-section_parametric_coordinates = np.linspace(0., 1., component_sectional_parameterization.num_sections).reshape((-1,1))
-sectional_translation_x = component_parameterization_b_splines[0].evaluate(section_parametric_coordinates)
-sectional_translation_y = component_parameterization_b_splines[1].evaluate(section_parametric_coordinates)
-sectional_translation_z = component_parameterization_b_splines[2].evaluate(section_parametric_coordinates)
-
-sectional_parameters = {
-    f'{components_name}_translation_x':sectional_translation_x,
-    f'{components_name}_translation_y':sectional_translation_y,
-    f'{components_name}_translation_z':sectional_translation_z,
-                        }
-
-component_ffd_block_coefficients = component_sectional_parameterization.evaluate(sectional_parameters, plot=False)
-component_coefficients = component_ffd_block.evaluate(component_ffd_block_coefficients, plot=False)
-disk = component_set[0]
-blade_1 = component_set[1]
-blade_2 = component_set[2]
-blade_3 = component_set[3]
-blade_4 = component_set[4]
-hub = component_set[5]
-
-geometry.assign_coefficients(coefficients=component_coefficients[disk.name+'_coefficients'], b_spline_names=disk.b_spline_names)
-geometry.assign_coefficients(coefficients=component_coefficients[blade_1.name+'_coefficients'], b_spline_names=blade_1.b_spline_names)
-geometry.assign_coefficients(coefficients=component_coefficients[blade_2.name+'_coefficients'], b_spline_names=blade_2.b_spline_names)
-geometry.assign_coefficients(coefficients=component_coefficients[blade_3.name+'_coefficients'], b_spline_names=blade_3.b_spline_names)
-geometry.assign_coefficients(coefficients=component_coefficients[blade_4.name+'_coefficients'], b_spline_names=blade_4.b_spline_names)
-geometry.assign_coefficients(coefficients=component_coefficients[hub.name+'_coefficients'], b_spline_names=hub.b_spline_names)
-# endregion
-
-# region v-tail Parameterization Evaluation for Parameterization Solver
-components_name = v_tail.name
-component_parameterization_b_splines = vtail_parameterization_objects[f'{components_name}_parameterization_b_splines']
-component_parameterization_b_splines[0].coefficients = parameterization_solver_states[f'{components_name}_translation_x_coefficients']
-component_parameterization_b_splines[1].coefficients = parameterization_solver_states[f'{components_name}_translation_y_coefficients']
-component_parameterization_b_splines[2].coefficients = parameterization_solver_states[f'{components_name}_translation_z_coefficients']
-component_sectional_parameterization = vtail_parameterization_objects[f'{components_name}_sectional_parameterization']
-component_ffd_block = vtail_parameterization_objects[f'{components_name}_ffd_block']
-
-section_parametric_coordinates = np.linspace(0., 1., component_sectional_parameterization.num_sections).reshape((-1,1))
-sectional_translation_x = component_parameterization_b_splines[0].evaluate(section_parametric_coordinates)
-sectional_translation_y = component_parameterization_b_splines[1].evaluate(section_parametric_coordinates)
-sectional_translation_z = component_parameterization_b_splines[2].evaluate(section_parametric_coordinates)
-
-sectional_parameters = {
-    f'{components_name}_translation_x':sectional_translation_x,
-    f'{components_name}_translation_y':sectional_translation_y,
-    f'{components_name}_translation_z':sectional_translation_z,
-                        }
-
-component_ffd_block_coefficients = component_sectional_parameterization.evaluate(sectional_parameters, plot=False)
-component_coefficients = component_ffd_block.evaluate(component_ffd_block_coefficients, plot=False)
-geometry.assign_coefficients(coefficients=component_coefficients, b_spline_names=v_tail.b_spline_names)
-# endregion
-
-# endregion
-geometry.plot()
+# geometry.plot()
 
 # region Mesh Evaluation
 upper_surface_wireframe = geometry.evaluate(upper_surface_wireframe_parametric)
@@ -1253,9 +764,9 @@ print(geometry.coefficients.name)
 
 print(vlm_mesh.operation.name)
 print(vlm_mesh.name)
-# geometry.coefficients = sim['10548_plus_10550_operation.10551']
+geometry.coefficients = sim['10548_plus_10550_operation.10551']
 # camber_surface = sim['10562_reshape_operation_Hryi2.10563']
 # geometry.plot_meshes([camber_surface])
 # geometry.plot()
-# sim.check_totals(of=[vlm_mesh.operation.name + '.' + vlm_mesh.name],
-#                  wrt=['root_chord', 'wingspan', 'tip_chord_left', 'tip_chord_right'])
+sim.check_totals(of=[vlm_mesh.operation.name + '.' + vlm_mesh.name],
+                 wrt=['root_chord', 'wingspan', 'tip_chord_left', 'tip_chord_right'])
