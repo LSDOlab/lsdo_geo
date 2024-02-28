@@ -159,11 +159,13 @@ class BSpline(m3l.Function):
         else:
             expansion_factor = 1
 
-        map = compute_evaluation_map(parametric_coordinates=parametric_coordinates, order=self.space.order,
-                                     parametric_coefficients_shape=self.space.parametric_coefficients_shape,
-                                     knots=self.space.knots,
-                                     parametric_derivative_order=parametric_derivative_order,
-                                     expansion_factor=expansion_factor)
+        map = compute_evaluation_map(
+            parametric_coordinates=parametric_coordinates, order=self.space.order,
+            parametric_coefficients_shape=self.space.parametric_coefficients_shape,
+            knots=self.space.knots,
+            parametric_derivative_order=parametric_derivative_order,
+            expansion_factor=expansion_factor,
+        )
 
         return map
     
@@ -282,12 +284,97 @@ class BSpline(m3l.Function):
         show : bool
             A boolean on whether to show the plot or not. If the plot is not shown, the Vedo plotting element is returned.
         '''
-        if self.space.num_parametric_dimensions == 2:
+        if self.space.num_parametric_dimensions == 1:
+            return self.plot_curve(point_types=point_types, plot_types=plot_types, opacity=opacity, color=color,
+                                    additional_plotting_elements=additional_plotting_elements, show=show)
+        elif self.space.num_parametric_dimensions == 2:
             return self.plot_surface(point_types=point_types, plot_types=plot_types, opacity=opacity, color=color, 
                                      surface_texture=surface_texture, additional_plotting_elements=additional_plotting_elements, show=show)
         elif self.space.num_parametric_dimensions == 3:
             return self.plot_volume(point_types=point_types, plot_types=plot_types, opacity=opacity, color=color,
                                     surface_texture=surface_texture, additional_plotting_elements=additional_plotting_elements, show=show)
+        
+    def plot_curve(self, point_types:list=['evaluated_points'], plot_types:list=['wireframe'],
+              opacity:float=1., color:Union[str,BSpline]='#00629B', additional_plotting_elements:list=[], show:bool=True):
+        '''
+        Plots the B-spline Surface.
+
+        Parameters
+        -----------
+        points_type : list
+            The type of points to be plotted. {evaluated_points, coefficients}
+        plot_types : list
+            The type of plot {curve, point_cloud}
+        opactity : float
+            The opacity of the plot. 0 is fully transparent and 1 is fully opaque.
+        color : str
+            The 6 digit color code to plot the B-spline as.
+        additional_plotting_elemets : list
+            Vedo plotting elements that may have been returned from previous plotting functions that should be plotted with this plot.
+        show : bool
+            A boolean on whether to show the plot or not. If the plot is not shown, the Vedo plotting element is returned.
+        '''
+        
+        plotting_elements = additional_plotting_elements.copy()
+
+        num_physical_dimensions = self.num_physical_dimensions
+
+        for point_type in point_types:
+            if point_type == 'evaluated_points':
+                num_points_u = 15
+                u_vec = np.linspace(0., 1., num_points_u)
+                parametric_coordinates = u_vec.reshape((-1,1))
+                plotting_points = self.evaluate(parametric_coordinates=parametric_coordinates).value
+
+                if num_physical_dimensions == 1:    # plot against the parametric coordinate
+                    # scale u axis to be more visually clear based on scaling of parameter
+                    u_axis_scaling = np.max(plotting_points) - np.min(plotting_points)
+                    if u_axis_scaling != 0:
+                        parametric_coordinates = u_vec * u_axis_scaling
+                    plotting_points = np.hstack((parametric_coordinates.reshape((-1,1)), plotting_points.reshape((-1,1)), np.zeros((num_points_u,1))))
+                elif num_physical_dimensions == 2:  # plot against the parametric coordinate
+                    # scale u axis to be more visually clear based on scaling of parameter
+                    u_axis_scaling = np.max(plotting_points) - np.min(plotting_points)
+                    parametric_coordinates = u_vec * u_axis_scaling
+                    plotting_points = np.hstack((parametric_coordinates.reshape((-1,1)), plotting_points.reshape((-1,2))))
+
+                if type(color) is BSpline:
+                    plotting_colors = color.evaluate(parametric_coordinates=parametric_coordinates).value
+
+            elif point_type == 'coefficients':
+                plotting_points_shape = self.coefficients_shape
+                # num_plotting_points = np.cumprod(plotting_points_shape[:-1])[-1]
+                plotting_points = self.coefficients.value.reshape((-1,num_physical_dimensions))
+
+            if 'point_cloud' in plot_types:
+                plotting_elements.append(vedo.Points(plotting_points, r=6).opacity(opacity).color('darkred'))
+
+            if 'curve' in plot_types or 'wireframe' in plot_types or 'surface' in plot_types:
+                from vedo import Line
+                plotting_line = Line(plotting_points).color(color).linewidth(3)
+                
+                if 'wireframe' in plot_types:
+                    num_points = np.cumprod(plotting_points.shape[:-1])[-1]
+                    plotting_elements.append(vedo.Points(plotting_points.reshape((num_points,-1)), r=12).color(color))
+                
+                if type(color) is str:
+                    plotting_line.color(color)
+                elif type(color) is BSpline:
+                    plotting_line.cmap('jet', plotting_colors)
+
+                plotting_elements.append(plotting_line)
+
+        if show:
+            plotter = vedo.Plotter()
+            if num_physical_dimensions == 1:
+                viewup = "y"
+            else:
+                viewup = "z"
+            plotter.show(plotting_elements, f'B-spline Curve: {self.name}', axes=1, viewup=viewup, interactive=True)
+            return plotting_elements
+        else:
+            return plotting_elements
+
 
     def plot_surface(self, point_types:list=['evaluated_points'], plot_types:list=['surface'],
               opacity:float=1., color:Union[str,BSpline]='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):

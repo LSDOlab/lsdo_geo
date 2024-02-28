@@ -70,6 +70,8 @@ class VolumeSectionalParameterization:
 
         self.linear_parameter_maps = {}
         self.rotational_axes = {}
+
+        self.updated_points = self.parameterized_points.copy()
         
 
     def add_parameter(self, name:str, map:sps.csc_matrix):
@@ -330,7 +332,7 @@ class VolumeSectionalParameterization:
             section_plot_types = ['surface', 'point_cloud']
             plotting_elements = self.helpful_b_spline.plot_section(section_points, plot_types=section_plot_types, opacity=opacity, color=color,
                                                         surface_texture=surface_texture, additional_plotting_elements=plotting_elements, show=False)
-            
+
         if show:
             plotter = vedo.Plotter()
             plotter.show(plotting_elements, f'Free Form Deformation Block: {self.name}', axes=1, viewup="z", interactive=True)

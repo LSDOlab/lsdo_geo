@@ -616,21 +616,21 @@ def refit_b_spline_set(b_spline_set:BSplineSet, order:tuple=(4,4), num_coefficie
     '''
     b_splines = {}
     if parallelize:
-        b_splines_list = Parallel(n_jobs=20)(delayed(_fit_b_spline_in_set)(b_spline_set, b_spline_name, indices, num_coefficients, 
+        b_splines_list = Parallel(n_jobs=20)(delayed(_refit_b_spline_in_set)(b_spline_set, b_spline_name, indices, num_coefficients, 
                                                                            fit_resolution, order) for b_spline_name, indices in \
                                                                             b_spline_set.coefficient_indices.items())
         for b_spline in b_splines_list:
             b_splines[b_spline.name] = b_spline
     else:
         for b_spline_name, indices in b_spline_set.coefficient_indices.items():
-            b_spline = _fit_b_spline_in_set(b_spline_set, b_spline_name, indices, num_coefficients, fit_resolution, order)
+            b_spline = _refit_b_spline_in_set(b_spline_set, b_spline_name, indices, num_coefficients, fit_resolution, order)
             b_splines[b_spline.name] = b_spline
 
     new_b_spline_set = create_b_spline_set(name=b_spline_set.name, b_splines=b_splines)
         
     return new_b_spline_set
 
-def _fit_b_spline_in_set(b_spline_set:BSplineSet, b_spline_name:str, indices:np.ndarray, num_coefficients:tuple=(25,25), 
+def _refit_b_spline_in_set(b_spline_set:BSplineSet, b_spline_name:str, indices:np.ndarray, num_coefficients:tuple=(25,25), 
                                                                     fit_resolution:tuple=(50,50), order:tuple=(4,4)):
     if type(num_coefficients) is int:
         num_coefficients = (num_coefficients, num_coefficients)
@@ -660,13 +660,48 @@ def _fit_b_spline_in_set(b_spline_set:BSplineSet, b_spline_name:str, indices:np.
     b_spline_space = b_spline_set.space.spaces[b_spline_set.space.b_spline_to_space[b_spline_name]]
     evaluation_map = compute_evaluation_map(parametric_coordinates=parametric_coordinates, order=b_spline_space.order,
         parametric_coefficients_shape=b_spline_space.parametric_coefficients_shape, knots=b_spline_space.knots)
-    points_vector = evaluation_map.dot(b_spline_set.coefficients.value[indices].reshape((evaluation_map.shape[1], -1)))
+    u_derivative_evaluation_map = compute_evaluation_map(parametric_coordinates=parametric_coordinates, order=b_spline_space.order,
+        parametric_coefficients_shape=b_spline_space.parametric_coefficients_shape, knots=b_spline_space.knots, parametric_derivative_order=(1,0))
+    v_derivative_evaluation_map = compute_evaluation_map(parametric_coordinates=parametric_coordinates, order=b_spline_space.order,
+        parametric_coefficients_shape=b_spline_space.parametric_coefficients_shape, knots=b_spline_space.knots, parametric_derivative_order=(0,1))
+    fitting_data_map = sps.vstack((evaluation_map, u_derivative_evaluation_map, v_derivative_evaluation_map))
+    # points_vector = evaluation_map.dot(b_spline_set.coefficients.value[indices].reshape((evaluation_map.shape[1], -1)))
+    fitting_data_vector = fitting_data_map.dot(b_spline_set.coefficients.value[indices].reshape((evaluation_map.shape[1], -1)))
 
-    points = points_vector.reshape((num_points_u, num_points_v, num_dimensions))
+    new_surface_evaluation_map = compute_evaluation_map(parametric_coordinates=parametric_coordinates, order=order,
+        parametric_coefficients_shape=num_coefficients, knots=None)
+    new_surface_u_derivative_evaluation_map = compute_evaluation_map(parametric_coordinates=parametric_coordinates, order=order,
+        parametric_coefficients_shape=num_coefficients, knots=None, parametric_derivative_order=(1,0))
+    new_surface_v_derivative_evaluation_map = compute_evaluation_map(parametric_coordinates=parametric_coordinates, order=order,
+        parametric_coefficients_shape=num_coefficients, knots=None, parametric_derivative_order=(0,1))
+    new_surface_fitting_data_map = sps.vstack((new_surface_evaluation_map, new_surface_u_derivative_evaluation_map, 
+                                               new_surface_v_derivative_evaluation_map))
+    
+    lhs = new_surface_fitting_data_map.T.dot(new_surface_fitting_data_map)
+    rhs = new_surface_fitting_data_map.T.dot(fitting_data_vector)
+    coefficients = sps.linalg.spsolve(lhs, rhs)
 
-    b_spline = fit_b_spline(fitting_points=points, parametric_coordinates=parametric_coordinates, 
-        order=order, num_coefficients=num_coefficients,
-        knots=None, name=b_spline_name)
+    # lhs = new_surface_evaluation_map.T.dot(new_surface_evaluation_map)
+    # rhs = new_surface_evaluation_map.T.dot(points_vector)
+    # coefficients = sps.linalg.spsolve(lhs, rhs)
+    
+    space_name = 'order_' + str(order) + 'num_coefficients_' + str(num_coefficients) + 'b_spline_space'
+
+    b_spline_space = BSplineSpace(name=space_name, order=order, parametric_coefficients_shape=num_coefficients, 
+            knots=None, knot_indices=None)
+
+    b_spline = BSpline(
+        name=b_spline_name,
+        space=b_spline_space,
+        coefficients=coefficients.reshape((-1,)),
+        num_physical_dimensions=num_dimensions
+    )
+
+    # points = points_vector.reshape((num_points_u, num_points_v, num_dimensions))
+
+    # b_spline = fit_b_spline(fitting_points=points, parametric_coordinates=parametric_coordinates, 
+    #     order=order, num_coefficients=num_coefficients,
+    #     knots=None, name=b_spline_name)
     
     return b_spline
 
@@ -777,10 +812,19 @@ def compute_evaluation_map(parametric_coordinates:np.ndarray, order:tuple, param
     basis : sps.csc_matrix
         The B-spline evaluation matrix.
     '''
+    # if len(parametric_coordinates.shape) == 1 and len(parametric_coefficients_shape) != 1:
+    #     parametric_coordinates = parametric_coordinates.reshape((1, -1))
+
     if len(parametric_coordinates.shape) == 1:
         parametric_coordinates = parametric_coordinates.reshape((1, -1))
 
+    # if len(parametric_coordinates.shape) == 1:
+    #     num_points = parametric_coordinates.shape[0]
+    #     num_parametric_dimensions = 1
+    # else:
+    num_points = np.prod(parametric_coordinates.shape[:-1])
     num_parametric_dimensions = parametric_coordinates.shape[-1]
+
     if parametric_derivative_order is None:
         parametric_derivative_order = (0,)*num_parametric_dimensions
     if type(parametric_derivative_order) is int:
@@ -788,7 +832,6 @@ def compute_evaluation_map(parametric_coordinates:np.ndarray, order:tuple, param
     elif len(parametric_derivative_order) == 1 and num_parametric_dimensions != 1:
         parametric_derivative_order = parametric_derivative_order*num_parametric_dimensions
 
-    num_points = np.prod(parametric_coordinates.shape[:-1])
     order_multiplied = 1
     for i in range(len(order)):
         order_multiplied *= order[i]

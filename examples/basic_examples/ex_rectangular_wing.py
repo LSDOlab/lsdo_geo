@@ -33,6 +33,7 @@ lower_surface_wireframe_parametric = geometry.project(chord_surface - np.array([
 upper_surface_wireframe = geometry.evaluate(upper_surface_wireframe_parametric)
 lower_surface_wireframe = geometry.evaluate(lower_surface_wireframe_parametric)
 camber_surface = m3l.linspace(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((num_chordwise, num_spanwise, 3))
+# geometry.plot_meshes([camber_surface])
 # endregion
 
 # endregion
@@ -47,6 +48,7 @@ from lsdo_geo.core.parameterization.free_form_deformation_functions import const
 num_ffd_sections = 11
 ffd_block = construct_ffd_block_around_entities(name='ffd_block', entities=geometry, num_coefficients=(2,num_ffd_sections,2), order=(2,2,2))
 ffd_block.coefficients.name = 'ffd_block_coefficients'
+# ffd_block.plot()
 
 from lsdo_geo.core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization
 ffd_sectional_parameterization = VolumeSectionalParameterization(
@@ -55,6 +57,7 @@ ffd_sectional_parameterization = VolumeSectionalParameterization(
                                                                  principal_parametric_dimension=1,
                                                                  parameterized_points_shape=ffd_block.coefficients_shape,
                                                                  )
+# ffd_sectional_parameterization.plot()
 
 ffd_sectional_parameterization.add_sectional_stretch(name='chord_stretching', axis=0)
 ffd_sectional_parameterization.add_sectional_translation(name='wingspan_stretching', axis=1)
@@ -68,10 +71,11 @@ space_of_linear_2_dof_b_splines = BSplineSpace(name='linear_2_dof_space', order=
 chord_stretching_b_spline = BSpline(
     name='chord_stretching_b_spline',
     space=space_of_linear_3_dof_b_splines,
-    # coefficients=m3l.Variable(shape=(3,), value=np.zeros(3,), name='chord_stretching_b_spline_coefficients'),
-    coefficients=m3l.Variable(shape=(3,), value=np.array([0., 0., 0.]), name='chord_stretching_b_spline_coefficients'),
+    coefficients=m3l.Variable(shape=(3,), value=np.zeros(3,), name='chord_stretching_b_spline_coefficients'),
+    # coefficients=m3l.Variable(shape=(3,), value=np.array([-.1, 10., 5.]), name='chord_stretching_b_spline_coefficients'),
     num_physical_dimensions=1,
     )
+chord_stretching_b_spline.plot()
 
 wingspan_stretching_b_spline = BSpline(
     name='wingspan_stretching_b_spline',
