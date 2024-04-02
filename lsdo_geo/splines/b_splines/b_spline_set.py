@@ -86,10 +86,10 @@ class BSplineSet(m3l.Function):
     # NOTE: These are connections in physical space. We can have a "disctontinuous" B-spline. The BSplineSetSpace  has the parametric connections.
 
     def __post_init__(self):
-        self.coefficients = self.coefficients
+        # self.coefficients = self.coefficients
 
         self.num_coefficients = len(self.coefficients)
-        self.num_coefficients = self.num_coefficients
+        # self.num_coefficients = self.num_coefficients
 
         self.coefficient_indices = {}
         coefficients_counter = 0
@@ -735,6 +735,8 @@ class BSplineSet(m3l.Function):
                 points_expanded_coarse = np.repeat(points[:,np.newaxis,:], coarse_grid_points.shape[0], axis=1)
                 coarse_distances = np.linalg.norm(points_expanded_coarse - coarse_grid_points, axis=2)
                 length_scales = np.min(coarse_distances, axis=1)
+                if length_scales[0] < 1e-12:
+                    length_scales[0] = 1e-12
                 system_length_scales = np.zeros((3,))
                 for i in range(3):
                     system_length_scales[i] = np.max(coarse_grid_points[:,i]) - np.min(coarse_grid_points[:,i])
@@ -920,6 +922,8 @@ class BSplineSet(m3l.Function):
             points_expanded_coarse = np.repeat(points[:,np.newaxis,:], coarse_grid_points.shape[0], axis=1)
             coarse_distances = np.linalg.norm(points_expanded_coarse - coarse_grid_points, axis=2)
             length_scales = np.min(coarse_distances, axis=1)
+            if length_scales[0] < 1e-12:
+                length_scales[0] = 1e-12
             system_length_scales = np.zeros((3,))
             for i in range(3):
                 system_length_scales[i] = np.max(coarse_grid_points[:,i]) - np.min(coarse_grid_points[:,i])
