@@ -927,8 +927,9 @@ def create_b_spline_from_corners(name:str, corners:np.ndarray, order:tuple=(4,),
     else:
         knot_vectors = tuple()
         for dimension_index in range(num_dimensions):
+            dimension_num_coefficients = (num_coefficients[dimension_index]-1)*(corners.shape[dimension_index] - 1) + 1
             knot_vectors = knot_vectors + \
-                    tuple(generate_open_uniform_knot_vector(num_coefficients[dimension_index], order[dimension_index]),)
+                    tuple(generate_open_uniform_knot_vector(dimension_num_coefficients, order[dimension_index]),)
     
     total_knot_vector = []
     for knot_vector in knot_vectors:
@@ -940,7 +941,8 @@ def create_b_spline_from_corners(name:str, corners:np.ndarray, order:tuple=(4,),
     dimension_hyper_volumes = corners.copy()
     for dimension_index in np.arange(num_dimensions, 0, -1)-1:
         dimension_hyper_volumes_shape = np.array(previous_dimension_hyper_volume.shape)
-        dimension_hyper_volumes_shape[dimension_index] = (dimension_hyper_volumes_shape[dimension_index]-1) * num_coefficients[dimension_index]
+        dimension_num_hyper_volumes = dimension_hyper_volumes_shape[dimension_index]-1
+        dimension_hyper_volumes_shape[dimension_index] = dimension_num_hyper_volumes * (num_coefficients[dimension_index]-1) + 1
         dimension_hyper_volumes_shape = tuple(dimension_hyper_volumes_shape)
         dimension_hyper_volumes = np.zeros(dimension_hyper_volumes_shape)
 
@@ -950,11 +952,19 @@ def create_b_spline_from_corners(name:str, corners:np.ndarray, order:tuple=(4,),
         include_endpoint = False
         # Perform interpolations
         for dimension_level_index in range(previous_dimension_hyper_volume.shape[dimension_index]-1):
-            if dimension_level_index == previous_dimension_hyper_volume.shape[dimension_index]-2:
+            if dimension_level_index == previous_dimension_hyper_volume.shape[dimension_index]-2:   # last hyper-volume/segment along dimension
                 include_endpoint = True
-            linspace_index_front[dimension_level_index*num_coefficients[dimension_index]:(dimension_level_index+1)*num_coefficients[dimension_index]] = \
+                dimension_hyper_volume_num_sections = num_coefficients[dimension_index]
+                linspace_index_front[dimension_level_index*(dimension_hyper_volume_num_sections-1):] = \
+                        np.linspace(previous_index_front[dimension_level_index], previous_index_front[dimension_level_index+1],
+                                dimension_hyper_volume_num_sections, endpoint=include_endpoint)
+                continue
+
+            dimension_hyper_volume_num_sections = num_coefficients[dimension_index] - 1
+            linspace_index_front[dimension_level_index*dimension_hyper_volume_num_sections:
+                                 (dimension_level_index+1)*dimension_hyper_volume_num_sections] = \
                     np.linspace(previous_index_front[dimension_level_index], previous_index_front[dimension_level_index+1],
-                            num_coefficients[dimension_index], endpoint=include_endpoint)
+                            dimension_hyper_volume_num_sections, endpoint=include_endpoint)
         # Move axis back to proper location
         dimension_hyper_volumes = np.moveaxis(linspace_index_front, 0, dimension_index)
         previous_dimension_hyper_volume = dimension_hyper_volumes.copy()

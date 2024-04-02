@@ -596,7 +596,7 @@ class BSplineSet(m3l.Function):
         '''
 
         if type(points) is m3l.Variable:
-                points = points.value
+            points = points.value
         if len(points.shape) == 1:
             points = points.reshape((1, -1))    # Last axis is reserved for dimensionality of physical space
         
