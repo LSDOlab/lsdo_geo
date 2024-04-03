@@ -146,10 +146,16 @@ def construct_tight_fit_ffd_block(name:str, entities:list[Union[np.ndarray, m3l.
     # Evaluate to get corners of key entities
     corner_points = {}
     for i, key_entity in enumerate(key_entities):
-        parametric_coordinate_00 = [(key_entity, np.array([0., 0.]))]   # u,v are swapped/inverted between wing and ffd
-        parametric_coordinate_01 = [(key_entity, np.array([1., 0.]))]   # u,v are swapped/inverted between wing and ffd
-        parametric_coordinate_10 = [(key_entity, np.array([0., 1.]))]   # u,v are swapped/inverted between wing and ffd
-        parametric_coordinate_11 = [(key_entity, np.array([1., 1.]))]   # u,v are swapped/inverted between wing and ffd
+        if i <= (len(key_entities)-1)//2:
+            parametric_coordinate_00 = [(key_entity, np.array([1., 1.]))]   # u,v are swapped/inverted between wing and ffd
+            parametric_coordinate_01 = [(key_entity, np.array([0., 1.]))]   # u,v are swapped/inverted between wing and ffd
+            parametric_coordinate_10 = [(key_entity, np.array([1., 0.]))]   # u,v are swapped/inverted between wing and ffd
+            parametric_coordinate_11 = [(key_entity, np.array([0., 0.]))]   # u,v are swapped/inverted between wing and ffd
+        else:
+            parametric_coordinate_00 = [(key_entity, np.array([0., 0.]))]   # u,v are swapped/inverted between wing and ffd
+            parametric_coordinate_01 = [(key_entity, np.array([1., 0.]))]   # u,v are swapped/inverted between wing and ffd
+            parametric_coordinate_10 = [(key_entity, np.array([0., 1.]))]   # u,v are swapped/inverted between wing and ffd
+            parametric_coordinate_11 = [(key_entity, np.array([1., 1.]))]   # u,v are swapped/inverted between wing and ffd
 
         corner_0i0 = entities[0].evaluate(parametric_coordinate_00).value
         corner_0ip10 = entities[0].evaluate(parametric_coordinate_01).value

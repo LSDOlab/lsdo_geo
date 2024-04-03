@@ -44,9 +44,13 @@ camber_surface = m3l.linspace(upper_surface_wireframe, lower_surface_wireframe, 
 from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver
 parameterization_solver = ParameterizationSolver()
 
-from lsdo_geo.core.parameterization.free_form_deformation_functions import construct_ffd_block_around_entities
+from lsdo_geo.core.parameterization.free_form_deformation_functions import construct_ffd_block_around_entities, construct_tight_fit_ffd_block
 num_ffd_sections = 11
-ffd_block = construct_ffd_block_around_entities(name='ffd_block', entities=geometry, num_coefficients=(2,num_ffd_sections,2), order=(2,2,2))
+# ffd_block = construct_ffd_block_around_entities(name='ffd_block', entities=geometry, num_coefficients=(2,num_ffd_sections,2), order=(2,2,2))
+num_wing_secctions = 2
+ffd_block = construct_tight_fit_ffd_block(name='ffd_block', entities=geometry, 
+                                          num_coefficients=(2,(num_ffd_sections//num_wing_secctions +1 ),2), order=(2,2,2))
+# ffd_block = construct_ffd_block_around_entities(name='ffd_block', entities=geometry, num_coefficients=(2,num_ffd_sections,2), order=(2,2,2))
 ffd_block.coefficients.name = 'ffd_block_coefficients'
 # ffd_block.plot()
 
@@ -75,7 +79,6 @@ chord_stretching_b_spline = BSpline(
     # coefficients=m3l.Variable(shape=(3,), value=np.array([-.1, 10., 5.]), name='chord_stretching_b_spline_coefficients'),
     num_physical_dimensions=1,
     )
-chord_stretching_b_spline.plot()
 
 wingspan_stretching_b_spline = BSpline(
     name='wingspan_stretching_b_spline',
@@ -92,7 +95,7 @@ sweep_translation_b_spline = BSpline(
     coefficients=m3l.Variable(shape=(3,), value=np.array([2., 0., 2.]), name='sweep_translation_b_spline_coefficients'),
     num_physical_dimensions=1,
     )
-
+sweep_translation_b_spline.plot()
 
 parameterization_solver.declare_state('chord_stretching_b_spline_coefficients', chord_stretching_b_spline.coefficients)
 parameterization_solver.declare_state('wingspan_stretching_b_spline_coefficients', wingspan_stretching_b_spline.coefficients)
