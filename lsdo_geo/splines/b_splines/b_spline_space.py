@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import m3l
+import csdl_alpha as csdl
 import numpy as np
 # import array_mapper as am
 import scipy.sparse as sps
@@ -48,7 +49,7 @@ class BSplineSpace(m3l.FunctionSpace):
                 knot_index += num_knots_i
 
     
-    def create_function(self, name:str, coefficients:np.ndarray) -> m3l.Function:
+    def create_function(self, name:str, coefficients:[np.ndarray,csdl.Variable]) -> m3l.Function:
         '''
         Creates a function in this function space.
 

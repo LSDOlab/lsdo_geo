@@ -244,7 +244,6 @@ def _build_b_splines(i, parsed_info_dict, point_table, b_spline_spaces, b_spline
             for k in range(num_cp_per_row):
                 cntrl_pts[j,k,:] = point_table.loc[point_table["lines"]==parsed_info_dict[f'surf{i}_cp_line_nums'][j][k]][['x', 'y', 'z']]
         else:
-            filtered = False
             cntrl_pts[j,:,:] = col_cntrl_pts
 
     # u_multiplicities = parsed_info_dict[f'surf{i}_u_multiplicities']
@@ -263,6 +262,9 @@ def _build_b_splines(i, parsed_info_dict, point_table, b_spline_spaces, b_spline
     coefficients = cntrl_pts.reshape((-1,))
     b_spline_space = b_spline_spaces[b_splines_to_spaces_dict[b_spline_name]]
     num_physical_dimensions = cntrl_pts.shape[-1]
+    # print(f'Creating B-spline {b_spline_name}')
+    # import csdl_alpha as csdl
+    # print(csdl.manager)
     b_spline = BSpline(name=b_spline_name, space=b_spline_space, coefficients=coefficients, num_physical_dimensions=num_physical_dimensions)
     return b_spline
 

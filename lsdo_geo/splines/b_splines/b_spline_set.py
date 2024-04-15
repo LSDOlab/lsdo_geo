@@ -1,6 +1,6 @@
 from __future__ import annotations
 import m3l
-import csdl
+import csdl_alpha as csdl
 
 import numpy as np
 import scipy.sparse as sps
@@ -64,7 +64,7 @@ class BSplineSet(m3l.Function):
         The name of the B-spline.
     space : BSplineSetSpace
         The space that the B-spline set is a member of.
-    coefficients : m3l.Variable
+    coefficients : csdl.Variable
         The coefficients of the B-spline set.
     num_physical_dimensions : dict[str, int]
         A dictionary of the number of physical dimensions for each B-spline.
@@ -88,7 +88,8 @@ class BSplineSet(m3l.Function):
     def __post_init__(self):
         # self.coefficients = self.coefficients
 
-        self.num_coefficients = len(self.coefficients)
+        # self.num_coefficients = len(self.coefficients)
+        self.num_coefficients = self.coefficients.shape[0]
         # self.num_coefficients = self.num_coefficients
 
         self.coefficient_indices = {}
@@ -107,7 +108,7 @@ class BSplineSet(m3l.Function):
             
 
         if type(self.coefficients) is np.ndarray:
-            self.coefficients = m3l.Variable(name=f'{self.name}_coefficients', shape=self.coefficients.shape, value=self.coefficients)
+            self.coefficients = csdl.Variable(name=f'{self.name}_coefficients', shape=self.coefficients.shape, value=self.coefficients)
 
         # NOTE: For aggregation, see not on BSplineSetSpace (it should come later probably)
         # # Promote attributes to make this object a bit more intuitive?
@@ -117,7 +118,7 @@ class BSplineSet(m3l.Function):
         # Find connections!
         # self.find_connections()
 
-    def get_coefficients(self, b_spline_names:list[str]=None, name:str=None) -> m3l.Variable:
+    def get_coefficients(self, b_spline_names:list[str]=None, name:str=None) -> csdl.Variable:
         '''
         Gets the coefficients for the given B-splines.
 
@@ -130,7 +131,7 @@ class BSplineSet(m3l.Function):
 
         Returns
         -------
-        coefficients : m3l.Variable
+        coefficients : csdl.Variable
             The coefficients for the given B-splines.
         '''
         if b_spline_names is None:
@@ -146,7 +147,7 @@ class BSplineSet(m3l.Function):
         num_indexed_coefficients = 0
         for b_spline_name in b_spline_names:
             num_indexed_coefficients += self.coefficient_indices[b_spline_name].shape[0]
-        indexed_coefficients = m3l.Variable(name=name, shape=(num_indexed_coefficients,),
+        indexed_coefficients = csdl.Variable(name=name, shape=(num_indexed_coefficients,),
                                             value=np.zeros((num_indexed_coefficients,)))
 
         index_counter = 0
@@ -164,20 +165,20 @@ class BSplineSet(m3l.Function):
         return indexed_coefficients
     
 
-    def assign_coefficients(self, coefficients:Union[m3l.Variable,list[m3l.Variable]], b_spline_names:list[str]=None) -> m3l.Variable:
+    def assign_coefficients(self, coefficients:Union[csdl.Variable,list[csdl.Variable]], b_spline_names:list[str]=None) -> csdl.Variable:
         '''
         Gets the coefficients for the given B-splines.
 
         Parameters
         ----------
-        coefficients  : m3l.Variable
+        coefficients  : csdl.Variable
             The coefficients to assign for the given B-spline names.
         b_spline_names : list[str], optional
             The names of the B-splines to get the coefficients for.
 
         Returns
         -------
-        coefficients : m3l.Variable
+        coefficients : csdl.Variable
             The coefficients for the given B-splines.
         '''
         # if b_spline_names is None:
@@ -205,7 +206,7 @@ class BSplineSet(m3l.Function):
         # If all coefficients are being assigned (in correct order), then just assign it
         if b_spline_names is None or flat_b_spline_names_list == list(self.space.b_spline_to_space.keys()):
             if type(coefficients) is list:
-                coefficients = m3l.vstack(coefficients)
+                coefficients = m3l.vstack(coefficients) # TODO: Come back to this when csdl has vstack
             self.coefficients = coefficients.copy()
             return
 
@@ -237,7 +238,7 @@ class BSplineSet(m3l.Function):
                 indices.append(b_spline_indices)
         
         if len(coefficients) != 1:
-            coefficients = m3l.vstack(tuple(coefficients))
+            coefficients = m3l.vstack(tuple(coefficients))  # TODO: Come back to this when csdl has vstack
         else:
             coefficients = coefficients[0]
 
@@ -247,7 +248,7 @@ class BSplineSet(m3l.Function):
         # return self.coefficients.copy()
 
 
-    # def evaluate(self, b_spline_name:str, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> m3l.Variable:
+    # def evaluate(self, b_spline_name:str, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> csdl.Variable:
     #     b_spline_basis = self.space.compute_evaluation_map(
     #         b_spline_name=b_spline_name, parametric_coordinates=parametric_coordinates, parametric_derivative_order=parametric_derivative_order)
         
@@ -270,7 +271,7 @@ class BSplineSet(m3l.Function):
     #     return points
 
     def evaluate(self, parametric_coordinates:list[tuple[str, np.ndarray]], parametric_derivative_order:tuple=None,
-                 plot:bool=False) -> m3l.Variable:
+                 plot:bool=False) -> csdl.Variable:
         '''
         Evaluates the B-spline set at the given parametric coordinates.
 
@@ -287,16 +288,16 @@ class BSplineSet(m3l.Function):
         # parametric_coordinates_string = ''
         # for coordinate in parametric_coordinates:
         #     parametric_coordinates_string += coordinate[0] + '_' + str(np.linalg.norm(coordinate[1]))
-        # evaluation_map = m3l.Variable(name=f'evaluation_map', shape=evaluation_map.shape, operation=None, 
+        # evaluation_map = csdl.Variable(name=f'evaluation_map', shape=evaluation_map.shape, operation=None, 
         #     value=evaluation_map)
 
         if type(self.coefficients) is np.ndarray:
-            coefficients = m3l.Variable(name='b_spline_set_coefficients', shape=self.coefficients.shape, operation=None, 
+            coefficients = csdl.Variable(name='b_spline_set_coefficients', shape=self.coefficients.shape, operation=None, 
                                              value=self.coefficients)
         else:
             coefficients = self.coefficients
 
-        output = m3l.matvec(evaluation_map, coefficients.copy())
+        output = csdl.matvec(evaluation_map, coefficients)
         # matvec_operation = m3l.MatVec()
         # output = matvec_operation.evaluate(evaluation_map, coefficients)
 
@@ -488,7 +489,7 @@ class BSplineSet(m3l.Function):
                                                     )
             if type(self.coefficients) is np.ndarray:
                 plotting_coefficients = self.coefficients
-            elif type(self.coefficients) is m3l.Variable:
+            elif type(self.coefficients) is csdl.Variable:
                 plotting_coefficients = self.coefficients.value
             else:
                 raise Exception(f"Coefficients are of type {type(self.coefficients)}.")
@@ -581,11 +582,11 @@ class BSplineSet(m3l.Function):
 
         Parameters
         -----------
-        points : {np.ndarray, m3l.Variable}
+        points : {np.ndarray, csdl.Variable}
             The points to be projected onto the system.
         targets : list, optional
             The list of primitives to project onto.
-        direction : {np.ndarray, m3l.Variable}, optional
+        direction : {np.ndarray, csdl.Variable}, optional
             An axis for perfoming projection along an axis. The projection will return the closest point to the axis.
         grid_search_density : int, optional
             The resolution of the grid search prior to the Newton iteration for solving the optimization problem.
@@ -595,7 +596,7 @@ class BSplineSet(m3l.Function):
             A boolean on whether or not to plot the projection result.
         '''
 
-        if type(points) is m3l.Variable:
+        if type(points) is csdl.Variable:
             points = points.value
         if len(points.shape) == 1:
             points = points.reshape((1, -1))    # Last axis is reserved for dimensionality of physical space
@@ -609,7 +610,7 @@ class BSplineSet(m3l.Function):
         if len(targets) == 0:
             raise Exception("No geometry to project on to.")
 
-        if type(direction) is m3l.Variable:
+        if type(direction) is csdl.Variable:
             direction = direction.value
         if direction is None:
             direction = np.zeros((num_points, num_physical_dimensions))
@@ -687,7 +688,7 @@ class BSplineSet(m3l.Function):
 
                 points_shape = points.shape
 
-                if type(points) is m3l.Variable:
+                if type(points) is csdl.Variable:
                     points = points.value
                 if len(points.shape) == 1:
                     points = points.reshape((1, -1))    # Last axis is reserved for dimensionality of physical space
@@ -703,7 +704,7 @@ class BSplineSet(m3l.Function):
                 if len(targets) == 0:
                     raise Exception("No geometry to project on to.")
 
-                if type(direction) is m3l.Variable:
+                if type(direction) is csdl.Variable:
                     direction = direction.value
                 if direction is None:
                     direction = np.zeros((num_points, num_physical_dimensions))
@@ -818,7 +819,7 @@ class BSplineSet(m3l.Function):
                 closest_b_splines = {}
                 for i in closest_fine_grid_point_b_spline_names:    # This is a bit tacky, but create B-spline objects to make projections easier
                     b_spline = BSpline(name=i, space=self.space.spaces[self.space.b_spline_to_space[i]], 
-                                    coefficients=self.coefficients[self.coefficient_indices[i]], num_physical_dimensions=self.num_physical_dimensions[i])
+                                    coefficients=self.coefficients[list(self.coefficient_indices[i])], num_physical_dimensions=self.num_physical_dimensions[i])
                     closest_b_splines[i] = b_spline
 
                 parametric_coordinates = []
@@ -874,7 +875,7 @@ class BSplineSet(m3l.Function):
 
             points_shape = points.shape
 
-            if type(points) is m3l.Variable:
+            if type(points) is csdl.Variable:
                 points = points.value
             if len(points.shape) == 1:
                 points = points.reshape((1, -1))    # Last axis is reserved for dimensionality of physical space
@@ -890,7 +891,7 @@ class BSplineSet(m3l.Function):
             if len(targets) == 0:
                 raise Exception("No geometry to project on to.")
 
-            if type(direction) is m3l.Variable:
+            if type(direction) is csdl.Variable:
                 direction = direction.value
             if direction is None:
                 direction = np.zeros((num_points, num_physical_dimensions))
@@ -1004,8 +1005,18 @@ class BSplineSet(m3l.Function):
             # -- -- If the objective goes down, the branch is followed / logic is repeeated until there are no more branches.
             closest_b_splines = {}
             for i in closest_fine_grid_point_b_spline_names:    # This is a bit tacky, but create B-spline objects to make projections easier
+                print(csdl.manager)
+                csdl.get_current_recorder().visualize_graph('visualization.svg')
+                # print(self.coefficients.shape)
+                # print(self.coefficient_indices[i])
+                # print(self.coefficient_indices[i].shape)
+                # print(type(self.coefficient_indices[i]))
+                # print(list(self.coefficient_indices[i]))
+                print(self.coefficients)
+                print(self.coefficients[list(self.coefficient_indices[i])])
+                # print(self.coefficients[self.coefficient_indices[i]])
                 b_spline = BSpline(name=i, space=self.space.spaces[self.space.b_spline_to_space[i]], 
-                                coefficients=self.coefficients[self.coefficient_indices[i]], num_physical_dimensions=self.num_physical_dimensions[i])
+                                coefficients=self.coefficients[list(self.coefficient_indices[i])], num_physical_dimensions=self.num_physical_dimensions[i])
                 closest_b_splines[i] = b_spline
 
             parametric_coordinates = []
@@ -1051,7 +1062,7 @@ class BSplineSet(m3l.Function):
     
 
 
-    def rotate(self, axis_origin:m3l.Variable, axis_vector:m3l.Variable, angles:m3l.Variable, b_splines:list[str]=None, units:str='degrees'):
+    def rotate(self, axis_origin:csdl.Variable, axis_vector:csdl.Variable, angles:csdl.Variable, b_splines:list[str]=None, units:str='degrees'):
         '''
         Rotates the B-spline set about an axis.
 
@@ -1059,11 +1070,11 @@ class BSplineSet(m3l.Function):
         -----------
         b_splines : list[str]
             The B-splines to rotate.
-        axis_origin : m3l.Variable
+        axis_origin : csdl.Variable
             The origin of the axis of rotation.
-        axis_vector : m3l.Variable
+        axis_vector : csdl.Variable
             The vector of the axis of rotation.
-        angles : m3l.Variable
+        angles : csdl.Variable
             The angle of rotation.
         units : str
             The units of the angle of rotation. {degrees, radians}
@@ -1084,11 +1095,11 @@ class BSplineSet(m3l.Function):
             raise ValueError('The B-splines must be a list of strings.')
         
         if type(axis_origin) is np.ndarray:
-            axis_origin = m3l.Variable(shape=axis_origin.shape, value=axis_origin)
+            axis_origin = csdl.Variable(shape=axis_origin.shape, value=axis_origin)
         if type(axis_vector) is np.ndarray:
-            axis_vector = m3l.Variable(shape=axis_vector.shape, value=axis_vector)
+            axis_vector = csdl.Variable(shape=axis_vector.shape, value=axis_vector)
         if type(angles) is np.ndarray:
-            angles = m3l.Variable(shape=angles.shape, value=angles)
+            angles = csdl.Variable(shape=angles.shape, value=angles)
 
         point_indices_list = []
         for i in range(len(b_splines)):
@@ -1097,6 +1108,7 @@ class BSplineSet(m3l.Function):
         points_indices = np.hstack(point_indices_list)
         rotating_points = self.coefficients.copy()[points_indices]
 
+        # TODO: Move the rotate code to somewhere in geometry since CSDL won't have it as an operation.
         rotated_points = m3l.rotate(points=rotating_points, axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units)
 
         rotated_points = rotated_points.reshape((-1,))

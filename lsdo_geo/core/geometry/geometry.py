@@ -124,7 +124,6 @@ class Geometry(BSplineSet):
 
         self.space = b_spline_set.space
         self.coefficients = b_spline_set.coefficients
-        self.coefficients = b_spline_set.coefficients
         self.num_physical_dimensions = b_spline_set.num_physical_dimensions
         self.coefficient_indices = b_spline_set.coefficient_indices
         self.connections = b_spline_set.connections
