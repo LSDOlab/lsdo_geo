@@ -268,13 +268,13 @@ def _build_b_splines(i, parsed_info_dict, point_table, b_spline_spaces, b_spline
 
 
 def fit_b_spline(fitting_points:np.ndarray, parametric_coordinates:np.ndarray=None, 
-        order:tuple = (4,), num_coefficients:tuple = (10,), knots:np.ndarray = None, name:str = None,
-        return_coefficients:bool = False):
+        order:tuple = (4,), num_coefficients:tuple = (10,), knots:np.ndarray = None, 
+        regularization_parameter:float=None, name:str = None, return_coefficients:bool = False):
     '''
     Solves P = B*C for C 
     '''
-    if len(fitting_points.shape[:-1]) == 1:     # If B-spline curve
-        raise Exception("Function not implemented yet for B-spline curves.")
+    # if len(fitting_points.shape[:-1]) == 1:     # If B-spline curve
+    #     raise Exception("Function not implemented yet for B-spline curves.")
     # elif len(fitting_points.shape[:-1]) == 2:   # If B-spline surface
     #     num_points_u = (fitting_points[:,0,:]).shape[0]
     #     num_points_v = (fitting_points[0,:,:]).shape[0]
@@ -352,12 +352,12 @@ def fit_b_spline(fitting_points:np.ndarray, parametric_coordinates:np.ndarray=No
     
     # elif len(fitting_points.shape[:-1]) == 3:     # If B-spline volume
     #     raise Exception("Function not implemented yet for B-spline volumes.")
-    else:
+    num_points = np.prod(fitting_points.shape[:-1])
+    num_physical_dimensions = fitting_points.shape[-1]
+    if parametric_coordinates is None:
         # num_points_u = (fitting_points[:,0,0,:]).shape[0]
         # num_points_v = (fitting_points[0,:,0,:]).shape[0]
         # num_points_w = (fitting_points[0,0,:,:]).shape[0]
-        num_points = np.prod(fitting_points.shape[:-1])
-        num_physical_dimensions = fitting_points.shape[-1]
         num_parametric_dimensions = len(fitting_points.shape[:-1])
         
         if parametric_coordinates is None:
@@ -370,80 +370,87 @@ def fit_b_spline(fitting_points:np.ndarray, parametric_coordinates:np.ndarray=No
                 parametric_coordinates_tuple[dimensions_index] = parametric_coordinates_tuple[dimensions_index].reshape((-1,1))
 
             parametric_coordinates = np.hstack(parametric_coordinates_tuple)
+    else:
+        # num_parametric_dimensions = 3   # NOTE: HARDCODED FOR NOW
+        num_parametric_dimensions = parametric_coordinates.shape[-1]
 
-        if type(order) is int:
-            order = tuple([order] * num_parametric_dimensions)
-        if len(order) == 1:
-            order = tuple([order[0]] * num_parametric_dimensions)
+    if type(order) is int:
+        order = tuple([order] * num_parametric_dimensions)
+    if len(order) == 1:
+        order = tuple([order[0]] * num_parametric_dimensions)
 
-        if type(num_coefficients) is int:
-            num_coefficients = tuple([num_coefficients] * num_parametric_dimensions)
-        if len(num_coefficients) == 1:
-            num_coefficients = tuple([num_coefficients[0]] * num_parametric_dimensions)
+    if type(num_coefficients) is int:
+        num_coefficients = tuple([num_coefficients] * num_parametric_dimensions)
+    if len(num_coefficients) == 1:
+        num_coefficients = tuple([num_coefficients[0]] * num_parametric_dimensions)
 
-        if knots is None:
-            # knot_vectors = []
-            # knots = np.array([])
-            knots = []
-            knot_indices = []
-            for i in range(num_parametric_dimensions):
-                num_knots = order[i] + num_coefficients[i]
-                knots_i = np.zeros((num_knots,))
-                get_open_uniform(order=order[i], num_coefficients=num_coefficients[i], knot_vector=knots_i)
-                knot_indices.append(np.arange(len(knots), len(knots) + num_knots))
-                # knots = np.hstack((knots, knots_i))
-                knots.append(knots_i)
-            knots = np.hstack(knots)
-        else:
-            knot_indices = []
-            knot_index = 0
-            for i in range(num_parametric_dimensions):
-                # knots.append(knot_vectors[i])
-                num_knots_i = order[i] + num_coefficients[i]
-                knot_indices.append(np.arange(knot_index, knot_index + num_knots_i))
-                knot_index += num_knots_i
+    if knots is None:
+        # knot_vectors = []
+        # knots = np.array([])
+        knots = []
+        knot_indices = []
+        for i in range(num_parametric_dimensions):
+            num_knots = order[i] + num_coefficients[i]
+            knots_i = np.zeros((num_knots,))
+            get_open_uniform(order=order[i], num_coefficients=num_coefficients[i], knot_vector=knots_i)
+            knot_indices.append(np.arange(len(knots), len(knots) + num_knots))
+            # knots = np.hstack((knots, knots_i))
+            knots.append(knots_i)
+        knots = np.hstack(knots)
+    else:
+        knot_indices = []
+        knot_index = 0
+        for i in range(num_parametric_dimensions):
+            # knots.append(knot_vectors[i])
+            num_knots_i = order[i] + num_coefficients[i]
+            knot_indices.append(np.arange(knot_index, knot_index + num_knots_i))
+            knot_index += num_knots_i
 
-        evaluation_matrix = compute_evaluation_map(parametric_coordinates=parametric_coordinates,  order=order,
-            parametric_coefficients_shape=num_coefficients, knots = knots)
+    evaluation_matrix = compute_evaluation_map(parametric_coordinates=parametric_coordinates,  order=order,
+        parametric_coefficients_shape=num_coefficients, knots = knots)
 
-        flattened_fitting_points_shape = tuple((num_points, num_physical_dimensions))
-        flattened_fitting_points = fitting_points.reshape(flattened_fitting_points_shape)
+    flattened_fitting_points_shape = tuple((num_points, num_physical_dimensions))
+    flattened_fitting_points = fitting_points.reshape(flattened_fitting_points_shape)
 
-        # Perform fitting
-        # a = ((evaluation_matrix.T).dot(evaluation_matrix)).toarray()
-        a = ((evaluation_matrix.T).dot(evaluation_matrix))
-        if not return_coefficients:
-            if type(evaluation_matrix) is np.ndarray:
-                if np.linalg.det(evaluation_matrix) == 0:
-                    coefficients,_,_,_ = np.linalg.lstsq(evaluation_matrix, flattened_fitting_points, rcond=None)
-                # else: 
-                #     coefficients = np.linalg.solve(a, evaluation_matrix.T.dot(flattened_fitting_points))
-            elif sps.isspmatrix(evaluation_matrix):
-                import scipy.sparse.linalg as spsl
-                # coefficients = np.zeros((evaluation_matrix.shape[1], flattened_fitting_points.shape[1]))
-                # if sps.linalg.det(a) == 0:
-                # for i in range(flattened_fitting_points.shape[1]):
-                #     coefficients[:,i] = spsl.lsqr(evaluation_matrix, flattened_fitting_points[:,i])[0]  # This is slower because looping is needed
-                # a = evaluation_matrix.T.dot(evaluation_matrix)
-                coefficients = spsl.spsolve(a, evaluation_matrix.T.dot(flattened_fitting_points))
-        else:
-            pseudo_inverse = spsl.pinv(evaluation_matrix)
-            coefficients = m3l.matvec(pseudo_inverse, flattened_fitting_points)
-            return coefficients
+    if regularization_parameter is not None:
+        evaluation_matrix = sps.vstack([evaluation_matrix, np.sqrt(regularization_parameter) * sps.identity(evaluation_matrix.shape[1])])
+        flattened_fitting_points = np.vstack([flattened_fitting_points, np.zeros((evaluation_matrix.shape[1], flattened_fitting_points.shape[1]))])
 
-        space_name = 'order_' + str(order) + 'num_coefficients_' + str(num_coefficients) + 'b_spline_space'
+    # Perform fitting
+    # a = ((evaluation_matrix.T).dot(evaluation_matrix)).toarray()
+    a = ((evaluation_matrix.T).dot(evaluation_matrix))
+    if not return_coefficients:
+        if type(evaluation_matrix) is np.ndarray:
+            if np.linalg.det(evaluation_matrix) == 0:
+                coefficients,_,_,_ = np.linalg.lstsq(evaluation_matrix, flattened_fitting_points, rcond=None)
+            # else: 
+            #     coefficients = np.linalg.solve(a, evaluation_matrix.T.dot(flattened_fitting_points))
+        elif sps.isspmatrix(evaluation_matrix):
+            import scipy.sparse.linalg as spsl
+            # coefficients = np.zeros((evaluation_matrix.shape[1], flattened_fitting_points.shape[1]))
+            # if sps.linalg.det(a) == 0:
+            # for i in range(flattened_fitting_points.shape[1]):
+            #     coefficients[:,i] = spsl.lsqr(evaluation_matrix, flattened_fitting_points[:,i])[0]  # This is slower because looping is needed
+            # a = evaluation_matrix.T.dot(evaluation_matrix)
+            coefficients = spsl.spsolve(a, evaluation_matrix.T.dot(flattened_fitting_points))
+    else:
+        pseudo_inverse = spsl.pinv(evaluation_matrix)
+        coefficients = m3l.matvec(pseudo_inverse, flattened_fitting_points)
+        return coefficients
 
-        b_spline_space = BSplineSpace(name=space_name, order=order, parametric_coefficients_shape=num_coefficients, 
-             knots=knots, knot_indices=knot_indices)
+    space_name = 'order_' + str(order) + 'num_coefficients_' + str(num_coefficients) + 'b_spline_space'
 
-        b_spline = BSpline(
-            name=name,
-            space=b_spline_space,
-            coefficients=coefficients.reshape((-1,)),
-            num_physical_dimensions=num_physical_dimensions
-        )
+    b_spline_space = BSplineSpace(name=space_name, order=order, parametric_coefficients_shape=num_coefficients, 
+            knots=knots, knot_indices=knot_indices)
 
-        return b_spline
+    b_spline = BSpline(
+        name=name,
+        space=b_spline_space,
+        coefficients=coefficients.reshape((-1,)),
+        num_physical_dimensions=num_physical_dimensions
+    )
+
+    return b_spline
 
 '''
 Evaluate a B-spline and refit it with the desired parameters.

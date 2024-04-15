@@ -119,7 +119,9 @@ class FFDBlock(BSpline):
         '''
         plotting_elements = additional_plotting_elements.copy()
 
-        plotting_elements = super().plot(point_types=point_types, plot_types=plot_types, opacity=opacity, color=color,
+        plotting_elements = super().plot(point_types=['evaluated_points'], plot_types=['surface'], opacity=opacity, color=color,
+                                         surface_texture=surface_texture, additional_plotting_elements=plotting_elements, show=False)
+        plotting_elements = super().plot(point_types=['coefficients'], plot_types=['point_cloud'], opacity=opacity, color=color,
                                          surface_texture=surface_texture, additional_plotting_elements=plotting_elements, show=False)
 
         if plot_embedded_points:

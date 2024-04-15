@@ -7,6 +7,8 @@ import numpy as np
 import scipy.sparse as sps
 # import array_mapper as am
 import vedo
+from pathlib import Path
+import pickle
 
 from lsdo_b_splines_cython.cython.basis_matrix_surface_py import get_basis_surface_matrix
 from lsdo_b_splines_cython.cython.surface_projection_py import compute_surface_projection
@@ -105,6 +107,12 @@ class BSpline(m3l.Function):
         # self.num_coefficients = self.space.num_coefficients
         # self.num_parametric_dimensions = self.space.num_parametric_dimensions
 
+    def copy(self):
+        copied_name = f'{self.name}_copy'
+        copied_coefficients = self.coefficients.copy()
+        space = self.space
+        return BSpline(name=copied_name, space=space, coefficients=copied_coefficients, num_physical_dimensions=self.num_physical_dimensions)
+
     
     def evaluate(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None, plot:bool=False) -> m3l.Variable:
         # basis_matrix = self.compute_evaluation_map(parametric_coordinates, parametric_derivative_order)
@@ -115,7 +123,11 @@ class BSpline(m3l.Function):
         
         # evaluation_map = m3l.Variable(name=f'evaluation_map', shape=evaluation_map.shape, operation=None, value=evaluation_map)
 
-        output = m3l.matvec(evaluation_map, self.coefficients)
+        if type(self.coefficients) is m3l.Variable:
+            output = m3l.matvec(evaluation_map, self.coefficients)
+        else:
+            output = evaluation_map.dot(self.coefficients)
+            output = m3l.Variable(name=f'{self.name}_evaluated_points', shape=output.shape, value=output)
 
         if plot:
             plotter = vedo.Plotter()
@@ -186,10 +198,34 @@ class BSpline(m3l.Function):
             num_points = 1
 
         if direction is None:
-            direction = np.zeros((num_points*np.cumprod(points.shape)[-1],))
+            direction = np.zeros((num_points*points.shape[-1],))
         else:
             direction = np.tile(direction, num_points)
 
+        # check if projection is stored
+        from pathlib import Path
+        Path("stored_projections").mkdir(parents=True, exist_ok=True)
+        stored_projection_file_name_points_part = f'{np.linalg.norm(points, axis=0)}_{direction[:3]}_{grid_search_density}_{max_iterations}_'
+        stored_projection_file_name_b_spline_part = f'{self.name}_{np.linalg.norm(self.coefficients.value)}_{self.space.order}_projection.pickle'
+        stored_projection_filename = stored_projection_file_name_points_part + stored_projection_file_name_b_spline_part
+        stored_projection_file_path = Path('stored_projections/' + stored_projection_filename)
+        if stored_projection_file_path.is_file():
+            with open(f'stored_projections/{stored_projection_filename}', 'rb') as handle:
+                parametric_coordinates = pickle.load(handle)
+                if plot:
+                    # Plot the surfaces that are projected onto
+                    plotter = vedo.Plotter()
+                    b_spline_meshes = self.plot(plot_types=['surface'], opacity=0.25, show=False)
+                    # Plot 
+                    plotting_points = []
+                    projected_points = self.evaluate(parametric_coordinates=parametric_coordinates)
+                    flattened_projected_points = (projected_points.value).reshape((num_points, -1)) # last axis usually has length 3 for x,y,z
+                    plotting_b_spline_coefficients = vedo.Points(flattened_projected_points, r=12, c='blue')  # TODO make this (1,3) instead of (3,)
+                    plotting_points.append(plotting_b_spline_coefficients)
+                    plotter.show(b_spline_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
+                return parametric_coordinates
+
+        # If projection is not stored, continue with projection
         if self.space.num_parametric_dimensions == 2:
             u_vec_flattened = np.zeros(num_points)
             v_vec_flattened = np.zeros(num_points)
@@ -213,10 +249,6 @@ class BSpline(m3l.Function):
             u_vec_flattened = np.zeros(num_points)
             v_vec_flattened = np.zeros(num_points)
             w_vec_flattened = np.zeros(num_points)
-
-            # print('FFD PROJECTION')
-            # print(self.name)
-            # exit()
 
             compute_volume_projection(
                 np.array([self.space.order[0]]), np.array([self.coefficients_shape[0]]),
@@ -250,6 +282,8 @@ class BSpline(m3l.Function):
         # u_vec = u_vec_flattened.reshape(tuple(input_shape[:-1],)+(1,))
         # v_vec = v_vec_flattened.reshape(tuple(input_shape[:-1],)+(1,))
         # parametric_coordinates = np.concatenate((u_vec, v_vec), axis=-1)
+        with open(f'stored_projections/{stored_projection_filename}', 'wb+') as handle:
+            pickle.dump(parametric_coordinates, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         return parametric_coordinates
 
@@ -465,7 +499,8 @@ class BSpline(m3l.Function):
             return plotting_elements
         else:
             return plotting_elements
-        
+
+    
     def plot_volume(self, point_types:list=['evaluated_points'], plot_types:list=['surface'],
               opacity:float=1., color:str='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
         '''
@@ -493,35 +528,160 @@ class BSpline(m3l.Function):
         plotting_elements = additional_plotting_elements.copy()
 
         coefficients = self.coefficients.value.reshape(self.space.parametric_coefficients_shape + (self.num_physical_dimensions,))
-        
-        plotting_elements = self.plot_section(coefficients[:,:,0], plot_types=plot_types, opacity=opacity, 
-                                              additional_plotting_elements=plotting_elements, show=False)
-        plotting_elements = self.plot_section(coefficients[:,:,-1], plot_types=plot_types, opacity=opacity, 
-                                              additional_plotting_elements=plotting_elements, show=False)
-        plotting_elements = self.plot_section(coefficients[:,0,:], plot_types=plot_types, opacity=opacity, 
-                                              additional_plotting_elements=plotting_elements, show=False)
-        plotting_elements = self.plot_section(coefficients[:,-1,:], plot_types=plot_types, opacity=opacity, 
-                                              additional_plotting_elements=plotting_elements, show=False)
-        plotting_elements = self.plot_section(coefficients[0,:,:], plot_types=plot_types, opacity=opacity, 
-                                              additional_plotting_elements=plotting_elements, show=False)
-        plotting_elements = self.plot_section(coefficients[-1,:,:], plot_types=plot_types, opacity=opacity, 
-                                              additional_plotting_elements=plotting_elements, show=False)
 
+        for point_type in point_types:
+            if point_type == 'evaluated_points':
+                num_points_per_dimension = 50
+                linspace_dimension = np.linspace(0., 1., num_points_per_dimension)
+                linspace_meshgrid = np.meshgrid(linspace_dimension, linspace_dimension)
+                linspace_dimension1 = linspace_meshgrid[0].reshape((-1,1))
+                linspace_dimension2 = linspace_meshgrid[1].reshape((-1,1))
+                zeros_dimension = np.zeros((num_points_per_dimension**2,)).reshape((-1,1))
+                ones_dimension = np.ones((num_points_per_dimension**2,)).reshape((-1,1))
+
+                parametric_coordinates = []
+                parametric_coordinates.append(np.column_stack((linspace_dimension1, linspace_dimension2, zeros_dimension)))
+                parametric_coordinates.append(np.column_stack((linspace_dimension1, linspace_dimension2, ones_dimension)))
+                parametric_coordinates.append(np.column_stack((linspace_dimension1, zeros_dimension, linspace_dimension2)))
+                parametric_coordinates.append(np.column_stack((linspace_dimension1, ones_dimension, linspace_dimension2)))
+                parametric_coordinates.append(np.column_stack((zeros_dimension, linspace_dimension1, linspace_dimension2)))
+                parametric_coordinates.append(np.column_stack((ones_dimension, linspace_dimension1, linspace_dimension2)))
+
+                num_points_u = num_points_per_dimension
+                num_points_v = num_points_per_dimension
+                plotting_points_shape = []
+                for i in range(6):
+                    plotting_points_shape.append((num_points_u, num_points_v, self.num_physical_dimensions))
+
+                plotting_points = []
+                for parametric_coordinate_set in parametric_coordinates:
+                    evaluation_map = self.compute_evaluation_map(parametric_coordinates=parametric_coordinate_set, expand_map_for_physical=False)
+                    plotting_points.append(evaluation_map.dot(self.coefficients.value.reshape((-1,3))))
+
+                plotting_colors = []
+                if type(color) is BSpline:
+                    for parametric_coordinate_set in parametric_coordinates:
+                        plotting_colors.append(color.evaluate(parametric_coordinate_set).value)
+            
+            elif point_type == 'coefficients':
+                plotting_points = []
+                plotting_points.append(coefficients[0,:,:].reshape((-1, self.num_physical_dimensions)))
+                plotting_points.append(coefficients[-1,:,:].reshape((-1, self.num_physical_dimensions)))
+                plotting_points.append(coefficients[:,0,:].reshape((-1, self.num_physical_dimensions)))
+                plotting_points.append(coefficients[:,-1,:].reshape((-1, self.num_physical_dimensions)))
+                plotting_points.append(coefficients[:,:,0].reshape((-1, self.num_physical_dimensions)))
+                plotting_points.append(coefficients[:,:,-1].reshape((-1, self.num_physical_dimensions)))
+
+                plotting_points_shape = []
+                plotting_points_shape.append(coefficients[0,:,:].shape)
+                plotting_points_shape.append(coefficients[-1,:,:].shape)
+                plotting_points_shape.append(coefficients[:,0,:].shape)
+                plotting_points_shape.append(coefficients[:,-1,:].shape)
+                plotting_points_shape.append(coefficients[:,:,0].shape)
+                plotting_points_shape.append(coefficients[:,:,-1].shape)
+
+
+            for i in range(6):
+                if 'point_cloud' in plot_types:
+                    plotting_elements.append(vedo.Points(plotting_points[i], r=6).opacity(opacity).color('darkred'))
+
+                if 'surface' in plot_types or 'wireframe' in plot_types:
+                    num_plot_u = plotting_points_shape[i][0]
+                    num_plot_v = plotting_points_shape[i][1]
+
+                    vertices = []
+                    faces = []
+                    plotting_points_reshaped = plotting_points[i].reshape(plotting_points_shape[i])
+                    for u_index in range(num_plot_u):
+                        for v_index in range(num_plot_v):
+                            vertex = tuple(plotting_points_reshaped[u_index, v_index, :])
+                            vertices.append(vertex)
+                            if u_index != 0 and v_index != 0:
+                                face = tuple((
+                                    (u_index-1)*num_plot_v+(v_index-1),
+                                    (u_index-1)*num_plot_v+(v_index),
+                                    (u_index)*num_plot_v+(v_index),
+                                    (u_index)*num_plot_v+(v_index-1),
+                                ))
+                                faces.append(face)
+
+                    mesh = vedo.Mesh([vertices, faces]).opacity(opacity).lighting(surface_texture)
+                    if type(color) is str:
+                        mesh.color(color)
+                    elif type(color) is BSpline:
+                        mesh.cmap('jet', plotting_colors[i])
+
+                if 'surface' in plot_types:
+                    plotting_elements.append(mesh)
+                if 'wireframe' in plot_types:
+                    mesh = vedo.Mesh([vertices, faces]).opacity(opacity)
+                    plotting_elements.append(mesh.wireframe())
+
+        
         if show:
             plotter = vedo.Plotter()
-            plotter.show(plotting_elements, f'B-spline Volume: {self.name}', axes=1, viewup="z", interactive=True)
+            plotter.show(plotting_elements, f'B-spline Volume: {self.name}', axes=1, viewup="y", interactive=True)
             return plotting_elements
         else:
             return plotting_elements
 
-    def plot_section(self, points:np.ndarray, plot_types:list=['surface'],
+        
+    # def plot_volume(self, point_types:list=['evaluated_points'], plot_types:list=['surface'],
+    #           opacity:float=1., color:str='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
+    #     '''
+    #     Plots the B-spline Surface.
+
+    #     Parameters
+    #     -----------
+    #     points_type : list
+    #         The type of points to be plotted. {evaluated_points, coefficients}
+    #     plot_types : list
+    #         The type of plot {surface, wireframe, point_cloud}
+    #     opactity : float
+    #         The opacity of the plot. 0 is fully transparent and 1 is fully opaque.
+    #     color : str
+    #         The 6 digit color code to plot the B-spline as.
+    #     surface_texture : str = "" {"metallic", "glossy", ...}, optional
+    #         The surface texture to determine how light bounces off the surface.
+    #         See https://github.com/marcomusy/vedo/blob/master/examples/basic/lightings.py for options.
+    #     additional_plotting_elemets : list
+    #         Vedo plotting elements that may have been returned from previous plotting functions that should be plotted with this plot.
+    #     show : bool
+    #         A boolean on whether to show the plot or not. If the plot is not shown, the Vedo plotting element is returned.
+    #     '''
+    #     # Plot the 6 sides of the volume
+    #     plotting_elements = additional_plotting_elements.copy()
+
+    #     coefficients = self.coefficients.value.reshape(self.space.parametric_coefficients_shape + (self.num_physical_dimensions,))
+        
+    #     plotting_elements = self.plot_section(coefficients[:,:,0], plot_types=plot_types, opacity=opacity, color=color,
+    #                                           additional_plotting_elements=plotting_elements, show=False)
+    #     plotting_elements = self.plot_section(coefficients[:,:,-1], plot_types=plot_types, opacity=opacity, color=color,
+    #                                           additional_plotting_elements=plotting_elements, show=False)
+    #     plotting_elements = self.plot_section(coefficients[:,0,:], plot_types=plot_types, opacity=opacity, color=color,
+    #                                           additional_plotting_elements=plotting_elements, show=False)
+    #     plotting_elements = self.plot_section(coefficients[:,-1,:], plot_types=plot_types, opacity=opacity, color=color,
+    #                                           additional_plotting_elements=plotting_elements, show=False)
+    #     plotting_elements = self.plot_section(coefficients[0,:,:], plot_types=plot_types, opacity=opacity, color=color,
+    #                                           additional_plotting_elements=plotting_elements, show=False)
+    #     plotting_elements = self.plot_section(coefficients[-1,:,:], plot_types=plot_types, opacity=opacity, color=color,
+    #                                           additional_plotting_elements=plotting_elements, show=False)
+
+    #     if show:
+    #         plotter = vedo.Plotter()
+    #         plotter.show(plotting_elements, f'B-spline Volume: {self.name}', axes=1, viewup="y", interactive=True)
+    #         return plotting_elements
+    #     else:
+    #         return plotting_elements
+
+    def plot_section(self, points:np.ndarray, point_types:list=['evaluated_points'], plot_types:list=['surface'],
               opacity:float=1., color:str='#00629B', surface_texture:str="", additional_plotting_elements:list=[], show:bool=True):
         '''
         Plots the B-spline Surface.
 
         Parameters
         -----------
-        points_type : list
+        point_types : list  NOTE: Doesn't use this. Only plots coefficients.
             The type of points to be plotted. {evaluated_points, coefficients}
         plot_types : list
             The type of plot {surface, wireframe, point_cloud}
@@ -591,9 +751,12 @@ if __name__ == "__main__":
     space_of_cubic_b_spline_surfaces_with_10_cp = BSplineSpace(name='cubic_b_spline_surfaces_10_cp', order=(order,order),
                                                               parametric_coefficients_shape=(num_coefficients,num_coefficients))
 
+    # coefficients_line = np.zeros((num_coefficients,))
+    # coefficients_line[order//2:-order//2] = np.linspace(0., 1., num_coefficients-order)
+    # coefficients_line[-order//2:] = 1.
     coefficients_line = np.linspace(0., 1., num_coefficients)
     coefficients_x, coefficients_y = np.meshgrid(coefficients_line,coefficients_line)
-    coefficients = np.stack((coefficients_x, coefficients_y, 0.1*np.random.rand(10,10)), axis=-1)
+    coefficients = np.stack((coefficients_x, coefficients_y, 0.1*np.random.rand(num_coefficients,num_coefficients)), axis=-1)
 
     b_spline = BSpline(name='test_b_spline', space=space_of_cubic_b_spline_surfaces_with_10_cp, coefficients=coefficients,
                         num_physical_dimensions=num_physical_dimensions)
@@ -618,13 +781,16 @@ if __name__ == "__main__":
 
     b_spline.project(points=projecting_points, plot=True)
 
-    u_vec = np.einsum('i,j->ij', np.linspace(0., 1., 25), np.ones(25)).flatten().reshape((-1,1))
-    v_vec = np.einsum('i,j->ij', np.ones(25), np.linspace(0., 1., 25)).flatten().reshape((-1,1))
+    num_fitting_points = 25
+    u_vec = np.einsum('i,j->ij', np.linspace(0., 1., num_fitting_points), np.ones(num_fitting_points)).flatten().reshape((-1,1))
+    v_vec = np.einsum('i,j->ij', np.ones(num_fitting_points), np.linspace(0., 1., num_fitting_points)).flatten().reshape((-1,1))
     parametric_coordinates = np.hstack((u_vec, v_vec))
 
-    grid_points = b_spline.evaluate(parametric_coordinates=parametric_coordinates, parametric_derivative_order=(0,0)).value.reshape((25,25,3))
+    grid_points = b_spline.evaluate(parametric_coordinates=parametric_coordinates, parametric_derivative_order=(0,0), plot=True
+                                    ).value.reshape((num_fitting_points,num_fitting_points,3))
 
     from lsdo_geo.splines.b_splines.b_spline_functions import fit_b_spline
 
-    new_b_spline = fit_b_spline(fitting_points=grid_points, parametric_coordinates=parametric_coordinates)
+    new_b_spline = fit_b_spline(fitting_points=grid_points, parametric_coordinates=parametric_coordinates, num_coefficients=(15,),
+                                order=(5,), regularization_parameter=1.e-3)
     new_b_spline.plot()
