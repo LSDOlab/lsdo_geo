@@ -3,7 +3,7 @@ from lsdo_geo.core.geometry.geometry import Geometry
 import os
 from pathlib import Path
 import pickle
-import m3l
+import csdl_alpha as csdl
 
 
 def import_geometry(file_name:str, name:str='geometry', parallelize:bool=True) -> Geometry:
@@ -36,7 +36,7 @@ def import_geometry(file_name:str, name:str='geometry', parallelize:bool=True) -
 
     # Since we can't pickle csdl variables, convert them back to csdl variables
     for b_spline_name, b_spline in b_splines.items():
-        b_spline.coefficients = m3l.Variable(
+        b_spline.coefficients = csdl.Variable(
             shape=b_spline.coefficients.shape,
             value=b_spline.coefficients,
             name=b_spline_name+'_coefficients')

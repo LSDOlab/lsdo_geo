@@ -3,7 +3,8 @@ import pickle
 from dataclasses import dataclass
 from pathlib import Path
 import pickle
-import m3l
+# import m3l
+import csdl_alpha as csdl
 from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
 from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
 from typing import Union
@@ -121,7 +122,7 @@ class Geometry(BSplineSet):
                 pickle.dump(b_spline_set, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         # # Since we can't pickle csdl variables, convert them back to csdl variables
-        b_spline_set.coefficients = m3l.Variable(
+        b_spline_set.coefficients = csdl.Variable(
             shape=b_spline_set.coefficients.shape,
             value=b_spline_set.coefficients,
             name=self.name+'_coefficients')
@@ -135,7 +136,7 @@ class Geometry(BSplineSet):
         self.num_coefficients = b_spline_set.num_coefficients
 
     
-    def plot_meshes(self, meshes:list[m3l.Variable], mesh_plot_types:list[str]=['wireframe'], mesh_opacity:float=1., mesh_color:str='#F5F0E6',
+    def plot_meshes(self, meshes:list[csdl.Variable], mesh_plot_types:list[str]=['wireframe'], mesh_opacity:float=1., mesh_color:str='#F5F0E6',
                 b_splines:list[str]=None, b_splines_plot_types:list[str]=['surface'], b_splines_opacity:float=0.25, b_splines_color:str='#00629B',
                 b_splines_surface_texture:str="", additional_plotting_elements:list=[], camera:dict=None, show:bool=True):
         '''
@@ -186,7 +187,7 @@ class Geometry(BSplineSet):
                                       additional_plotting_elements=plotting_elements,show=False)
 
         for mesh in meshes:
-            if type(mesh) is m3l.Variable:
+            if type(mesh) is csdl.Variable:
                 points = mesh.value
             else:
                 points = mesh
@@ -195,7 +196,7 @@ class Geometry(BSplineSet):
                 # Is vector, so draw an arrow
                 processed_points = ()
                 for point in mesh:
-                    if type(point) is m3l.Variable:
+                    if type(point) is csdl.Variable:
                         processed_points = processed_points + (point.value,)
                     else:
                         processed_points = processed_points + (point,)
@@ -262,15 +263,17 @@ class Geometry(BSplineSet):
 if __name__ == "__main__":
     from lsdo_geo.core.geometry.geometry_functions import import_geometry
     # import array_mapper as am
-    import m3l
     import time
     import scipy.sparse as sps
+
+    recorder = csdl.Recorder(inline=True)
+    recorder.start()
 
     # import sys
     # sys.setrecursionlimit(10000)
 
-    # var1 = m3l.Variable('var1', shape=(2,3), value=np.array([[1., 2., 3.], [4., 5., 6.]]))
-    # var2 = m3l.Variable('var2', shape=(2,3), value=np.array([[1., 2., 3.], [4., 5., 6.]]))
+    # var1 = csdl.Variable('var1', shape=(2,3), value=np.array([[1., 2., 3.], [4., 5., 6.]]))
+    # var2 = csdl.Variable('var2', shape=(2,3), value=np.array([[1., 2., 3.], [4., 5., 6.]]))
     # var3 = var1 + var2
     # print(var3)
 
@@ -289,7 +292,6 @@ if __name__ == "__main__":
     # print('Find connections time: ', t4-t3)
     print('Plot time: ', t5-t4)
 
-    m3l_model = m3l.Model()
 
     projected_points1_coordinates = geometry.project(np.array([[0.2, 1., 10.], [0.5, 1., 1.]]), plot=False, direction=np.array([0., 0., -1.]))
     projected_points2_coordinates = geometry.project(np.array([[0.2, 0., 10.], [0.5, 1., 1.]]), plot=False, max_iterations=100)
@@ -297,7 +299,7 @@ if __name__ == "__main__":
     projected_points1 = geometry.evaluate(projected_points1_coordinates, plot=False)
     projected_points2 = geometry.evaluate(projected_points2_coordinates, plot=False)
 
-    test_linspace = m3l.linspace(projected_points1, projected_points2)
+    test_linspace = csdl.linspace(projected_points1, projected_points2)
 
     import vedo
     plotter = vedo.Plotter()
@@ -379,7 +381,7 @@ if __name__ == "__main__":
     axis_origin = geometry.evaluate(geometry.project(np.array([0.5, -10., 0.5])))
     axis_vector = geometry.evaluate(geometry.project(np.array([0.5, 10., 0.5]))) - axis_origin
     angles = 45
-    # geometry3.coefficients = m3l.rotate(points=geometry3.coefficients.reshape((-1,3)), axis_origin=axis_origin, axis_vector=axis_vector,
+    # geometry3.coefficients = csdl.rotate(points=geometry3.coefficients.reshape((-1,3)), axis_origin=axis_origin, axis_vector=axis_vector,
     #                                     angles=angles, units='degrees').reshape((-1,))
     # # geometry3.plot()
 
@@ -413,7 +415,7 @@ if __name__ == "__main__":
 
     # leading_edge = geometry4.evaluate(leading_edge_parametric_coordinates, plot=False).reshape((-1,3))
     # trailing_edge = geometry4.evaluate(trailing_edge_parametric_coordinates, plot=False).reshape((-1,3))
-    # chord_surface = m3l.linspace(leading_edge, trailing_edge, num_steps=4)
+    # chord_surface = csdl.linspace(leading_edge, trailing_edge, num_steps=4)
 
     # # geometry4.plot_meshes(meshes=chord_surface, mesh_plot_types=['wireframe'], mesh_opacity=1., mesh_color='#F5F0E6',)
 
@@ -424,7 +426,7 @@ if __name__ == "__main__":
 
     # leading_edge = geometry4.evaluate(leading_edge_parametric_coordinates, plot=False).reshape((-1,3))
     # trailing_edge = geometry4.evaluate(trailing_edge_parametric_coordinates, plot=False).reshape((-1,3))
-    # chord_surface = m3l.linspace(leading_edge, trailing_edge, num_steps=4)
+    # chord_surface = csdl.linspace(leading_edge, trailing_edge, num_steps=4)
 
     # # geometry4.plot_meshes(meshes=chord_surface, mesh_plot_types=['wireframe'], mesh_opacity=1., mesh_color='#F5F0E6',)
 
@@ -442,17 +444,17 @@ if __name__ == "__main__":
     right_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='right_wing_rigid_body_translation_z', axis=2)
     import lsdo_geo.splines.b_splines as bsp
     constant_b_spline_curve_1_dof_space = bsp.BSplineSpace(name='constant_b_spline_curve_1_dof_space', order=1, parametric_coefficients_shape=(1,))
-    right_wing_rigid_body_translation_x_coefficients = m3l.Variable(name='right_wing_rigid_body_translation_x_coefficients', shape=(1,), 
+    right_wing_rigid_body_translation_x_coefficients = csdl.Variable(name='right_wing_rigid_body_translation_x_coefficients', shape=(1,), 
                                                                     value=np.array([0.,]))
     right_wing_rigid_body_translation_x_b_spline = bsp.BSpline(name='right_wing_rigid_body_translation_x_b_spline', 
                                                                space=constant_b_spline_curve_1_dof_space, 
                                            coefficients=right_wing_rigid_body_translation_x_coefficients, num_physical_dimensions=1)
-    right_wing_rigid_body_translation_y_coefficients = m3l.Variable(name='right_wing_rigid_body_translation_y_coefficients', shape=(1,), 
+    right_wing_rigid_body_translation_y_coefficients = csdl.Variable(name='right_wing_rigid_body_translation_y_coefficients', shape=(1,), 
                                                                     value=np.array([0.,]))
     right_wing_rigid_body_translation_y_b_spline = bsp.BSpline(name='right_wing_rigid_body_translation_y_b_spline', 
                                                                space=constant_b_spline_curve_1_dof_space, 
                                            coefficients=right_wing_rigid_body_translation_y_coefficients, num_physical_dimensions=1)
-    right_wing_rigid_body_translation_z_coefficients = m3l.Variable(name='right_wing_rigid_body_translation_z_coefficients', shape=(1,), 
+    right_wing_rigid_body_translation_z_coefficients = csdl.Variable(name='right_wing_rigid_body_translation_z_coefficients', shape=(1,), 
                                                                     value=np.array([0.,]))
     right_wing_rigid_body_translation_z_b_spline = bsp.BSpline(name='right_wing_rigid_body_translation_z_b_spline',
                                                                space=constant_b_spline_curve_1_dof_space, 
@@ -484,7 +486,7 @@ if __name__ == "__main__":
     # scaling_matrix = sps.eye(left_wing_ffd_block.num_coefficients)*2
     # scaling_matrix = scaling_matrix.tocsc()
 
-    # new_left_wing_ffd_block_coefficients = m3l.matvec(scaling_matrix, left_wing_ffd_block.coefficients)
+    # new_left_wing_ffd_block_coefficients = csdl.matvec(scaling_matrix, left_wing_ffd_block.coefficients)
     # left_wing_coefficients = left_wing_ffd_block.evaluate(new_left_wing_ffd_block_coefficients, plot=True)
     # geometry5.assign_coefficients(coefficients=left_wing_coefficients, b_spline_names=left_wing.b_spline_names)
 
@@ -506,25 +508,25 @@ if __name__ == "__main__":
     linear_b_spline_curve_3_dof_space = bsp.BSplineSpace(name='linear_b_spline_curve_3_dof_space', order=2, parametric_coefficients_shape=(3,))
     cubic_b_spline_curve_5_dof_space = bsp.BSplineSpace(name='cubic_b_spline_curve_5_dof_space', order=4, parametric_coefficients_shape=(5,))
 
-    left_wing_sweep_coefficients = m3l.Variable(name='left_wing_sweep_coefficients', shape=(2,), value=np.array([0., 0.]))
+    left_wing_sweep_coefficients = csdl.Variable(name='left_wing_sweep_coefficients', shape=(2,), value=np.array([0., 0.]))
     left_wing_sweep_b_spline = bsp.BSpline(name='left_wing_sweep_b_spline', space=linear_b_spline_curve_2_dof_space, 
                                            coefficients=left_wing_sweep_coefficients, num_physical_dimensions=1)
     
-    left_wing_dihedral_coefficients = m3l.Variable(name='left_wing_dihedral_coefficients', shape=(2,), value=np.array([0., 0.]))
+    left_wing_dihedral_coefficients = csdl.Variable(name='left_wing_dihedral_coefficients', shape=(2,), value=np.array([0., 0.]))
     left_wing_dihedral_b_spline = bsp.BSpline(name='left_wing_dihedral_b_spline', space=linear_b_spline_curve_2_dof_space, 
                                            coefficients=left_wing_dihedral_coefficients, num_physical_dimensions=1)
     
-    left_wing_wingspan_stretch_coefficients_state = m3l.Variable(name='left_wing_wingspan_stretch_coefficients_state', shape=(2,), 
+    left_wing_wingspan_stretch_coefficients_state = csdl.Variable(name='left_wing_wingspan_stretch_coefficients_state', shape=(2,), 
                                                                  value=np.array([0., 0.]))
     left_wing_wingspan_stretch_b_spline = bsp.BSpline(name='left_wing_wingspan_stretch_b_spline', space=linear_b_spline_curve_2_dof_space,
                                                      coefficients=left_wing_wingspan_stretch_coefficients_state, num_physical_dimensions=1)
     
-    left_wing_chord_stretch_coefficients_state = m3l.Variable(name='left_wing_chord_stretch_coefficients_state', shape=(3,), 
+    left_wing_chord_stretch_coefficients_state = csdl.Variable(name='left_wing_chord_stretch_coefficients_state', shape=(3,), 
                                                         value=np.array([0., 0., 0.]))
     left_wing_chord_stretch_b_spline = bsp.BSpline(name='left_wing_chord_stretch_b_spline', space=linear_b_spline_curve_3_dof_space,
                                                     coefficients=left_wing_chord_stretch_coefficients_state, num_physical_dimensions=1)
     
-    left_wing_twist_coefficients = m3l.Variable(name='left_wing_twist_coefficients', shape=(5,),
+    left_wing_twist_coefficients = csdl.Variable(name='left_wing_twist_coefficients', shape=(5,),
                                                 value=np.array([0., 30., 20., 10., 0.]))
     # left_wing_twist_b_spline = bsp.BSpline(name='left_wing_twist_b_spline', space=cubic_b_spline_curve_5_dof_space,
     #                                          coefficients=left_wing_twist_coefficients, num_physical_dimensions=1)
@@ -556,14 +558,14 @@ if __name__ == "__main__":
 
     # leading_edge = geometry5.evaluate(leading_edge_parametric_coordinates, plot=False).reshape((-1,3))
     # trailing_edge = geometry5.evaluate(trailing_edge_parametric_coordinates, plot=False).reshape((-1,3))
-    # chord_surface = m3l.linspace(leading_edge, trailing_edge, num_steps=4)
+    # chord_surface = csdl.linspace(leading_edge, trailing_edge, num_steps=4)
 
     # geometry5.plot_meshes(meshes=chord_surface, mesh_plot_types=['wireframe'], mesh_opacity=1., mesh_color='#F5F0E6',)
     # geometry5.plot()
 
     left_wing_root_quarter_chord_ish = geometry5.evaluate([('WingGeom, 1, 8', np.array([0., 0.6]),)], plot=False)
     left_wing_tip_quarter_chord_ish = geometry5.evaluate([('WingGeom, 1, 8', np.array([1., 0.6]),)], plot=False)
-    half_wingspan = m3l.norm(left_wing_tip_quarter_chord_ish - left_wing_root_quarter_chord_ish)    # NOTE: Consider adding dot operation to m3l
+    half_wingspan = csdl.norm(left_wing_tip_quarter_chord_ish - left_wing_root_quarter_chord_ish)    # NOTE: Consider adding dot operation to m3l
 
     left_wing_root_leading_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([0., 0.]),)], plot=False)
     left_wing_root_trailing_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([0., 1.]),)], plot=False)
@@ -571,9 +573,9 @@ if __name__ == "__main__":
     left_wing_tip_trailing_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([1., 1.]),)], plot=False)
     left_wing_mid_leading_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([0.5, 0.]),)], plot=False)
     left_wing_mid_trailing_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([0.5, 1.]),)], plot=False)
-    root_chord = m3l.norm(left_wing_root_leading_edge - left_wing_root_trailing_edge)
-    tip_chord = m3l.norm(left_wing_tip_leading_edge - left_wing_tip_trailing_edge)
-    mid_chord = m3l.norm(left_wing_mid_leading_edge - left_wing_mid_trailing_edge)
+    root_chord = csdl.norm(left_wing_root_leading_edge - left_wing_root_trailing_edge)
+    tip_chord = csdl.norm(left_wing_tip_leading_edge - left_wing_tip_trailing_edge)
+    mid_chord = csdl.norm(left_wing_mid_leading_edge - left_wing_mid_trailing_edge)
 
     right_wing_root_quarter_chord_ish = geometry5.evaluate([('WingGeom, 0, 3', np.array([0., 0.6]),)], plot=False)
     left_wing_right_wing_connection = left_wing_root_quarter_chord_ish - right_wing_root_quarter_chord_ish
@@ -592,17 +594,17 @@ if __name__ == "__main__":
     parameterization_solver.declare_input(name='tip_chord', input=tip_chord)
     parameterization_solver.declare_input(name='mid_chord', input=mid_chord)
     parameterization_solver.declare_input(name='left_wing_right_wing_connection', input=left_wing_right_wing_connection)
-    # parameterization_solver.declare_input(name='left_wing_right_wing_connection', input=m3l.norm(left_wing_right_wing_connection))
+    # parameterization_solver.declare_input(name='left_wing_right_wing_connection', input=csdl.norm(left_wing_right_wing_connection))
     
 
-    half_wingspan_input = m3l.Variable(name='half_wingspan', shape=(1,), value=np.array([10.]))
-    root_chord_input = m3l.Variable(name='root_chord', shape=(1,), value=np.array([4.]))
-    tip_chord_input = m3l.Variable(name='tip_chord', shape=(1,), value=np.array([0.5]))
-    mid_chord_input = m3l.Variable(name='mid_chord', shape=(1,), value=np.array([2.5]))
+    half_wingspan_input = csdl.Variable(name='half_wingspan', shape=(1,), value=np.array([10.]))
+    root_chord_input = csdl.Variable(name='root_chord', shape=(1,), value=np.array([4.]))
+    tip_chord_input = csdl.Variable(name='tip_chord', shape=(1,), value=np.array([0.5]))
+    mid_chord_input = csdl.Variable(name='mid_chord', shape=(1,), value=np.array([2.5]))
 
-    left_wing_right_wing_connection_input = m3l.Variable(name='left_wing_right_wing_connection', shape=(3,), value=left_wing_right_wing_connection.value)
-    # left_wing_right_wing_connection_input = m3l.Variable(name='left_wing_right_wing_connection', shape=(1,), 
-    #                                                      value=m3l.norm(left_wing_right_wing_connection).value)
+    left_wing_right_wing_connection_input = csdl.Variable(name='left_wing_right_wing_connection', shape=(3,), value=left_wing_right_wing_connection.value)
+    # left_wing_right_wing_connection_input = csdl.Variable(name='left_wing_right_wing_connection', shape=(1,), 
+    #                                                      value=csdl.norm(left_wing_right_wing_connection).value)
 
     parameterization_inputs = {
         'half_wingspan':half_wingspan_input,
@@ -654,7 +656,7 @@ if __name__ == "__main__":
     #                                                                                  parameterized_points=left_wing_ffd_block.coefficients,
     #                                                         parameterized_points_shape=left_wing_ffd_block.coefficients_shape)
 
-    left_wing_dihedral_coefficients = m3l.Variable(name='left_wing_dihedral_coefficients', shape=(2,), value=np.array([1., 0.]))
+    left_wing_dihedral_coefficients = csdl.Variable(name='left_wing_dihedral_coefficients', shape=(2,), value=np.array([1., 0.]))
     left_wing_dihedral_b_spline = bsp.BSpline(name='left_wing_dihedral_b_spline', space=linear_b_spline_curve_2_dof_space, 
                                            coefficients=left_wing_dihedral_coefficients, num_physical_dimensions=1)
     
@@ -667,7 +669,7 @@ if __name__ == "__main__":
                                                     coefficients=left_wing_chord_stretch_coefficients, num_physical_dimensions=1)
     
     left_wing_ffd_block_sectional_parameterization.add_sectional_rotation(name='left_wing_twist', axis=1)
-    left_wing_twist_coefficients = m3l.Variable(name='left_wing_twist_coefficients', shape=(5,),
+    left_wing_twist_coefficients = csdl.Variable(name='left_wing_twist_coefficients', shape=(5,),
                                                 value=np.array([0., 30., 20., 10., 0.]))
     left_wing_twist_b_spline = bsp.BSpline(name='left_wing_twist_b_spline', space=cubic_b_spline_curve_5_dof_space,
                                              coefficients=left_wing_twist_coefficients, num_physical_dimensions=1)
@@ -699,23 +701,25 @@ if __name__ == "__main__":
 
     leading_edge = geometry5.evaluate(leading_edge_parametric_coordinates, plot=False).reshape((-1,3))
     trailing_edge = geometry5.evaluate(trailing_edge_parametric_coordinates, plot=False).reshape((-1,3))
-    chord_surface = m3l.linspace(leading_edge, trailing_edge, num_steps=4)
+    chord_surface = csdl.linspace(leading_edge, trailing_edge, num_steps=4)
 
     # geometry5.plot_meshes(meshes=chord_surface, mesh_plot_types=['wireframe'], mesh_opacity=1., mesh_color='#F5F0E6',)
     # geometry5.plot()
 
     left_wing_root_quarter_chord_ish = geometry5.evaluate([('WingGeom, 1, 8', np.array([0., 0.6]),)], plot=False)
     left_wing_tip_quarter_chord_ish = geometry5.evaluate([('WingGeom, 1, 8', np.array([1., 0.6]),)], plot=False)
-    half_wingspan_output = m3l.norm(left_wing_tip_quarter_chord_ish - left_wing_root_quarter_chord_ish)    # NOTE: Consider adding dot operation to m3l
+    half_wingspan_output = csdl.norm(left_wing_tip_quarter_chord_ish - left_wing_root_quarter_chord_ish)    # NOTE: Consider adding dot operation to m3l
 
     left_wing_root_leading_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([0., 0.]),)], plot=False)
     left_wing_root_trailing_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([0., 1.]),)], plot=False)
     left_wing_tip_leading_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([1., 0.]),)], plot=False)
     left_wing_tip_trailing_edge = geometry5.evaluate([('WingGeom, 1, 8', np.array([1., 1.]),)], plot=False)
-    root_chord_output = m3l.norm(left_wing_root_leading_edge - left_wing_root_trailing_edge)
-    tip_chord_output = m3l.norm(left_wing_tip_leading_edge - left_wing_tip_trailing_edge)
+    root_chord_output = csdl.norm(left_wing_root_leading_edge - left_wing_root_trailing_edge)
+    tip_chord_output = csdl.norm(left_wing_tip_leading_edge - left_wing_tip_trailing_edge)
 
     geometry5.plot()
+    '''
+    # NOTE: No CSDL simulator yet.
 
     m3l_model.register_output(half_wingspan_output)
 
@@ -730,6 +734,7 @@ if __name__ == "__main__":
     print('new root chord', root_chord_output)
     # THEN REVISIT ACTUATIONS
     # -- Do I want to create the framework of creating actuators, etc.?
+    '''
 
 
     print('hi')

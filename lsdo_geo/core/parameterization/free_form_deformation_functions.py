@@ -85,7 +85,7 @@ def construct_tight_fit_ffd_block(name:str, entities:list[Union[np.ndarray, csdl
     '''
     Constructs an FFD block around the given entities and embeds them within.
     '''
-    if type(entities) is not list:
+    if not isinstance(entities, list):
         entities = [entities]
 
     from lsdo_geo.splines.b_splines.b_spline_functions import create_cartesian_enclosure_block

@@ -297,7 +297,7 @@ class BSplineSet(m3l.Function):
         else:
             coefficients = self.coefficients
 
-        output = csdl.matvec(evaluation_map, coefficients)
+        output = csdl.sparse.matvec(evaluation_map, coefficients)
         # matvec_operation = m3l.MatVec()
         # output = matvec_operation.evaluate(evaluation_map, coefficients)
 
