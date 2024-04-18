@@ -106,21 +106,25 @@ class Geometry(BSplineSet):
             The order of the B-splines to use in each direction.
         '''
         from lsdo_geo.splines.b_splines.b_spline_functions import refit_b_spline_set
-        from lsdo_geo import REFIT_FOLDER
 
-        saved_refit_file = Path(REFIT_FOLDER / f'{self.name}_{num_coefficients}_{order}_{fit_resolution}_refit_dict.pickle')
-        if saved_refit_file.is_file():
-            with open(saved_refit_file, 'rb') as handle:
-                refit_dict = pickle.load(handle)
-                b_spline_set = refit_dict['b_spline_set']
-
+        file_path = f"stored_files/refits/{self.name}_{num_coefficients}_{order}_{fit_resolution}_stored_refit.pickle"
+        path = Path(file_path)
+        if path.is_file():
+            with open(file_path, 'rb') as handle:
+                b_spline_set = pickle.load(handle)
         else:
-            refit_dict = {}
             b_spline_set = refit_b_spline_set(self, order, num_coefficients, fit_resolution, parallelize=parallelize)
-            refit_dict['b_spline_set'] = b_spline_set
-            with open(REFIT_FOLDER / f'{self.name}_{num_coefficients}_{order}_{fit_resolution}_refit_dict.pickle', 'wb+') as handle:
-                pickle.dump(refit_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            Path("stored_files/refits").mkdir(parents=True, exist_ok=True)
+            with open(file_path, 'wb+') as handle:
+                # Since we can't pickle csdl variables, convert them back to numpy arrays
+                b_spline_set.coefficients = b_spline_set.coefficients.value
+                pickle.dump(b_spline_set, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
+        # # Since we can't pickle csdl variables, convert them back to csdl variables
+        b_spline_set.coefficients = m3l.Variable(
+            shape=b_spline_set.coefficients.shape,
+            value=b_spline_set.coefficients,
+            name=self.name+'_coefficients')
 
         self.space = b_spline_set.space
         self.coefficients = b_spline_set.coefficients
