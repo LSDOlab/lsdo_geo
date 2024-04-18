@@ -3,12 +3,13 @@ from lsdo_geo.core.parameterization.ffd_block import FFDBlock
 from typing import Union
 import numpy as np
 import m3l
+import csdl_alpha as csdl
 from lsdo_geo.splines.b_splines.b_spline import BSpline
 from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
 from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
 from lsdo_geo.core.geometry.geometry import Geometry
 
-def construct_ffd_block_around_entities(name:str, entities:list[Union[np.ndarray, m3l.Variable, BSpline, BSplineSet, BSplineSubSet]],
+def construct_ffd_block_around_entities(name:str, entities:list[Union[np.ndarray, csdl.Variable, BSpline, BSplineSet, BSplineSubSet]],
                                         num_coefficients:tuple[int]=5, order:tuple[int]=2, num_physical_dimensions:int=3):
     '''
     Constructs an FFD block around the given entities and embeds them within.
@@ -22,7 +23,7 @@ def construct_ffd_block_around_entities(name:str, entities:list[Union[np.ndarray
     for entity in entities:
         if type(entity) is np.ndarray:
             enclosed_points.append(entity)
-        elif type(entity) is m3l.Variable:
+        elif type(entity) is csdl.Variable:
             enclosed_points.append(entity.value)
         elif type(entity) is BSpline or type(entity) is BSplineSet or type(entity) is Geometry:
             enclosed_points.append(entity.coefficients.value)
@@ -44,7 +45,7 @@ def construct_ffd_block_around_entities(name:str, entities:list[Union[np.ndarray
     return ffd_block
 
 
-def construct_ffd_block_from_corners(name:str, entities:list[Union[np.ndarray, m3l.Variable, BSpline, BSplineSet, BSplineSubSet]],
+def construct_ffd_block_from_corners(name:str, entities:list[Union[np.ndarray, csdl.Variable, BSpline, BSplineSet, BSplineSubSet]],
                                      corners:np.ndarray,
                                         num_coefficients:tuple[int]=5, order:tuple[int]=2, num_physical_dimensions:int=3):
     '''
@@ -60,7 +61,7 @@ def construct_ffd_block_from_corners(name:str, entities:list[Union[np.ndarray, m
     for entity in entities:
         if type(entity) is np.ndarray:
             enclosed_points.append(entity)
-        elif type(entity) is m3l.Variable:
+        elif type(entity) is csdl.Variable:
             enclosed_points.append(entity.value)
         elif type(entity) is BSpline or type(entity) is BSplineSet or type(entity) is Geometry:
             enclosed_points.append(entity.coefficients.value)
@@ -79,7 +80,7 @@ def construct_ffd_block_from_corners(name:str, entities:list[Union[np.ndarray, m
     return ffd_block
 
 
-def construct_tight_fit_ffd_block(name:str, entities:list[Union[np.ndarray, m3l.Variable, BSpline, BSplineSet, BSplineSubSet]],
+def construct_tight_fit_ffd_block(name:str, entities:list[Union[np.ndarray, csdl.Variable, BSpline, BSplineSet, BSplineSubSet]],
                                         num_coefficients:tuple[int]=5, order:tuple[int]=2, num_physical_dimensions:int=3):
     '''
     Constructs an FFD block around the given entities and embeds them within.
@@ -93,7 +94,7 @@ def construct_tight_fit_ffd_block(name:str, entities:list[Union[np.ndarray, m3l.
     for entity in entities:
         if type(entity) is np.ndarray:
             enclosed_points.append(entity)
-        elif type(entity) is m3l.Variable:
+        elif type(entity) is csdl.Variable:
             enclosed_points.append(entity.value)
         elif type(entity) is BSpline or type(entity) is BSplineSet or type(entity) is Geometry:
             enclosed_points.append(entity.coefficients.value)

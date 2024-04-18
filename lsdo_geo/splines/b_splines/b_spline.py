@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Union
 import m3l
-import csdl
+import csdl_alpha as csdl
 
 import numpy as np
 import scipy.sparse as sps
@@ -31,14 +31,14 @@ class BSpline(m3l.Function):
         The name of the B-spline.
     space : BSplineSpace
         The space that the B-spline is in.
-    coefficients : m3l.Variable
+    coefficients : csdl.Variable
         The coefficients of the B-spline.
     num_physical_dimensions : int
         The number of physical dimensions that the B-spline is in.
 
     Methods
     -------
-    evaluate(parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> m3l.Variable
+    evaluate(parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None) -> csdl.Variable
         Evaluates the B-spline at the given parametric coordinates.
     compute_evaluation_map(parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None,
                            expand_map_for_physical:bool=True) -> sps.csc_matrix
@@ -91,14 +91,14 @@ class BSpline(m3l.Function):
         self.num_coefficients = np.prod(self.coefficients_shape)
         self.num_coefficient_elements = self.space.num_coefficient_elements
 
-        if len(self.coefficients) != self.num_coefficients:
+        if self.coefficients.shape[0] != self.num_coefficients:
             if np.prod(self.coefficients.shape) == np.prod(self.coefficients_shape):
                 self.coefficients = self.coefficients.reshape((-1,))
             else:
                 raise Exception("Coefficients size doesn't match the function space's coefficients shape.")
             
         if type(self.coefficients) is np.ndarray:
-            self.coefficients = m3l.Variable(name=f'{self.name}_coefficients', shape=self.coefficients.shape, value=self.coefficients)
+            self.coefficients = csdl.Variable(name=f'{self.name}_coefficients', shape=self.coefficients.shape, value=self.coefficients)
 
         # Promote attributes to make this object a bit more intuitive
         # Not doing this for now to make objects more lightweight
@@ -114,20 +114,20 @@ class BSpline(m3l.Function):
         return BSpline(name=copied_name, space=space, coefficients=copied_coefficients, num_physical_dimensions=self.num_physical_dimensions)
 
     
-    def evaluate(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None, plot:bool=False) -> m3l.Variable:
+    def evaluate(self, parametric_coordinates:np.ndarray, parametric_derivative_order:tuple=None, plot:bool=False) -> csdl.Variable:
         # basis_matrix = self.compute_evaluation_map(parametric_coordinates, parametric_derivative_order)
         # output = basis_matrix.dot(self.coefficients)
 
         evaluation_map = self.compute_evaluation_map(parametric_coordinates=parametric_coordinates,
                                                      parametric_derivative_order=parametric_derivative_order)
         
-        # evaluation_map = m3l.Variable(name=f'evaluation_map', shape=evaluation_map.shape, operation=None, value=evaluation_map)
+        # evaluation_map = csdl.Variable(name=f'evaluation_map', shape=evaluation_map.shape, operation=None, value=evaluation_map)
 
-        if type(self.coefficients) is m3l.Variable:
-            output = m3l.matvec(evaluation_map, self.coefficients)
+        if type(self.coefficients) is csdl.Variable:
+            output = csdl.matvec(evaluation_map, self.coefficients)
         else:
             output = evaluation_map.dot(self.coefficients)
-            output = m3l.Variable(name=f'{self.name}_evaluated_points', shape=output.shape, value=output)
+            output = csdl.Variable(name=f'{self.name}_evaluated_points', shape=output.shape, value=output)
 
         if plot:
             plotter = vedo.Plotter()
@@ -183,11 +183,11 @@ class BSpline(m3l.Function):
     
 
     def project(self, points:np.ndarray, direction:np.ndarray=None, grid_search_density:int=50,
-                    max_iterations:int=100, plot:bool=False) -> m3l.Variable:
+                    max_iterations:int=100, plot:bool=False) -> csdl.Variable:
         if len(points.shape) == 1:
             points = points.reshape((-1,self.num_physical_dimensions))
 
-        if type(points) is m3l.Variable:
+        if type(points) is csdl.Variable:
             points = points.value
         
         input_shape = points.shape
@@ -744,6 +744,9 @@ class BSpline(m3l.Function):
 
 if __name__ == "__main__":
     from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
+
+    recorder = csdl.Recorder(inline=True)
+    recorder.start()
 
     num_coefficients = 10
     num_physical_dimensions = 3
