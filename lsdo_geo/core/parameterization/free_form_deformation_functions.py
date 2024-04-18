@@ -199,7 +199,7 @@ def construct_tight_fit_ffd_block(name:str, entities:list[Union[np.ndarray, csdl
         u = int(index[0])
         v = int(index[1])
         w = int(index[2])
-        corners[u,v,w,:] = corner_point
+        corners[u,v,w,:] = corner_point.reshape((3,))
 
     ffd_block = construct_ffd_block_from_corners(name=name, entities=entities, corners=corners, num_coefficients=num_coefficients, order=order, num_physical_dimensions=num_physical_dimensions)    
     

@@ -2,7 +2,7 @@ import numpy as np
 import scipy.sparse as sps
 import m3l
 import vedo
-import csdl
+import csdl_alpha as csdl
 
 from dataclasses import dataclass
 
@@ -115,7 +115,7 @@ class VolumeSectionalParameterization:
         self.linear_parameter_maps = {}
         self.rotational_axes = {}
 
-        self.updated_points = self.parameterized_points.copy()
+        self.updated_points = self.parameterized_points # NOTE: Removing .copy() here because csdl doesn't have one.
 
     def add_parameter(self, name: str, map: sps.csc_matrix):
         """
@@ -330,6 +330,12 @@ class VolumeSectionalParameterization:
         """
         # # Assemble linear maps
         # self.assemble()
+        if sectional_parameters.stretches is None:
+            sectional_parameters.stretches = {}
+        if sectional_parameters.translations is None:
+            sectional_parameters.translations = {}
+        if sectional_parameters.rotations is None:
+            sectional_parameters.rotations = {}
 
         # Add parameters that are found.
         for axis, parameter in sectional_parameters.stretches.items():
@@ -365,7 +371,8 @@ class VolumeSectionalParameterization:
                     + f"Expected: {self.num_sections}, got: {parameter_variable.shape}"
                 )
 
-            delta_points = csdl.matvec(map=parameter_map, x=parameter_variable)
+            delta_points = csdl.sparse.matvec(parameter_map, parameter_variable.reshape((parameter_variable.size, 1)))
+            delta_points = delta_points.reshape((delta_points.size,))
             updated_points = updated_points + delta_points
 
         # updated_points = self.parameterized_points.reshape((-1,))

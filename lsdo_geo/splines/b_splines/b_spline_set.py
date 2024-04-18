@@ -13,7 +13,6 @@ from lsdo_geo.splines.b_splines.b_spline import BSpline
 from dataclasses import dataclass
 from typing import Union
 
-import os
 import pickle
 from pathlib import Path
 import string 
@@ -28,7 +27,6 @@ def generate_random_string(length=5):
     
     return random_string
 
-# TODO: I'm going to leave this class as surface for now, but I want to generalize to n-dimensional.
 
 # TODO: NOTE: I want to include connectivity information (architecture/graph/network) in the B-spline set space.
 # -- Can perform projections that span multiple B-splines.
@@ -198,19 +196,19 @@ class BSplineSet(m3l.Function):
 
         # return self.coefficients.copy()
 
-        if type(coefficients) is list:
+        if isinstance(coefficients, list):
             flat_b_spline_names_list = [item for sublist in b_spline_names for item in sublist]
         else:
             flat_b_spline_names_list = b_spline_names
 
         # If all coefficients are being assigned (in correct order), then just assign it
         if b_spline_names is None or flat_b_spline_names_list == list(self.space.b_spline_to_space.keys()):
-            if type(coefficients) is list:
+            if isinstance(coefficients, list):
                 coefficients = m3l.vstack(coefficients) # TODO: Come back to this when csdl has vstack
-            self.coefficients = coefficients.copy()
+            self.coefficients = coefficients
             return
 
-        if type(coefficients) is not list:
+        if not isinstance(coefficients, list):
             coefficients = [coefficients]
             b_spline_names = [b_spline_names]
 
@@ -297,7 +295,8 @@ class BSplineSet(m3l.Function):
         else:
             coefficients = self.coefficients
 
-        output = csdl.sparse.matvec(evaluation_map, coefficients)
+        output = csdl.sparse.matvec(evaluation_map, coefficients.reshape((coefficients.size,1)))
+        output = output.reshape((output.size,))
         # matvec_operation = m3l.MatVec()
         # output = matvec_operation.evaluate(evaluation_map, coefficients)
 
@@ -336,8 +335,6 @@ class BSplineSet(m3l.Function):
             The order of the parametric derivative to evaluate the B-spline set at.
         '''
         from lsdo_geo.splines.b_splines.b_spline_functions import compute_evaluation_map
-
-        import time
 
         # Rearrange evaluation into per B-spline instead of per-point to vectorize and make computationally feasible
         output_size = 0
@@ -438,10 +435,7 @@ class BSplineSet(m3l.Function):
         '''
         from lsdo_geo.splines.b_splines.b_spline_functions import compute_evaluation_map
 
-        if b_spline_names is None:
-            b_spline_names = list(self.space.b_spline_to_space.keys())
-
-        if type(grid_resolution) is dict:
+        if isinstance(grid_resolution, dict):
             if len(grid_resolution.keys()) != len(b_spline_names):
                 raise ValueError('The number of B-spline names does not match the number of grid resolutions.')
         elif isinstance(grid_resolution, int):
@@ -886,12 +880,12 @@ class BSplineSet(m3l.Function):
         
         if b_splines is None:
             b_splines = list(self.coefficient_indices.keys())
-        if type(b_splines) is str:
+        if isinstance(b_splines, str):
             b_splines = [b_splines]
-        if type(b_splines) is not list:
+        if not isinstance(b_splines, list):
             raise ValueError('The B-splines must be a list of strings.')
         
-        if type(axis_origin) is np.ndarray:
+        if isinstance(axis_origin, np.ndarray):
             axis_origin = csdl.Variable(shape=axis_origin.shape, value=axis_origin)
         if type(axis_vector) is np.ndarray:
             axis_vector = csdl.Variable(shape=axis_vector.shape, value=axis_vector)
@@ -1109,9 +1103,9 @@ class BSplineSet(m3l.Function):
                     plotting_points_shape = self.space.spaces[self.space.b_spline_to_space[b_spline_name]].parametric_coefficients_shape + \
                         (self.num_physical_dimensions[b_spline_name],)
                 b_spline_plotting_points = plotting_points[plotting_points_indices[b_spline_name]].reshape(plotting_points_shape)
-                if type(color) is BSplineSet:
+                if isinstance(color, BSplineSet):
                     b_spline_plotting_colors = plotting_colors[plotting_colors_indices[b_spline_name]].reshape(plotting_points_shape)
-                elif type(color) is str:
+                elif isinstance(color, str):
                     b_spline_plotting_colors = color
 
 
@@ -1326,12 +1320,12 @@ class BSplineSet(m3l.Function):
         player_1 = b_spline_1
         player_2 = b_spline_2
         num_physical_dimensions = self.num_physical_dimensions[player_1]
-        if type(player_1) is str:
+        if isinstance(player_1, str):
             # player_1 = self.b_splines[player_1]   # Not storing B-spline objects in this set.
             player_1_space = self.space.spaces[self.space.b_spline_to_space[player_1]]
             player_1 = BSpline(name=player_1, space=player_1_space, coefficients=self.coefficients[self.coefficient_indices[player_1]],
                                num_physical_dimensions=num_physical_dimensions)
-        if type(player_2) is str:
+        if isinstance(player_2, str):
             player_2_space = self.space.spaces[self.space.b_spline_to_space[player_2]]
             player_2 = BSpline(name=player_2, space=player_2_space, coefficients=self.coefficients[self.coefficient_indices[player_2]],
                                num_physical_dimensions=num_physical_dimensions)
@@ -1356,9 +1350,6 @@ class BSplineSet(m3l.Function):
 
 
 if __name__ == "__main__":
-    from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
-    from lsdo_b_splines_cython.cython.get_open_uniform_py import get_open_uniform
-
     # ''' Creating B-spline set manually '''
 
     # num_coefficients1 = 10

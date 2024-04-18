@@ -1,5 +1,4 @@
 import csdl_alpha as csdl
-import m3l
 import numpy as np
 
 from lsdo_geo.core.parameterization.parameterization_solver import (
@@ -10,6 +9,7 @@ from lsdo_geo.core.parameterization.free_form_deformation_functions import (
 )
 from lsdo_geo.core.parameterization.volume_sectional_parameterization import (
     VolumeSectionalParameterization,
+    VolumeSectionalParameterizationInputs
 )
 
 from lsdo_geo.splines.b_splines.b_spline import BSpline
@@ -37,8 +37,6 @@ leading_edge_center = geometry.project(np.array([0.0, 0.0, 0.0]))
 trailing_edge_center = geometry.project(np.array([1.0, 0.0, 0.0]))
 # endregion
 
-"""
-Commenting this out because I can't evaluate the geometry.
 # region Mesh definitions
 # region Wing Camber Surface
 num_spanwise = 19
@@ -51,17 +49,16 @@ leading_edge_physical = geometry.evaluate(leading_edge_parametric)
 trailing_edge_parametric = geometry.project(points_to_project_on_trailing_edge, direction=np.array([0., 0., -1.]))
 trailing_edge_physical = geometry.evaluate(trailing_edge_parametric)
 
-chord_surface = m3l.linspace(leading_edge_physical, trailing_edge_physical, num_chordwise).value.reshape((num_chordwise, num_spanwise, 3))
+chord_surface = csdl.linspace(leading_edge_physical, trailing_edge_physical, num_chordwise).value.reshape((num_chordwise, num_spanwise, 3))
 upper_surface_wireframe_parametric = geometry.project(chord_surface + np.array([0., 0., 1]), direction=np.array([0., 0., -1.]), plot=False)
 lower_surface_wireframe_parametric = geometry.project(chord_surface - np.array([0., 0., 1]), direction=np.array([0., 0., -1.]), plot=False)
 upper_surface_wireframe = geometry.evaluate(upper_surface_wireframe_parametric)
 lower_surface_wireframe = geometry.evaluate(lower_surface_wireframe_parametric)
-camber_surface = m3l.linspace(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((num_chordwise, num_spanwise, 3))
+camber_surface = csdl.linspace(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((num_chordwise, num_spanwise, 3))
 # geometry.plot_meshes([camber_surface])
 # endregion
 
 # endregion
-"""
 
 # region Parameterization
 
@@ -162,11 +159,20 @@ sweep_translation_sectional_parameters = sweep_translation_b_spline.evaluate(
     parametric_b_spline_inputs
 )
 
-sectional_parameters = {
-    "chord_stretching": chord_stretch_sectional_parameters,
-    "wingspan_stretching": wingspan_stretch_sectional_parameters,
-    "sweep_translation": sweep_translation_sectional_parameters,
-}
+# sectional_parameters = {
+#     "chord_stretching": chord_stretch_sectional_parameters,
+#     "wingspan_stretching": wingspan_stretch_sectional_parameters,
+#     "sweep_translation": sweep_translation_sectional_parameters,
+# }
+# ffd_sectional_parameterization.add_sectional_stretch(name='chord_stretching', axis=0)
+# ffd_sectional_parameterization.add_sectional_translation(name='wingspan_stretching', axis=1)
+# ffd_sectional_parameterization.add_sectional_translation(name='sweep_translation', axis=0)
+
+sectional_parameters = VolumeSectionalParameterizationInputs(
+    stretches={0: chord_stretch_sectional_parameters},
+    translations={1: wingspan_stretch_sectional_parameters, 0: sweep_translation_sectional_parameters},
+)
+
 ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters)
 
 geometry_coefficients = ffd_block.evaluate(ffd_coefficients)
@@ -175,54 +181,54 @@ geometry.assign_coefficients(geometry_coefficients)
 
 parameterization_inputs = {}
 
-wingspan = m3l.norm(
+wingspan = csdl.norm(
     geometry.evaluate(leading_edge_right) - geometry.evaluate(leading_edge_left)
 )
-root_chord = m3l.norm(
+root_chord = csdl.norm(
     geometry.evaluate(trailing_edge_center) - geometry.evaluate(leading_edge_center)
 )
-tip_chord_left = m3l.norm(
+tip_chord_left = csdl.norm(
     geometry.evaluate(trailing_edge_left) - geometry.evaluate(leading_edge_left)
 )
-tip_chord_right = m3l.norm(
+tip_chord_right = csdl.norm(
     geometry.evaluate(trailing_edge_right) - geometry.evaluate(leading_edge_right)
 )
 
-parameterization_solver.declare_input(name="wingspan", input=wingspan)
-parameterization_solver.declare_input(name="root_chord", input=root_chord)
-parameterization_solver.declare_input(name="tip_chord_left", input=tip_chord_left)
-parameterization_solver.declare_input(name="tip_chord_right", input=tip_chord_right)
+# parameterization_solver.declare_input(name="wingspan", input=wingspan)
+# parameterization_solver.declare_input(name="root_chord", input=root_chord)
+# parameterization_solver.declare_input(name="tip_chord_left", input=tip_chord_left)
+# parameterization_solver.declare_input(name="tip_chord_right", input=tip_chord_right)
 # endregion
 
-# region Evaluate Parameterization Solver
-parameterization_inputs["wingspan"] = m3l.Variable(
-    name="wingspan", shape=(1,), value=np.array([6.0]), dv_flag=True
-)
-parameterization_inputs["root_chord"] = m3l.Variable(
-    name="root_chord", shape=(1,), value=np.array([2.0]), dv_flag=True
-)
-parameterization_inputs["tip_chord_left"] = m3l.Variable(
-    name="tip_chord_left", shape=(1,), value=np.array([0.5])
-)
-parameterization_inputs["tip_chord_right"] = m3l.Variable(
-    name="tip_chord_right", shape=(1,), value=np.array([0.5])
-)
-# geometry.plot()
+# # region Evaluate Parameterization Solver
+# parameterization_inputs["wingspan"] = csdl.Variable(
+#     name="wingspan", shape=(1,), value=np.array([6.0])
+# )
+# parameterization_inputs["root_chord"] = csdl.Variable(
+#     name="root_chord", shape=(1,), value=np.array([2.0])
+# )
+# parameterization_inputs["tip_chord_left"] = csdl.Variable(
+#     name="tip_chord_left", shape=(1,), value=np.array([0.5])
+# )
+# parameterization_inputs["tip_chord_right"] = csdl.Variable(
+#     name="tip_chord_right", shape=(1,), value=np.array([0.5])
+# )
+# # geometry.plot()
 
-parameterization_solver_states = parameterization_solver.evaluate(
-    inputs=parameterization_inputs
-)
-# endregion
+# parameterization_solver_states = parameterization_solver.evaluate(
+#     inputs=parameterization_inputs
+# )
+# # endregion
 
 
 # region Evaluate Parameterization Forward Model Using Solver States
-parametric_b_spline_inputs = np.linspace(0.0, 1.0, num_ffd_sections).reshape((-1, 1))
-chord_stretching_b_spline.coefficients = parameterization_solver_states[
-    "chord_stretching_b_spline_coefficients"
-]
-wingspan_stretching_b_spline.coefficients = parameterization_solver_states[
-    "wingspan_stretching_b_spline_coefficients"
-]
+# parametric_b_spline_inputs = np.linspace(0.0, 1.0, num_ffd_sections).reshape((-1, 1))
+# chord_stretching_b_spline.coefficients = parameterization_solver_states[
+#     "chord_stretching_b_spline_coefficients"
+# ]
+# wingspan_stretching_b_spline.coefficients = parameterization_solver_states[
+#     "wingspan_stretching_b_spline_coefficients"
+# ]
 
 chord_stretch_sectional_parameters = chord_stretching_b_spline.evaluate(
     parametric_b_spline_inputs
@@ -234,11 +240,16 @@ sweep_translation_sectional_parameters = sweep_translation_b_spline.evaluate(
     parametric_b_spline_inputs
 )
 
-sectional_parameters = {
-    "chord_stretching": chord_stretch_sectional_parameters,
-    "wingspan_stretching": wingspan_stretch_sectional_parameters,
-    "sweep_translation": sweep_translation_sectional_parameters,
-}
+# sectional_parameters = {
+#     "chord_stretching": chord_stretch_sectional_parameters,
+#     "wingspan_stretching": wingspan_stretch_sectional_parameters,
+#     "sweep_translation": sweep_translation_sectional_parameters,
+# }
+sectional_parameters = VolumeSectionalParameterizationInputs(
+    stretches={0: chord_stretch_sectional_parameters},
+    translations={1: wingspan_stretch_sectional_parameters, 0: sweep_translation_sectional_parameters},
+)
+
 ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters)
 
 geometry_coefficients = ffd_block.evaluate(ffd_coefficients)
@@ -247,22 +258,22 @@ geometry.assign_coefficients(geometry_coefficients)
 
 parameterization_inputs = {}
 
-wingspan = m3l.norm(
+wingspan = csdl.norm(
     geometry.evaluate(leading_edge_right) - geometry.evaluate(leading_edge_left)
 )
-root_chord = m3l.norm(
+root_chord = csdl.norm(
     geometry.evaluate(trailing_edge_center) - geometry.evaluate(leading_edge_center)
 )
-tip_chord_left = m3l.norm(
+tip_chord_left = csdl.norm(
     geometry.evaluate(trailing_edge_left) - geometry.evaluate(leading_edge_left)
 )
-tip_chord_right = m3l.norm(
+tip_chord_right = csdl.norm(
     geometry.evaluate(trailing_edge_right) - geometry.evaluate(leading_edge_right)
 )
 
 upper_surface_wireframe = geometry.evaluate(upper_surface_wireframe_parametric)
 lower_surface_wireframe = geometry.evaluate(lower_surface_wireframe_parametric)
-camber_surface = m3l.linspace(
+camber_surface = csdl.linspace(
     upper_surface_wireframe, lower_surface_wireframe, 1
 ).reshape((num_chordwise, num_spanwise, 3))
 # endregion

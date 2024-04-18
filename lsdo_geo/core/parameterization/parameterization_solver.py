@@ -90,7 +90,7 @@ class ParameterizationSolver:
 
         if self.declared_states is None:
             self.declared_states = {}
-        self.declared_states[name] = state.copy()
+        self.declared_states[name] = state
 
         if self.state_penalties is None:
             self.state_penalties = {}

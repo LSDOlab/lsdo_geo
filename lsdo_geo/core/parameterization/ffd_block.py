@@ -1,5 +1,6 @@
 import numpy as np
-import m3l
+# import m3l
+import csdl_alpha as csdl
 from lsdo_geo.splines.b_splines.b_spline import BSpline
 from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
 from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
@@ -19,14 +20,14 @@ class FFDBlock(BSpline):
         The name of the free form deformation (FFD) block.
     space : BSplineSpace
         The space that the B-spline is in.
-    coefficients : m3l.Variable
+    coefficients : csdl.Variable
         The coefficients of the B-spline FFD block.
     num_physical_dimensions : int
         The number of physical dimensions that the FFD block is in.
-    embedded_points : m3l.Variable
+    embedded_points : csdl.Variable
         The points embedded within the FFD block.
     '''
-    embedded_entities : list[Union[m3l.Variable,BSpline,BSplineSet,BSplineSubSet,Geometry]]
+    embedded_entities : list[Union[csdl.Variable,BSpline,BSplineSet,BSplineSubSet,Geometry]]
 
     def __post_init__(self):
         super().__post_init__()
@@ -38,19 +39,19 @@ class FFDBlock(BSpline):
         embedded_points_indices = {}
         embedded_points_index = 0
         for embedded_entity in self.embedded_entities:
-            if type(embedded_entity) is m3l.Variable:
+            if type(embedded_entity) is csdl.Variable:
                 embedded_points.append(embedded_entity.value)
                 embedded_points_indices[embedded_entity.name] = np.arange(embedded_points_index, embedded_points_index+len(embedded_entity))
                 embedded_points_index += len(embedded_entity)
             elif type(embedded_entity) is BSpline or type(embedded_entity) is BSplineSet or type(embedded_entity) is Geometry:
                 embedded_points.append(embedded_entity.coefficients.value)
                 embedded_points_indices[embedded_entity.name] = \
-                    np.arange(embedded_points_index, embedded_points_index+len(embedded_entity.coefficients))
-                embedded_points_index += len(embedded_entity.coefficients)
+                    np.arange(embedded_points_index, embedded_points_index+embedded_entity.coefficients.shape[0])
+                embedded_points_index += embedded_entity.coefficients.shape[0]
             elif type(embedded_entity) is BSplineSubSet:
                 embedded_points.append(embedded_entity.get_coefficients().value)
                 embedded_points_indices[embedded_entity.name] = \
-                    np.arange(embedded_points_index, embedded_points_index+len(embedded_entity.get_coefficients()))
+                    np.arange(embedded_points_index, embedded_points_index+embedded_entity.get_coefficients().shape[0])
                 embedded_points_index += len(embedded_entity.get_coefficients())
             else:
                 raise Exception("Please pass in a valid embedded entity type.")
@@ -63,34 +64,35 @@ class FFDBlock(BSpline):
                                                           expand_map_for_physical=True)
 
 
-    def evaluate(self, coefficients:m3l.Variable, plot:bool=False) -> m3l.Variable:
+    def evaluate(self, coefficients:csdl.Variable, plot:bool=False) -> csdl.Variable:
         '''
         Takes in the FFD block coefficients and evaluates the embedded points.
 
         Parameters
         ----------
-        coefficients : m3l.Variable
+        coefficients : csdl.Variable
             The coefficients of the FFD block.
         plot : bool
             A boolean on whether or not to plot the FFD block.
 
         Returns
         -------
-        updated_points : m3l.Variable
+        updated_points : csdl.Variable
             The embedded points.
         '''
         # Perform update
         self.coefficients = coefficients
 
-        updated_points = m3l.matvec(map=self.evaluation_map, x=coefficients)
+        updated_points = csdl.sparse.matvec(self.evaluation_map, coefficients.reshape((self.coefficients.size,1)))
+        updated_points = updated_points.reshape((updated_points.size,1))
 
         outputs = {}
 
         # For given objects, assign updated points/coefficients accordingly
         for embedded_entity in self.embedded_entities:
-            updated_embedded_entity_points = updated_points[self.embedded_points_indices[embedded_entity.name]]
+            updated_embedded_entity_points = updated_points[list(self.embedded_points_indices[embedded_entity.name])]
 
-            if type(embedded_entity) is m3l.Variable:
+            if type(embedded_entity) is csdl.Variable:
                 embedded_entity = updated_embedded_entity_points  # Think about this one. This won't update pointer to object with this pointer.
                 outputs[embedded_entity.name] = updated_embedded_entity_points
             elif type(embedded_entity) is BSpline or type(embedded_entity) is BSplineSet or type(embedded_entity) is Geometry:
@@ -126,7 +128,7 @@ class FFDBlock(BSpline):
 
         if plot_embedded_points:
             for embedded_entity in self.embedded_entities:
-                if type(embedded_entity) is m3l.Variable:
+                if type(embedded_entity) is csdl.Variable:
                     updated_entity_points = self.embedded_points[self.embedded_points_indices[embedded_entity.name]]
                     plotting_elements.append(vedo.Points(updated_entity_points, r=5, c='green'))
                 elif type(embedded_entity) is BSpline or type(embedded_entity) is BSplineSet or type(embedded_entity) is Geometry \
