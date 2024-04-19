@@ -32,7 +32,7 @@ class FFDBlock(BSpline):
     def __post_init__(self):
         super().__post_init__()
 
-        if type(self.embedded_entities) is not list:
+        if not isinstance(self.embedded_entities, list):
             self.embedded_entities = [self.embedded_entities]
 
         embedded_points = []
@@ -52,7 +52,7 @@ class FFDBlock(BSpline):
                 embedded_points.append(embedded_entity.get_coefficients().value)
                 embedded_points_indices[embedded_entity.name] = \
                     np.arange(embedded_points_index, embedded_points_index+embedded_entity.get_coefficients().shape[0])
-                embedded_points_index += len(embedded_entity.get_coefficients())
+                embedded_points_index += embedded_entity.get_coefficients().shape[0]
             else:
                 raise Exception("Please pass in a valid embedded entity type.")
         embedded_points = np.hstack(embedded_points)
@@ -84,7 +84,7 @@ class FFDBlock(BSpline):
         self.coefficients = coefficients
 
         updated_points = csdl.sparse.matvec(self.evaluation_map, coefficients.reshape((self.coefficients.size,1)))
-        updated_points = updated_points.reshape((updated_points.size,1))
+        updated_points = updated_points.reshape((updated_points.size,))
 
         outputs = {}
 

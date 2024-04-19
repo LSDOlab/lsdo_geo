@@ -156,7 +156,7 @@ class BSplineSet(m3l.Function):
             b_spline_indices = self.coefficient_indices[b_spline_name]
             b_spline_num_coefficients = len(b_spline_indices)
             assignment_indices = np.arange(index_counter, index_counter+b_spline_num_coefficients)
-            indexed_coefficients[assignment_indices] = self.coefficients[b_spline_indices]
+            indexed_coefficients = indexed_coefficients.set(list(assignment_indices), self.coefficients[list(b_spline_indices)])
 
             index_counter += b_spline_num_coefficients
 
@@ -240,8 +240,8 @@ class BSplineSet(m3l.Function):
         else:
             coefficients = coefficients[0]
 
-        indices = np.hstack(indices)
-        self.coefficients[indices] = coefficients
+        indices = list(np.hstack(indices))
+        self.coefficients = self.coefficients.set(indices, coefficients)
 
         # return self.coefficients.copy()
 
@@ -813,7 +813,7 @@ class BSplineSet(m3l.Function):
         closest_b_splines = {}
         for i in closest_fine_grid_point_b_spline_names:    # This is a bit tacky, but create B-spline objects to make projections easier
             b_spline = BSpline(name=i, space=self.space.spaces[self.space.b_spline_to_space[i]], 
-                            coefficients=self.coefficients[self.coefficient_indices[i]], num_physical_dimensions=self.num_physical_dimensions[i])
+                            coefficients=self.coefficients[list(self.coefficient_indices[i])], num_physical_dimensions=self.num_physical_dimensions[i])
             closest_b_splines[i] = b_spline
 
         parametric_coordinates = []

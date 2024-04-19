@@ -4,8 +4,6 @@ import m3l
 import numpy as np
 import scipy.sparse as sps
 
-import time
-
 from dataclasses import dataclass
 
 @dataclass

@@ -2,12 +2,11 @@ import numpy as np
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-import pickle
+# import pickle
 # import m3l
 import csdl_alpha as csdl
 from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
 from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
-from typing import Union
 
 @dataclass
 class Geometry(BSplineSet):
@@ -20,10 +19,10 @@ class Geometry(BSplineSet):
         Creates a copy of the geometry that does not point to this geometry.
         '''
         if self.connections is not None:
-            return Geometry(self.name+'_copy', self.space, self.coefficients.copy(), self.num_physical_dimensions.copy(),
+            return Geometry(self.name+'_copy', self.space, self.coefficients, self.num_physical_dimensions.copy(),
                     self.coefficient_indices.copy(), self.connections.copy())
         else:
-            return Geometry(self.name+'_copy', self.space, self.coefficients.copy(), self.num_physical_dimensions.copy(),
+            return Geometry(self.name+'_copy', self.space, self.coefficients, self.num_physical_dimensions.copy(),
                     self.coefficient_indices.copy())
 
     def declare_component(self, component_name:str, b_spline_names:list[str]=None, b_spline_search_names:list[str]=None) -> BSplineSubSet:
@@ -107,8 +106,9 @@ class Geometry(BSplineSet):
             The order of the B-splines to use in each direction.
         '''
         from lsdo_geo.splines.b_splines.b_spline_functions import refit_b_spline_set
+        coefficients_norm = np.linalg.norm(self.coefficients.value)
 
-        file_path = f"stored_files/refits/{self.name}_{num_coefficients}_{order}_{fit_resolution}_stored_refit.pickle"
+        file_path = f"stored_files/refits/{self.name}_{coefficients_norm}_{num_coefficients}_{order}_{fit_resolution}_stored_refit.pickle"
         path = Path(file_path)
         if path.is_file():
             with open(file_path, 'rb') as handle:
@@ -264,7 +264,6 @@ if __name__ == "__main__":
     from lsdo_geo.core.geometry.geometry_functions import import_geometry
     # import array_mapper as am
     import time
-    import scipy.sparse as sps
 
     recorder = csdl.Recorder(inline=True)
     recorder.start()
@@ -299,7 +298,7 @@ if __name__ == "__main__":
     projected_points1 = geometry.evaluate(projected_points1_coordinates, plot=False)
     projected_points2 = geometry.evaluate(projected_points2_coordinates, plot=False)
 
-    test_linspace = csdl.linspace(projected_points1, projected_points2)
+    test_linspace = csdl.linear_combination(projected_points1, projected_points2, 10)
 
     import vedo
     plotter = vedo.Plotter()
@@ -434,14 +433,14 @@ if __name__ == "__main__":
     from lsdo_geo.core.parameterization.free_form_deformation_functions import construct_ffd_block_around_entities
     right_wing_ffd_block = construct_ffd_block_around_entities(name='right_wing_ffd_block', entities=right_wing, num_coefficients=(2, 2, 2))
     right_wing_ffd_block.coefficients.name = 'right_wing_ffd_block_coefficients'
-    from lsdo_geo.core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization
+    from lsdo_geo.core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization, VolumeSectionalParameterizationInputs
     right_wing_ffd_block_sectional_parameterization = VolumeSectionalParameterization(name='right_wing_ffd_block_sectional_parameterization',
                                                                                      principal_parametric_dimension=1,
                                                                                      parameterized_points=right_wing_ffd_block.coefficients,
                                                             parameterized_points_shape=right_wing_ffd_block.coefficients_shape)
-    right_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='right_wing_rigid_body_translation_x', axis=0)
-    right_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='right_wing_rigid_body_translation_y', axis=1)
-    right_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='right_wing_rigid_body_translation_z', axis=2)
+    # right_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='right_wing_rigid_body_translation_x', axis=0)
+    # right_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='right_wing_rigid_body_translation_y', axis=1)
+    # right_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='right_wing_rigid_body_translation_z', axis=2)
     import lsdo_geo.splines.b_splines as bsp
     constant_b_spline_curve_1_dof_space = bsp.BSplineSpace(name='constant_b_spline_curve_1_dof_space', order=1, parametric_coefficients_shape=(1,))
     right_wing_rigid_body_translation_x_coefficients = csdl.Variable(name='right_wing_rigid_body_translation_x_coefficients', shape=(1,), 
@@ -465,11 +464,15 @@ if __name__ == "__main__":
     right_wing_sectional_rigid_body_translation_y = right_wing_rigid_body_translation_y_b_spline.evaluate(section_parametric_coordinates)
     right_wing_sectional_rigid_body_translation_z = right_wing_rigid_body_translation_z_b_spline.evaluate(section_parametric_coordinates)
 
-    sectional_parameters = {
-        'right_wing_rigid_body_translation_x':right_wing_sectional_rigid_body_translation_x,
-        'right_wing_rigid_body_translation_y':right_wing_sectional_rigid_body_translation_y,
-        'right_wing_rigid_body_translation_z':right_wing_sectional_rigid_body_translation_z,
-                            }
+    # sectional_parameters = {
+    #     'right_wing_rigid_body_translation_x':right_wing_sectional_rigid_body_translation_x,
+    #     'right_wing_rigid_body_translation_y':right_wing_sectional_rigid_body_translation_y,
+    #     'right_wing_rigid_body_translation_z':right_wing_sectional_rigid_body_translation_z,
+    #                         }
+    sectional_parameters = VolumeSectionalParameterizationInputs()
+    sectional_parameters.add_sectional_translation(axis=0, translation=right_wing_sectional_rigid_body_translation_x)
+    sectional_parameters.add_sectional_translation(axis=1, translation=right_wing_sectional_rigid_body_translation_y)
+    sectional_parameters.add_sectional_translation(axis=2, translation=right_wing_sectional_rigid_body_translation_z)
 
     right_wing_ffd_block_coefficients = right_wing_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=False)
     right_wing_coefficients = right_wing_ffd_block.evaluate(right_wing_ffd_block_coefficients, plot=False)
@@ -490,18 +493,18 @@ if __name__ == "__main__":
     # left_wing_coefficients = left_wing_ffd_block.evaluate(new_left_wing_ffd_block_coefficients, plot=True)
     # geometry5.assign_coefficients(coefficients=left_wing_coefficients, b_spline_names=left_wing.b_spline_names)
 
-    from lsdo_geo.core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization
+    from lsdo_geo.core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization, VolumeSectionalParameterizationInputs
     left_wing_ffd_block_sectional_parameterization = VolumeSectionalParameterization(name='left_wing_ffd_block_sectional_parameterization',
                                                                                      principal_parametric_dimension=1,
                                                                                      parameterized_points=left_wing_ffd_block.coefficients,
                                                             parameterized_points_shape=left_wing_ffd_block.coefficients_shape)
 
-    left_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='left_wing_sweep', axis=0)
-    left_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='left_wing_diheral', axis=2)
-    left_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='left_wing_wingspan_stretch', axis=1)
-    left_wing_ffd_block_sectional_parameterization.add_sectional_stretch(name='left_wing_chord_stretch', axis=0)
-    # left_wing_ffd_block_sectional_parameterization.add_sectional_rotation(name='left_wing_twist', axis=1)
-    # left_wing_ffd_block_sectional_parameterization.plot()
+    # left_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='left_wing_sweep', axis=0)
+    # left_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='left_wing_diheral', axis=2)
+    # left_wing_ffd_block_sectional_parameterization.add_sectional_translation(name='left_wing_wingspan_stretch', axis=1)
+    # left_wing_ffd_block_sectional_parameterization.add_sectional_stretch(name='left_wing_chord_stretch', axis=0)
+    # # left_wing_ffd_block_sectional_parameterization.add_sectional_rotation(name='left_wing_twist', axis=1)
+    # # left_wing_ffd_block_sectional_parameterization.plot()
 
     import lsdo_geo.splines.b_splines as bsp
     linear_b_spline_curve_2_dof_space = bsp.BSplineSpace(name='linear_b_spline_curve_2_dof_space', order=2, parametric_coefficients_shape=(2,))
@@ -538,13 +541,19 @@ if __name__ == "__main__":
     left_wing_sectional_chord_stretch = left_wing_chord_stretch_b_spline.evaluate(section_parametric_coordinates)
     # left_wing_sectional_twist = left_wing_twist_b_spline.evaluate(section_parametric_coordinates)
 
-    sectional_parameters = {
-        'left_wing_sweep':left_wing_sectional_sweep, 
-        'left_wing_diheral':left_wing_sectional_diheral,
-        'left_wing_wingspan_stretch':left_wing_wingspan_stretch,
-        'left_wing_chord_stretch':left_wing_sectional_chord_stretch,
-        # 'left_wing_twist':left_wing_sectional_twist,
-                            }
+    # sectional_parameters = {
+    #     'left_wing_sweep':left_wing_sectional_sweep, 
+    #     'left_wing_diheral':left_wing_sectional_diheral,
+    #     'left_wing_wingspan_stretch':left_wing_wingspan_stretch,
+    #     'left_wing_chord_stretch':left_wing_sectional_chord_stretch,
+    #     # 'left_wing_twist':left_wing_sectional_twist,
+    #                         }
+    sectional_parameters = VolumeSectionalParameterizationInputs()
+    sectional_parameters.add_sectional_translation(axis=0, translation=left_wing_sectional_sweep)
+    sectional_parameters.add_sectional_translation(axis=2, translation=left_wing_sectional_diheral)
+    sectional_parameters.add_sectional_translation(axis=1, translation=left_wing_wingspan_stretch)
+    sectional_parameters.add_sectional_stretch(axis=0, stretch=left_wing_sectional_chord_stretch)
+    # sectional_parameters.add_sectional_rotation(axis=1, rotation=left_wing_sectional_twist)
     
 
     left_wing_ffd_block_coefficients = left_wing_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=False)
@@ -580,21 +589,21 @@ if __name__ == "__main__":
     right_wing_root_quarter_chord_ish = geometry5.evaluate([('WingGeom, 0, 3', np.array([0., 0.6]),)], plot=False)
     left_wing_right_wing_connection = left_wing_root_quarter_chord_ish - right_wing_root_quarter_chord_ish
 
-    from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver
-    parameterization_solver = ParameterizationSolver()
+    # from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver
+    # parameterization_solver = ParameterizationSolver()
 
-    parameterization_solver.declare_state('left_wing_wingspan_stretch_coefficients_state', left_wing_wingspan_stretch_coefficients_state)
-    parameterization_solver.declare_state('left_wing_chord_stretch_coefficients_state', left_wing_chord_stretch_coefficients_state)
-    parameterization_solver.declare_state('right_wing_rigid_body_translation_x_coefficients', right_wing_rigid_body_translation_x_coefficients)
-    parameterization_solver.declare_state('right_wing_rigid_body_translation_y_coefficients', right_wing_rigid_body_translation_y_coefficients)
-    parameterization_solver.declare_state('right_wing_rigid_body_translation_z_coefficients', right_wing_rigid_body_translation_z_coefficients)
+    # parameterization_solver.declare_state('left_wing_wingspan_stretch_coefficients_state', left_wing_wingspan_stretch_coefficients_state)
+    # parameterization_solver.declare_state('left_wing_chord_stretch_coefficients_state', left_wing_chord_stretch_coefficients_state)
+    # parameterization_solver.declare_state('right_wing_rigid_body_translation_x_coefficients', right_wing_rigid_body_translation_x_coefficients)
+    # parameterization_solver.declare_state('right_wing_rigid_body_translation_y_coefficients', right_wing_rigid_body_translation_y_coefficients)
+    # parameterization_solver.declare_state('right_wing_rigid_body_translation_z_coefficients', right_wing_rigid_body_translation_z_coefficients)
 
-    parameterization_solver.declare_input(name='half_wingspan', input=half_wingspan)
-    parameterization_solver.declare_input(name='root_chord', input=root_chord)
-    parameterization_solver.declare_input(name='tip_chord', input=tip_chord)
-    parameterization_solver.declare_input(name='mid_chord', input=mid_chord)
-    parameterization_solver.declare_input(name='left_wing_right_wing_connection', input=left_wing_right_wing_connection)
-    # parameterization_solver.declare_input(name='left_wing_right_wing_connection', input=csdl.norm(left_wing_right_wing_connection))
+    # parameterization_solver.declare_input(name='half_wingspan', input=half_wingspan)
+    # parameterization_solver.declare_input(name='root_chord', input=root_chord)
+    # parameterization_solver.declare_input(name='tip_chord', input=tip_chord)
+    # parameterization_solver.declare_input(name='mid_chord', input=mid_chord)
+    # parameterization_solver.declare_input(name='left_wing_right_wing_connection', input=left_wing_right_wing_connection)
+    # # parameterization_solver.declare_input(name='left_wing_right_wing_connection', input=csdl.norm(left_wing_right_wing_connection))
     
 
     half_wingspan_input = csdl.Variable(name='half_wingspan', shape=(1,), value=np.array([10.]))
@@ -606,41 +615,46 @@ if __name__ == "__main__":
     # left_wing_right_wing_connection_input = csdl.Variable(name='left_wing_right_wing_connection', shape=(1,), 
     #                                                      value=csdl.norm(left_wing_right_wing_connection).value)
 
-    parameterization_inputs = {
-        'half_wingspan':half_wingspan_input,
-        'root_chord':root_chord_input,
-        'tip_chord':tip_chord_input,
-        'mid_chord':mid_chord_input,
-        'left_wing_right_wing_connection':left_wing_right_wing_connection_input
-    }
-    outputs_dict = parameterization_solver.evaluate(inputs=parameterization_inputs, plot=False)
+    # parameterization_inputs = {
+    #     'half_wingspan':half_wingspan_input,
+    #     'root_chord':root_chord_input,
+    #     'tip_chord':tip_chord_input,
+    #     'mid_chord':mid_chord_input,
+    #     'left_wing_right_wing_connection':left_wing_right_wing_connection_input
+    # }
+    # outputs_dict = parameterization_solver.evaluate(inputs=parameterization_inputs, plot=False)
 
 
 
 
-    right_wing_rigid_body_translation_x_coefficients = outputs_dict['right_wing_rigid_body_translation_x_coefficients']
-    right_wing_rigid_body_translation_x_b_spline = bsp.BSpline(name='right_wing_rigid_body_translation_x_b_spline', 
-                                                               space=constant_b_spline_curve_1_dof_space, 
-                                           coefficients=right_wing_rigid_body_translation_x_coefficients, num_physical_dimensions=1)
-    right_wing_rigid_body_translation_y_coefficients = outputs_dict['right_wing_rigid_body_translation_y_coefficients']
-    right_wing_rigid_body_translation_y_b_spline = bsp.BSpline(name='right_wing_rigid_body_translation_y_b_spline', 
-                                                               space=constant_b_spline_curve_1_dof_space, 
-                                           coefficients=right_wing_rigid_body_translation_y_coefficients, num_physical_dimensions=1)
-    right_wing_rigid_body_translation_z_coefficients = outputs_dict['right_wing_rigid_body_translation_z_coefficients']
-    right_wing_rigid_body_translation_z_b_spline = bsp.BSpline(name='right_wing_rigid_body_translation_z_b_spline',
-                                                               space=constant_b_spline_curve_1_dof_space, 
-                                           coefficients=right_wing_rigid_body_translation_z_coefficients, num_physical_dimensions=1)
+    # right_wing_rigid_body_translation_x_coefficients = outputs_dict['right_wing_rigid_body_translation_x_coefficients']
+    # right_wing_rigid_body_translation_x_b_spline = bsp.BSpline(name='right_wing_rigid_body_translation_x_b_spline', 
+    #                                                            space=constant_b_spline_curve_1_dof_space, 
+    #                                        coefficients=right_wing_rigid_body_translation_x_coefficients, num_physical_dimensions=1)
+    # right_wing_rigid_body_translation_y_coefficients = outputs_dict['right_wing_rigid_body_translation_y_coefficients']
+    # right_wing_rigid_body_translation_y_b_spline = bsp.BSpline(name='right_wing_rigid_body_translation_y_b_spline', 
+    #                                                            space=constant_b_spline_curve_1_dof_space, 
+    #                                        coefficients=right_wing_rigid_body_translation_y_coefficients, num_physical_dimensions=1)
+    # right_wing_rigid_body_translation_z_coefficients = outputs_dict['right_wing_rigid_body_translation_z_coefficients']
+    # right_wing_rigid_body_translation_z_b_spline = bsp.BSpline(name='right_wing_rigid_body_translation_z_b_spline',
+    #                                                            space=constant_b_spline_curve_1_dof_space, 
+    #                                        coefficients=right_wing_rigid_body_translation_z_coefficients, num_physical_dimensions=1)
     
     section_parametric_coordinates = np.linspace(0., 1., right_wing_ffd_block_sectional_parameterization.num_sections).reshape((-1,1))
     right_wing_sectional_rigid_body_translation_x = right_wing_rigid_body_translation_x_b_spline.evaluate(section_parametric_coordinates)
     right_wing_sectional_rigid_body_translation_y = right_wing_rigid_body_translation_y_b_spline.evaluate(section_parametric_coordinates)
     right_wing_sectional_rigid_body_translation_z = right_wing_rigid_body_translation_z_b_spline.evaluate(section_parametric_coordinates)
 
-    sectional_parameters = {
-        'right_wing_rigid_body_translation_x':right_wing_sectional_rigid_body_translation_x,
-        'right_wing_rigid_body_translation_y':right_wing_sectional_rigid_body_translation_y,
-        'right_wing_rigid_body_translation_z':right_wing_sectional_rigid_body_translation_z,
-                            }
+    # sectional_parameters = {
+    #     'right_wing_rigid_body_translation_x':right_wing_sectional_rigid_body_translation_x,
+    #     'right_wing_rigid_body_translation_y':right_wing_sectional_rigid_body_translation_y,
+    #     'right_wing_rigid_body_translation_z':right_wing_sectional_rigid_body_translation_z,
+    #                         }
+    
+    sectional_parameters = VolumeSectionalParameterizationInputs()
+    sectional_parameters.add_sectional_translation(axis=0, translation=right_wing_sectional_rigid_body_translation_x)
+    sectional_parameters.add_sectional_translation(axis=1, translation=right_wing_sectional_rigid_body_translation_y)
+    sectional_parameters.add_sectional_translation(axis=2, translation=right_wing_sectional_rigid_body_translation_z)
 
     right_wing_ffd_block_coefficients = right_wing_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=False)
     right_wing_coefficients = right_wing_ffd_block.evaluate(right_wing_ffd_block_coefficients, plot=False)
@@ -660,19 +674,19 @@ if __name__ == "__main__":
     left_wing_dihedral_b_spline = bsp.BSpline(name='left_wing_dihedral_b_spline', space=linear_b_spline_curve_2_dof_space, 
                                            coefficients=left_wing_dihedral_coefficients, num_physical_dimensions=1)
     
-    left_wing_wingspan_stretch_coefficients = outputs_dict['left_wing_wingspan_stretch_coefficients_state'].copy()
-    left_wing_wingspan_stretch_b_spline = bsp.BSpline(name='left_wing_wingspan_stretch_b_spline', space=linear_b_spline_curve_2_dof_space,
-                                                     coefficients=left_wing_wingspan_stretch_coefficients, num_physical_dimensions=1)
+    # left_wing_wingspan_stretch_coefficients = outputs_dict['left_wing_wingspan_stretch_coefficients_state'].copy()
+    # left_wing_wingspan_stretch_b_spline = bsp.BSpline(name='left_wing_wingspan_stretch_b_spline', space=linear_b_spline_curve_2_dof_space,
+    #                                                  coefficients=left_wing_wingspan_stretch_coefficients, num_physical_dimensions=1)
     
-    left_wing_chord_stretch_coefficients = outputs_dict['left_wing_chord_stretch_coefficients_state'].copy()
-    left_wing_chord_stretch_b_spline = bsp.BSpline(name='left_wing_chord_stretch_b_spline', space=linear_b_spline_curve_3_dof_space,
-                                                    coefficients=left_wing_chord_stretch_coefficients, num_physical_dimensions=1)
+    # left_wing_chord_stretch_coefficients = outputs_dict['left_wing_chord_stretch_coefficients_state'].copy()
+    # left_wing_chord_stretch_b_spline = bsp.BSpline(name='left_wing_chord_stretch_b_spline', space=linear_b_spline_curve_3_dof_space,
+    #                                                 coefficients=left_wing_chord_stretch_coefficients, num_physical_dimensions=1)
     
-    left_wing_ffd_block_sectional_parameterization.add_sectional_rotation(name='left_wing_twist', axis=1)
-    left_wing_twist_coefficients = csdl.Variable(name='left_wing_twist_coefficients', shape=(5,),
-                                                value=np.array([0., 30., 20., 10., 0.]))
-    left_wing_twist_b_spline = bsp.BSpline(name='left_wing_twist_b_spline', space=cubic_b_spline_curve_5_dof_space,
-                                             coefficients=left_wing_twist_coefficients, num_physical_dimensions=1)
+    # left_wing_ffd_block_sectional_parameterization.add_sectional_rotation(name='left_wing_twist', axis=1)
+    # left_wing_twist_coefficients = csdl.Variable(name='left_wing_twist_coefficients', shape=(5,),
+    #                                             value=np.array([0., 30., 20., 10., 0.]))
+    # left_wing_twist_b_spline = bsp.BSpline(name='left_wing_twist_b_spline', space=cubic_b_spline_curve_5_dof_space,
+    #                                          coefficients=left_wing_twist_coefficients, num_physical_dimensions=1)
 
 
     
@@ -681,15 +695,22 @@ if __name__ == "__main__":
     left_wing_sectional_diheral = left_wing_dihedral_b_spline.evaluate(section_parametric_coordinates)
     left_wing_wingspan_stretch = left_wing_wingspan_stretch_b_spline.evaluate(section_parametric_coordinates)
     left_wing_sectional_chord_stretch = left_wing_chord_stretch_b_spline.evaluate(section_parametric_coordinates)
-    left_wing_sectional_twist = left_wing_twist_b_spline.evaluate(section_parametric_coordinates)
+    # left_wing_sectional_twist = left_wing_twist_b_spline.evaluate(section_parametric_coordinates)
 
-    sectional_parameters = {
-        'left_wing_sweep':left_wing_sectional_sweep, 
-        'left_wing_diheral':left_wing_sectional_diheral,
-        'left_wing_wingspan_stretch':left_wing_wingspan_stretch,
-        'left_wing_chord_stretch':left_wing_sectional_chord_stretch,
-        'left_wing_twist':left_wing_sectional_twist,
-                            }
+    # sectional_parameters = {
+    #     'left_wing_sweep':left_wing_sectional_sweep, 
+    #     'left_wing_diheral':left_wing_sectional_diheral,
+    #     'left_wing_wingspan_stretch':left_wing_wingspan_stretch,
+    #     'left_wing_chord_stretch':left_wing_sectional_chord_stretch,
+    #     'left_wing_twist':left_wing_sectional_twist,
+    #                         }
+    
+    sectional_parameters = VolumeSectionalParameterizationInputs()
+    sectional_parameters.add_sectional_translation(axis=0, translation=left_wing_sectional_sweep)
+    sectional_parameters.add_sectional_translation(axis=2, translation=left_wing_sectional_diheral)
+    sectional_parameters.add_sectional_translation(axis=1, translation=left_wing_wingspan_stretch)
+    sectional_parameters.add_sectional_stretch(axis=0, stretch=left_wing_sectional_chord_stretch)
+    # sectional_parameters.add_sectional_rotation(axis=1, rotation=left_wing_sectional_twist)
     
     left_wing_ffd_block_coefficients = left_wing_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=False)
 
@@ -701,7 +722,7 @@ if __name__ == "__main__":
 
     leading_edge = geometry5.evaluate(leading_edge_parametric_coordinates, plot=False).reshape((-1,3))
     trailing_edge = geometry5.evaluate(trailing_edge_parametric_coordinates, plot=False).reshape((-1,3))
-    chord_surface = csdl.linspace(leading_edge, trailing_edge, num_steps=4)
+    chord_surface = csdl.linear_combination(leading_edge, trailing_edge, num_steps=4)
 
     # geometry5.plot_meshes(meshes=chord_surface, mesh_plot_types=['wireframe'], mesh_opacity=1., mesh_color='#F5F0E6',)
     # geometry5.plot()

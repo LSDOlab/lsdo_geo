@@ -49,13 +49,13 @@ leading_edge_physical = geometry.evaluate(leading_edge_parametric)
 trailing_edge_parametric = geometry.project(points_to_project_on_trailing_edge, direction=np.array([0., 0., -1.]))
 trailing_edge_physical = geometry.evaluate(trailing_edge_parametric)
 
-chord_surface = csdl.linspace(leading_edge_physical, trailing_edge_physical, num_chordwise).value.reshape((num_chordwise, num_spanwise, 3))
+chord_surface = csdl.linear_combination(leading_edge_physical, trailing_edge_physical, num_chordwise).value.reshape((num_chordwise, num_spanwise, 3))
 upper_surface_wireframe_parametric = geometry.project(chord_surface + np.array([0., 0., 1]), direction=np.array([0., 0., -1.]), plot=False)
 lower_surface_wireframe_parametric = geometry.project(chord_surface - np.array([0., 0., 1]), direction=np.array([0., 0., -1.]), plot=False)
 upper_surface_wireframe = geometry.evaluate(upper_surface_wireframe_parametric)
 lower_surface_wireframe = geometry.evaluate(lower_surface_wireframe_parametric)
-camber_surface = csdl.linspace(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((num_chordwise, num_spanwise, 3))
-# geometry.plot_meshes([camber_surface])
+camber_surface = csdl.linear_combination(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((num_chordwise, num_spanwise, 3))
+geometry.plot_meshes([camber_surface])
 # endregion
 
 # endregion
@@ -138,6 +138,18 @@ sweep_translation_b_spline = BSpline(
 )
 sweep_translation_b_spline.plot()
 
+twist_b_spline = BSpline(
+    name="twist_translation_b_spline",
+    space=space_of_linear_3_dof_b_splines,
+    # coefficients=csdl.Variable(shape=(3,), value=np.zeros(3,), name='twist_translation_b_spline_coefficients'),
+    coefficients=csdl.Variable(
+        shape=(3,),
+        value=np.array([15, 0., 15]),
+        name="twist_translation_b_spline_coefficients",
+    ),
+    num_physical_dimensions=1,
+)
+
 parameterization_solver.declare_state(
     "chord_stretching_b_spline_coefficients", chord_stretching_b_spline.coefficients
 )
@@ -159,6 +171,10 @@ sweep_translation_sectional_parameters = sweep_translation_b_spline.evaluate(
     parametric_b_spline_inputs
 )
 
+twist_sectional_parameters = twist_b_spline.evaluate(
+    parametric_b_spline_inputs
+)
+
 # sectional_parameters = {
 #     "chord_stretching": chord_stretch_sectional_parameters,
 #     "wingspan_stretching": wingspan_stretch_sectional_parameters,
@@ -168,10 +184,15 @@ sweep_translation_sectional_parameters = sweep_translation_b_spline.evaluate(
 # ffd_sectional_parameterization.add_sectional_translation(name='wingspan_stretching', axis=1)
 # ffd_sectional_parameterization.add_sectional_translation(name='sweep_translation', axis=0)
 
-sectional_parameters = VolumeSectionalParameterizationInputs(
-    stretches={0: chord_stretch_sectional_parameters},
-    translations={1: wingspan_stretch_sectional_parameters, 0: sweep_translation_sectional_parameters},
-)
+# sectional_parameters = VolumeSectionalParameterizationInputs(
+#     stretches={0: chord_stretch_sectional_parameters},
+#     translations={1: wingspan_stretch_sectional_parameters, 0: sweep_translation_sectional_parameters},
+# )
+
+sectional_parameters = VolumeSectionalParameterizationInputs()
+sectional_parameters.add_sectional_stretch(axis=0, stretch=chord_stretch_sectional_parameters)
+sectional_parameters.add_sectional_translation(axis=1, translation=wingspan_stretch_sectional_parameters)
+sectional_parameters.add_sectional_translation(axis=0, translation=sweep_translation_sectional_parameters)
 
 ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters)
 
@@ -245,10 +266,11 @@ sweep_translation_sectional_parameters = sweep_translation_b_spline.evaluate(
 #     "wingspan_stretching": wingspan_stretch_sectional_parameters,
 #     "sweep_translation": sweep_translation_sectional_parameters,
 # }
-sectional_parameters = VolumeSectionalParameterizationInputs(
-    stretches={0: chord_stretch_sectional_parameters},
-    translations={1: wingspan_stretch_sectional_parameters, 0: sweep_translation_sectional_parameters},
-)
+sectional_parameters = VolumeSectionalParameterizationInputs()
+sectional_parameters.add_sectional_stretch(axis=0, stretch=chord_stretch_sectional_parameters)
+sectional_parameters.add_sectional_translation(axis=1, translation=wingspan_stretch_sectional_parameters)
+sectional_parameters.add_sectional_translation(axis=0, translation=sweep_translation_sectional_parameters)
+sectional_parameters.add_sectional_rotation(axis=1, rotation=twist_sectional_parameters)
 
 ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters)
 
@@ -273,7 +295,7 @@ tip_chord_right = csdl.norm(
 
 upper_surface_wireframe = geometry.evaluate(upper_surface_wireframe_parametric)
 lower_surface_wireframe = geometry.evaluate(lower_surface_wireframe_parametric)
-camber_surface = csdl.linspace(
+camber_surface = csdl.linear_combination(
     upper_surface_wireframe, lower_surface_wireframe, 1
 ).reshape((num_chordwise, num_spanwise, 3))
 # endregion
@@ -282,10 +304,12 @@ camber_surface = csdl.linspace(
 geometry.plot()
 geometry.plot_meshes([camber_surface])
 
-print("Wingspan: ", wingspan)
-print("Root Chord: ", root_chord)
-print("Tip Chord Left: ", tip_chord_left)
-print("Tip Chord Right: ", tip_chord_right)
+print("Wingspan: ", wingspan.value)
+print("Root Chord: ", root_chord.value)
+print("Tip Chord Left: ", tip_chord_left.value)
+print("Tip Chord Right: ", tip_chord_right.value)
 # endregion
 
 # endregion
+
+# recorder.visualize_graph('my_graph')

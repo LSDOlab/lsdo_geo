@@ -6,6 +6,8 @@ import csdl_alpha as csdl
 
 from dataclasses import dataclass
 
+from lsdo_geo.core.geometry.geometry_functions import rotate
+
 
 @dataclass
 class VolumeSectionalParameterizationInputs:
@@ -29,6 +31,53 @@ class VolumeSectionalParameterizationInputs:
     stretches: dict[int, csdl.Variable] = None
     translations: dict[int, csdl.Variable] = None
     rotations: dict[int, csdl.Variable] = None
+
+    def __post_init__(self):
+        if self.stretches is None:
+            self.stretches = {}
+        if self.translations is None:
+            self.translations = {}
+        if self.rotations is None:
+            self.rotations = {}
+
+    def add_sectional_stretch(self, axis: int, stretch: csdl.Variable):
+        """
+        Adds a stretch to the stretches dictionary.
+
+        Parameters
+        ----------
+        axis : int
+            The axis of the stretch.
+        stretch : csdl.Variable
+            The stretch values.
+        """
+        self.stretches[axis] = stretch
+
+    def add_sectional_translation(self, axis: int, translation: csdl.Variable):
+        """
+        Adds a translation to the translations dictionary.
+
+        Parameters
+        ----------
+        axis : int
+            The axis of the translation.
+        translation : csdl.Variable
+            The translation values.
+        """
+        self.translations[axis] = translation
+
+    def add_sectional_rotation(self, axis: int, rotation: csdl.Variable):
+        """
+        Adds a rotation to the rotations dictionary.
+
+        Parameters
+        ----------
+        axis : int
+            The axis of the rotation.
+        rotation : csdl.Variable
+            The rotation values.
+        """
+        self.rotations[axis] = rotation
 
 
 @dataclass
@@ -330,12 +379,6 @@ class VolumeSectionalParameterization:
         """
         # # Assemble linear maps
         # self.assemble()
-        if sectional_parameters.stretches is None:
-            sectional_parameters.stretches = {}
-        if sectional_parameters.translations is None:
-            sectional_parameters.translations = {}
-        if sectional_parameters.rotations is None:
-            sectional_parameters.rotations = {}
 
         # Add parameters that are found.
         for axis, parameter in sectional_parameters.stretches.items():
@@ -432,13 +475,13 @@ class VolumeSectionalParameterization:
                 ).value
                 rotation_axis /= np.linalg.norm(rotation_axis)
 
-                angle = parameter_variable[np.array([i])]
+                angle = parameter_variable[i]
                 indices = np.arange(np.prod(self.parameterized_points_shape, dtype=int))
                 indices = indices.reshape(self.parameterized_points_shape)
                 indices = np.swapaxes(indices, 0, self.principal_parametric_dimension)
                 indices = indices[i].reshape((-1,))
 
-                section_updated_points = updated_points[indices].reshape(
+                section_updated_points = updated_points[list(indices)].reshape(
                     (-1, self.num_physical_dimensions)
                 )
 
@@ -451,16 +494,16 @@ class VolumeSectionalParameterization:
                 )
                 section_average = section_updated_points_sum / number_of_points_m3l
 
-                # TODO: convert this when rotate function is moved into geometry_functions
-                raise NotImplementedError(
-                    "Need to m3l.rotate function to geometry_functions in new csdl."
-                )
-                updated_points[indices] = m3l.rotate(
+                # # TODO: convert this when rotate function is moved into geometry_functions
+                # raise NotImplementedError(
+                #     "Need to m3l.rotate function to geometry_functions in new csdl."
+                # )
+                updated_points = updated_points.set(csdl.slice[[indices]], rotate(
                     points=section_updated_points,
                     axis_origin=section_average,
                     axis_vector=rotation_axis,
                     angles=angle,
-                ).reshape((-1,))
+                ).reshape((updated_points[list(indices)].size,)))
 
         # self.parameterized_points = updated_points
         self.updated_points = updated_points
