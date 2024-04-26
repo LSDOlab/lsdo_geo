@@ -278,6 +278,11 @@ geometry_coefficients = ffd_block.evaluate(ffd_coefficients)
 
 geometry.assign_coefficients(geometry_coefficients)
 
+rotation_axis_origin = geometry.evaluate(geometry.project(np.array([0.5, 0., 0.5])))
+rotation_axis_vector = geometry.evaluate(geometry.project(np.array([0.5, 1., 0.5])))
+rotation_angles = 45
+geometry.rotate(rotation_axis_origin, rotation_axis_vector, rotation_angles)
+
 parameterization_inputs = {}
 
 wingspan = csdl.norm(

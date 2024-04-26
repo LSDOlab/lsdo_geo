@@ -3,7 +3,6 @@ import pickle
 from dataclasses import dataclass
 from pathlib import Path
 # import pickle
-# import m3l
 import csdl_alpha as csdl
 from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
 from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
@@ -134,6 +133,60 @@ class Geometry(BSplineSet):
         self.connections = b_spline_set.connections
 
         self.num_coefficients = b_spline_set.num_coefficients
+
+
+    def rotate(self, axis_origin:csdl.Variable, axis_vector:csdl.Variable, angles:csdl.Variable, b_splines:list[str]=None, units:str='degrees'):
+        '''
+        Rotates the B-spline set about an axis.
+
+        Parameters
+        -----------
+        b_splines : list[str]
+            The B-splines to rotate.
+        axis_origin : csdl.Variable
+            The origin of the axis of rotation.
+        axis_vector : csdl.Variable
+            The vector of the axis of rotation.
+        angles : csdl.Variable
+            The angle of rotation.
+        units : str
+            The units of the angle of rotation. {degrees, radians}
+        '''
+        from lsdo_geo.core.geometry.geometry_functions import rotate as rotate_function
+        if units == 'degrees':
+            angles = angles * np.pi / 180.
+            units = 'radians'
+        elif units == 'radians':
+            pass
+        else:
+            raise ValueError(f'Invalid units {units}.')
+        
+        if b_splines is None:
+            b_splines = list(self.coefficient_indices.keys())
+        if isinstance(b_splines, str):
+            b_splines = [b_splines]
+        if not isinstance(b_splines, list):
+            raise ValueError('The B-splines must be a list of strings.')
+        
+        if isinstance(axis_origin, np.ndarray):
+            axis_origin = csdl.Variable(shape=axis_origin.shape, value=axis_origin)
+        if type(axis_vector) is np.ndarray:
+            axis_vector = csdl.Variable(shape=axis_vector.shape, value=axis_vector)
+        if type(angles) is np.ndarray:
+            angles = csdl.Variable(shape=angles.shape, value=angles)
+
+        point_indices_list = []
+        for i in range(len(b_splines)):
+            b_spline_coefficients_indices = self.coefficient_indices[b_splines[i]]
+            point_indices_list.append(b_spline_coefficients_indices)
+        points_indices = np.hstack(point_indices_list)
+        rotating_points = self.coefficients[csdl.slice[list(points_indices)]]
+
+        rotated_points = rotate_function(points=rotating_points, axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units)
+        rotated_points = rotated_points.reshape((-1,))
+
+        self.coefficients = self.coefficients.set(csdl.slice[list(points_indices)], rotated_points)
+        return self.coefficients
 
     
     def plot_meshes(self, meshes:list[csdl.Variable], mesh_plot_types:list[str]=['wireframe'], mesh_opacity:float=1., mesh_color:str='#F5F0E6',
