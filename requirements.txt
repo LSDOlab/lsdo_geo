@@ -12,6 +12,9 @@ numpydoc
 gitpython
 # git+https://github.com/anugrahjo/sphinx-collections.git
 Cython==0.29.28
+pandas
+joblib
+vedo
 
 scipy
 vedo

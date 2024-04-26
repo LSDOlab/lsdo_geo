@@ -34,6 +34,9 @@ setup(
         'setuptools',
         'wheel',
         'twine',
+        'pandas',
+        'joblib',
+        'vedo',
     ],
     classifiers=[
         'Programming Language :: Python',
