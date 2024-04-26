@@ -282,7 +282,7 @@ class BSpline(m3l.Function):
         # u_vec = u_vec_flattened.reshape(tuple(input_shape[:-1],)+(1,))
         # v_vec = v_vec_flattened.reshape(tuple(input_shape[:-1],)+(1,))
         # parametric_coordinates = np.concatenate((u_vec, v_vec), axis=-1)
-        with open(f'stored_projections/{stored_projection_filename}', 'wb+') as handle:
+        with open(f'stored_files/projections/{stored_projection_filename}', 'wb+') as handle:
             pickle.dump(parametric_coordinates, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         return parametric_coordinates
