@@ -204,13 +204,13 @@ class BSpline(m3l.Function):
 
         # check if projection is stored
         from pathlib import Path
-        Path("stored_projections").mkdir(parents=True, exist_ok=True)
+        Path("stored_files/projections").mkdir(parents=True, exist_ok=True)
         stored_projection_file_name_points_part = f'{np.linalg.norm(points, axis=0)}_{direction[:3]}_{grid_search_density}_{max_iterations}_'
         stored_projection_file_name_b_spline_part = f'{self.name}_{np.linalg.norm(self.coefficients.value)}_{self.space.order}_projection.pickle'
         stored_projection_filename = stored_projection_file_name_points_part + stored_projection_file_name_b_spline_part
-        stored_projection_file_path = Path('stored_projections/' + stored_projection_filename)
+        stored_projection_file_path = Path('stored_files/projections/' + stored_projection_filename)
         if stored_projection_file_path.is_file():
-            with open(f'stored_projections/{stored_projection_filename}', 'rb') as handle:
+            with open(f'stored_files/projections/{stored_projection_filename}', 'rb') as handle:
                 parametric_coordinates = pickle.load(handle)
                 if plot:
                     # Plot the surfaces that are projected onto
