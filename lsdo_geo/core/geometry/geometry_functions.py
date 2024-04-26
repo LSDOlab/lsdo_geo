@@ -104,11 +104,17 @@ def rotate(points:csdl.Variable, axis_origin:csdl.Variable, axis_vector:csdl.Var
         quaternion_conjugate = quaternion_conjugate.set(csdl.slice[2], -quaternion[2])
         quaternion_conjugate = quaternion_conjugate.set(csdl.slice[3], -quaternion[3])
 
-        for j in csdl.frange(points_wrt_axis.shape[0]):
-            rotated_points_quaternion = rotated_points_quaternion.set(csdl.slice[i,j,:], 
-                                hamiltonion_product(quaternion, 
-                                hamiltonion_product(points_wrt_axis_quaternion[j],
-                                                    quaternion_conjugate)))
+        # for j in csdl.frange(points_wrt_axis.shape[0]):
+        # for j in range(points_wrt_axis.shape[0]):
+            # rotated_points_quaternion = rotated_points_quaternion.set(csdl.slice[i,j,:], 
+            #                     hamiltonion_product(quaternion, 
+            #                     hamiltonion_product(points_wrt_axis_quaternion[j],
+            #                                         quaternion_conjugate)))
+            
+        rotated_points_quaternion = rotated_points_quaternion.set(csdl.slice[i,:,:], 
+                            vectorized_hamiltonion_product_2(quaternion, 
+                            vectorized_hamiltonion_product_1(points_wrt_axis_quaternion,
+                                                quaternion_conjugate)))
 
     if angles.shape[0] == 1:
         rotated_points_wrt_axis = rotated_points_quaternion[0,:,1:]
@@ -118,8 +124,55 @@ def rotate(points:csdl.Variable, axis_origin:csdl.Variable, axis_vector:csdl.Var
         output_shape = (angles.shape[0], points.shape[0], points.shape[1])
         rotated_points = rotated_points_wrt_axis + csdl.expand(axis_origin, output_shape, 'i->kij')
 
-
     return rotated_points
+
+
+def vectorized_hamiltonion_product_1(q1:csdl.Variable, q2:csdl.Variable) -> csdl.Variable:
+    # q1 = q1.reshape((4,))
+    # q2 = q2.reshape((4,))
+
+    q1_0 = q1[:,0]
+    q1_1 = q1[:,1]
+    q1_2 = q1[:,2]
+    q1_3 = q1[:,3]
+
+    q2_0 = q2[0]
+    q2_1 = q2[1]
+    q2_2 = q2[2]
+    q2_3 = q2[3]
+
+    q = csdl.Variable(shape=q1.shape, name='quaternion_product', value=0.)
+    q = q.set(csdl.slice[:,0], q1_0*q2_0 - q1_1*q2_1 - q1_2*q2_2 - q1_3*q2_3)
+    q = q.set(csdl.slice[:,1], q1_0*q2_1 + q1_1*q2_0 + q1_2*q2_3 - q1_3*q2_2)
+    q = q.set(csdl.slice[:,2], q1_0*q2_2 - q1_1*q2_3 + q1_2*q2_0 + q1_3*q2_1)
+    q = q.set(csdl.slice[:,3], q1_0*q2_3 + q1_1*q2_2 - q1_2*q2_1 + q1_3*q2_0)
+
+    return q
+
+def vectorized_hamiltonion_product_2(q1:csdl.Variable, q2:csdl.Variable) -> csdl.Variable:
+    # q1 = q1.reshape((4,))
+    # q2 = q2.reshape((4,))
+
+    q1_0 = q1[0]
+    q1_1 = q1[1]
+    q1_2 = q1[2]
+    q1_3 = q1[3]
+
+    q2_0 = q2[:,0]
+    q2_1 = q2[:,1]
+    q2_2 = q2[:,2]
+    q2_3 = q2[:,3]
+
+    q = csdl.Variable(shape=q2.shape, name='quaternion_product', value=0.)
+    q = q.set(csdl.slice[:,0], q1_0*q2_0 - q1_1*q2_1 - q1_2*q2_2 - q1_3*q2_3)
+    q = q.set(csdl.slice[:,1], q1_0*q2_1 + q1_1*q2_0 + q1_2*q2_3 - q1_3*q2_2)
+    q = q.set(csdl.slice[:,2], q1_0*q2_2 - q1_1*q2_3 + q1_2*q2_0 + q1_3*q2_1)
+    q = q.set(csdl.slice[:,3], q1_0*q2_3 + q1_1*q2_2 - q1_2*q2_1 + q1_3*q2_0)
+
+    return q
+
+
+
 
 
 def hamiltonion_product(q1:csdl.Variable, q2:csdl.Variable) -> csdl.Variable:
