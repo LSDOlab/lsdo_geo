@@ -183,7 +183,7 @@ class Geometry(BSplineSet):
         rotating_points = self.coefficients[csdl.slice[list(points_indices)]]
 
         rotated_points = rotate_function(points=rotating_points, axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units)
-        rotated_points = rotated_points.reshape((-1,))
+        rotated_points = rotated_points.flatten()
 
         self.coefficients = self.coefficients.set(csdl.slice[list(points_indices)], rotated_points)
         return self.coefficients

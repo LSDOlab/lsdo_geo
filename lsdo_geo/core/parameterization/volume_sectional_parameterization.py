@@ -482,7 +482,7 @@ class VolumeSectionalParameterization:
                 indices = indices[i].reshape((-1,))
 
                 section_updated_points = updated_points[list(indices)].reshape(
-                    (-1, self.num_physical_dimensions)
+                    (len(indices)//self.num_physical_dimensions, self.num_physical_dimensions)
                 )
 
                 section_updated_points_sum = csdl.sum(section_updated_points, axes=(0,))

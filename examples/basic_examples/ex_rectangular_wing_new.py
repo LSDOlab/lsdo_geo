@@ -55,7 +55,7 @@ lower_surface_wireframe_parametric = geometry.project(chord_surface - np.array([
 upper_surface_wireframe = geometry.evaluate(upper_surface_wireframe_parametric)
 lower_surface_wireframe = geometry.evaluate(lower_surface_wireframe_parametric)
 camber_surface = csdl.linear_combination(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((num_chordwise, num_spanwise, 3))
-geometry.plot_meshes([camber_surface])
+# geometry.plot_meshes([camber_surface])
 # endregion
 
 # endregion
@@ -136,7 +136,7 @@ sweep_translation_b_spline = BSpline(
     ),
     num_physical_dimensions=1,
 )
-sweep_translation_b_spline.plot()
+# sweep_translation_b_spline.plot()
 
 twist_b_spline = BSpline(
     name="twist_translation_b_spline",
@@ -215,6 +215,27 @@ tip_chord_right = csdl.norm(
     geometry.evaluate(trailing_edge_right) - geometry.evaluate(leading_edge_right)
 )
 
+d_wingspan_dx = csdl.derivative.reverse(wingspan, [wingspan_stretching_b_spline.coefficients, chord_stretching_b_spline.coefficients])
+print(d_wingspan_dx)
+for key, value in d_wingspan_dx.items():
+    print(key, value.value)
+# from csdl_alpha.src.operations.derivative.utils import verify_derivatives_inline
+# verify_derivatives_inline([wingspan], [wingspan_stretching_b_spline.coefficients, chord_stretching_b_spline.coefficients])
+# d_root_chord_dx = csdl.derivative.reverse(root_chord, [wingspan_stretching_b_spline.coefficients, chord_stretching_b_spline.coefficients])
+# print(d_root_chord_dx)
+# for key, value in d_root_chord_dx.items():
+#     print(key, value.value)
+
+d_wingspan_d_wingspan_stretch = d_wingspan_dx[wingspan_stretching_b_spline.coefficients]
+test_output = d_wingspan_d_wingspan_stretch*10
+print(test_output.value)
+
+d2_wingspan_dx2 = csdl.derivative.reverse(d_wingspan_dx[wingspan_stretching_b_spline.coefficients], [wingspan_stretching_b_spline.coefficients, chord_stretching_b_spline.coefficients])
+for key, value in d2_wingspan_dx2.items():
+    print(key, value.value)
+csdl.get_current_recorder().print_graph_structure()
+csdl.get_current_recorder().visualize_graph('my_graph')
+exit()
 # parameterization_solver.declare_input(name="wingspan", input=wingspan)
 # parameterization_solver.declare_input(name="root_chord", input=root_chord)
 # parameterization_solver.declare_input(name="tip_chord_left", input=tip_chord_left)
@@ -306,8 +327,8 @@ camber_surface = csdl.linear_combination(
 # endregion
 
 # region Print and Plot Geometric Outputs
-geometry.plot()
-geometry.plot_meshes([camber_surface])
+# geometry.plot()
+# geometry.plot_meshes([camber_surface])
 
 print("Wingspan: ", wingspan.value)
 print("Root Chord: ", root_chord.value)

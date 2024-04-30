@@ -51,7 +51,7 @@ def import_geometry(file_name:str, name:str='geometry', parallelize:bool=True) -
 def rotate(points:csdl.Variable, axis_origin:csdl.Variable, axis_vector:csdl.Variable, angles:csdl.Variable, units:str='degrees') -> csdl.Variable:
     if len(points.shape) == 1:
         print("Rotating points is in vector format, so rotation is assuming 3d and reshaping into (-1,3)")
-        points = points.reshape((-1,3))
+        points = points.reshape((points.size//3,3))
 
     if type(points) is np.ndarray:
         points = csdl.Variable(shape=points.shape, value=points)
