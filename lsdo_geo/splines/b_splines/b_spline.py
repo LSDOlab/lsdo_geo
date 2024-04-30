@@ -203,87 +203,123 @@ class BSpline(m3l.Function):
             direction = np.tile(direction, num_points)
 
         # check if projection is stored
-        from pathlib import Path
-        Path("stored_files/projections").mkdir(parents=True, exist_ok=True)
-        stored_projection_file_name_points_part = f'{np.linalg.norm(points, axis=0)}_{direction[:3]}_{grid_search_density}_{max_iterations}_'
-        stored_projection_file_name_b_spline_part = f'{self.name}_{np.linalg.norm(self.coefficients.value)}_{self.space.order}_projection.pickle'
-        stored_projection_filename = stored_projection_file_name_points_part + stored_projection_file_name_b_spline_part
-        stored_projection_file_path = Path('stored_files/projections/' + stored_projection_filename)
-        if stored_projection_file_path.is_file():
-            with open(f'stored_files/projections/{stored_projection_filename}', 'rb') as handle:
+        projections_folder = "stored_files/projections"
+        name_space_file_path = projections_folder + '/name_space_dict.pickle'
+        
+        name_space_dict_file_path = Path(name_space_file_path)
+        if name_space_dict_file_path.is_file():
+            with open(name_space_file_path, 'rb') as handle:
+                name_space_dict = pickle.load(handle)
+        else:
+            Path(projections_folder).mkdir(parents=True, exist_ok=True)
+            name_space_dict = {}
+
+        long_name_space = f'{self.name}_{self.coefficients.value}_{str(points)}_{str(direction)}_{grid_search_density}_{max_iterations}'
+        if long_name_space in name_space_dict.keys():
+            short_name_space = name_space_dict[long_name_space]
+            saved_projections_file = projections_folder + f'/{short_name_space}.pickle'
+            with open(saved_projections_file, 'rb') as handle:
                 parametric_coordinates = pickle.load(handle)
-                if plot:
-                    # Plot the surfaces that are projected onto
-                    plotter = vedo.Plotter()
-                    b_spline_meshes = self.plot(plot_types=['surface'], opacity=0.25, show=False)
-                    # Plot 
-                    plotting_points = []
-                    projected_points = self.evaluate(parametric_coordinates=parametric_coordinates)
-                    flattened_projected_points = (projected_points.value).reshape((num_points, -1)) # last axis usually has length 3 for x,y,z
-                    plotting_b_spline_coefficients = vedo.Points(flattened_projected_points, r=12, c='blue')  # TODO make this (1,3) instead of (3,)
-                    plotting_points.append(plotting_b_spline_coefficients)
-                    plotter.show(b_spline_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
-                return parametric_coordinates
 
-        # If projection is not stored, continue with projection
-        if self.space.num_parametric_dimensions == 2:
-            u_vec_flattened = np.zeros(num_points)
-            v_vec_flattened = np.zeros(num_points)
+            # if plot:
+            #     self.evaluate(parametric_coordinates=parametric_coordinates, plot=plot)
+            
+        else:
+            # Path(projections_folder).mkdir(parents=True, exist_ok=True)
+            # stored_projection_file_name_points_part = f'{np.linalg.norm(points, axis=0)}_{direction[:3]}_{grid_search_density}_{max_iterations}_'
+            # stored_projection_file_name_b_spline_part = f'{self.name}_{np.linalg.norm(self.coefficients.value)}_{self.space.order}_projection.pickle'
+            # stored_projection_filename = stored_projection_file_name_points_part + stored_projection_file_name_b_spline_part
+            # stored_projection_file_path = Path(projections_folder + '/' + stored_projection_filename)
+            # if stored_projection_file_path.is_file():
+            #     with open(projections_folder + f'/{stored_projection_filename}', 'rb') as handle:
+            #         parametric_coordinates = pickle.load(handle)
+            #         if plot:
+            #             # Plot the surfaces that are projected onto
+            #             plotter = vedo.Plotter()
+            #             b_spline_meshes = self.plot(plot_types=['surface'], opacity=0.25, show=False)
+            #             # Plot 
+            #             plotting_points = []
+            #             projected_points = self.evaluate(parametric_coordinates=parametric_coordinates)
+            #             flattened_projected_points = (projected_points.value).reshape((num_points, -1)) # last axis usually has length 3 for x,y,z
+            #             plotting_b_spline_coefficients = vedo.Points(flattened_projected_points, r=12, c='blue')  # TODO make this (1,3) instead of (3,)
+            #             plotting_points.append(plotting_b_spline_coefficients)
+            #             plotter.show(b_spline_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
+            #         return parametric_coordinates
 
-            num_surfaces = 1
+            # If projection is not stored, continue with projection
+            if self.space.num_parametric_dimensions == 2:
+                u_vec_flattened = np.zeros(num_points)
+                v_vec_flattened = np.zeros(num_points)
 
-            compute_surface_projection(
-                np.array([self.space.order[0]], dtype=np.int32), np.array([self.coefficients_shape[0]], dtype=np.int32),
-                np.array([self.space.order[1]], dtype=np.int32), np.array([self.coefficients_shape[1]], dtype=np.int32),
-                num_points, max_iterations,
-                flattened_points, 
-                self.coefficients.value.reshape((-1,)),
-                self.space.knots[self.space.knot_indices[0]].copy(), self.space.knots[self.space.knot_indices[1]].copy(),
-                u_vec_flattened, v_vec_flattened, grid_search_density,
-                direction.reshape((-1,)), np.zeros((num_points,), dtype=np.int32), num_surfaces
-            )
+                num_surfaces = 1
 
-            parametric_coordinates = np.hstack((u_vec_flattened.reshape((-1,1)), v_vec_flattened.reshape((-1,1))))
+                compute_surface_projection(
+                    np.array([self.space.order[0]], dtype=np.int32), np.array([self.coefficients_shape[0]], dtype=np.int32),
+                    np.array([self.space.order[1]], dtype=np.int32), np.array([self.coefficients_shape[1]], dtype=np.int32),
+                    num_points, max_iterations,
+                    flattened_points, 
+                    self.coefficients.value.reshape((-1,)),
+                    self.space.knots[self.space.knot_indices[0]].copy(), self.space.knots[self.space.knot_indices[1]].copy(),
+                    u_vec_flattened, v_vec_flattened, grid_search_density,
+                    direction.reshape((-1,)), np.zeros((num_points,), dtype=np.int32), num_surfaces
+                )
 
-        elif self.space.num_parametric_dimensions == 3:
-            u_vec_flattened = np.zeros(num_points)
-            v_vec_flattened = np.zeros(num_points)
-            w_vec_flattened = np.zeros(num_points)
+                parametric_coordinates = np.hstack((u_vec_flattened.reshape((-1,1)), v_vec_flattened.reshape((-1,1))))
 
-            compute_volume_projection(
-                np.array([self.space.order[0]]), np.array([self.coefficients_shape[0]]),
-                np.array([self.space.order[1]]), np.array([self.coefficients_shape[1]]),
-                np.array([self.space.order[2]]), np.array([self.coefficients_shape[2]]),
-                num_points, max_iterations,
-                flattened_points, 
-                self.coefficients.value.reshape((-1,)),
-                self.space.knots[self.space.knot_indices[0]].copy(), self.space.knots[self.space.knot_indices[1]].copy(),
-                self.space.knots[self.space.knot_indices[2]].copy(),
-                u_vec_flattened, v_vec_flattened, w_vec_flattened, grid_search_density, direction.reshape((-1,))
-            )
+            elif self.space.num_parametric_dimensions == 3:
+                u_vec_flattened = np.zeros(num_points)
+                v_vec_flattened = np.zeros(num_points)
+                w_vec_flattened = np.zeros(num_points)
 
-            parametric_coordinates = np.hstack((u_vec_flattened.reshape((-1,1)), v_vec_flattened.reshape((-1,1)), w_vec_flattened.reshape((-1,1))))
+                compute_volume_projection(
+                    np.array([self.space.order[0]]), np.array([self.coefficients_shape[0]]),
+                    np.array([self.space.order[1]]), np.array([self.coefficients_shape[1]]),
+                    np.array([self.space.order[2]]), np.array([self.coefficients_shape[2]]),
+                    num_points, max_iterations,
+                    flattened_points, 
+                    self.coefficients.value.reshape((-1,)),
+                    self.space.knots[self.space.knot_indices[0]].copy(), self.space.knots[self.space.knot_indices[1]].copy(),
+                    self.space.knots[self.space.knot_indices[2]].copy(),
+                    u_vec_flattened, v_vec_flattened, w_vec_flattened, grid_search_density, direction.reshape((-1,))
+                )
+
+                parametric_coordinates = np.hstack((u_vec_flattened.reshape((-1,1)), v_vec_flattened.reshape((-1,1)), w_vec_flattened.reshape((-1,1))))
+
+            import string 
+            import random
+            characters = string.ascii_letters + string.digits  # Alphanumeric characters
+            # Generate a random string of the specified length
+            short_name_space = ''.join(random.choice(characters) for _ in range(6))
+            name_space_dict[long_name_space] = short_name_space
+            with open(name_space_file_path, 'wb+') as handle:
+                pickle.dump(name_space_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+            with open(projections_folder + f'/{short_name_space}.pickle', 'wb+') as handle:
+                pickle.dump(parametric_coordinates, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         # map = self.compute_evaluation_map(parametric_coordinates)
         # projected_points = am.array(input=self.coefficients, linear_map=map, shape=input_shape)
 
         if plot:
-            # Plot the surfaces that are projected onto
-            plotter = vedo.Plotter()
-            b_spline_meshes = self.plot(plot_types=['surface'], opacity=0.25, show=False)
-            # Plot 
-            plotting_points = []
-            projected_points = self.evaluate(parametric_coordinates=parametric_coordinates)
-            flattened_projected_points = (projected_points.value).reshape((num_points, -1)) # last axis usually has length 3 for x,y,z
-            plotting_b_spline_coefficients = vedo.Points(flattened_projected_points, r=12, c='blue')  # TODO make this (1,3) instead of (3,)
-            plotting_points.append(plotting_b_spline_coefficients)
-            plotter.show(b_spline_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
+            self.evaluate(parametric_coordinates=parametric_coordinates, plot=plot)
+
+        # if plot:
+        #     # Plot the surfaces that are projected onto
+        #     plotter = vedo.Plotter()
+        #     b_spline_meshes = self.plot(plot_types=['surface'], opacity=0.25, show=False)
+        #     # Plot 
+        #     plotting_points = []
+        #     projected_points = self.evaluate(parametric_coordinates=parametric_coordinates)
+        #     flattened_projected_points = (projected_points.value).reshape((num_points, -1)) # last axis usually has length 3 for x,y,z
+        #     plotting_b_spline_coefficients = vedo.Points(flattened_projected_points, r=12, c='blue')  # TODO make this (1,3) instead of (3,)
+        #     plotting_points.append(plotting_b_spline_coefficients)
+        #     plotter.show(b_spline_meshes, plotting_points, 'Projected Points', axes=1, viewup="z", interactive=True)
 
         # u_vec = u_vec_flattened.reshape(tuple(input_shape[:-1],)+(1,))
         # v_vec = v_vec_flattened.reshape(tuple(input_shape[:-1],)+(1,))
         # parametric_coordinates = np.concatenate((u_vec, v_vec), axis=-1)
-        with open(f'stored_files/projections/{stored_projection_filename}', 'wb+') as handle:
-            pickle.dump(parametric_coordinates, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        # with open(f'stored_files/projections/{stored_projection_filename}', 'wb+') as handle:
+        #     pickle.dump(parametric_coordinates, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         return parametric_coordinates
 
