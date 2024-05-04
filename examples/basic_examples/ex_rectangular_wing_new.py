@@ -117,7 +117,7 @@ wingspan_stretching_b_spline = BSpline(
     name="wingspan_stretching_b_spline",
     space=space_of_linear_2_dof_b_splines,
     # coefficients=csdl.Variable(shape=(2,), value=np.zeros(2,), name='wingspan_stretching_b_spline_coefficients'),
-    coefficients=csdl.Variable(
+    coefficients=csdl.ImplicitVariable(
         shape=(2,),
         value=np.array([0.0, 0.0]),
         name="wingspan_stretching_b_spline_coefficients",
@@ -230,9 +230,19 @@ d_wingspan_d_wingspan_stretch = d_wingspan_dx[wingspan_stretching_b_spline.coeff
 test_output = d_wingspan_d_wingspan_stretch*10
 print(test_output.value)
 
-d2_wingspan_dx2 = csdl.derivative.reverse(d_wingspan_dx[wingspan_stretching_b_spline.coefficients], [wingspan_stretching_b_spline.coefficients, chord_stretching_b_spline.coefficients])
-for key, value in d2_wingspan_dx2.items():
-    print(key, value.value)
+# objective = csdl.tensordot(wingspan_stretching_b_spline.coefficients, wingspan_stretching_b_spline.coefficients, axes=([0],[0]))
+# objective = csdl.sum(wingspan_stretching_b_spline.coefficients*wingspan_stretching_b_spline.coefficients)
+objective = wingspan_stretching_b_spline.coefficients @ wingspan_stretching_b_spline.coefficients
+residual = csdl.derivative.reverse(objective, [wingspan_stretching_b_spline.coefficients])[wingspan_stretching_b_spline.coefficients]
+residual = residual.flatten()
+
+solver = csdl.nonlinear_solvers.Newton()
+solver.add_state(wingspan_stretching_b_spline.coefficients, residual, tolerance=1e-8, initial_value=1.)
+solver.run()
+
+print(wingspan_stretching_b_spline.coefficients.value)
+print(residual.value)
+
 csdl.get_current_recorder().print_graph_structure()
 csdl.get_current_recorder().visualize_graph('my_graph')
 exit()

@@ -123,7 +123,7 @@ class BSpline(m3l.Function):
         
         # evaluation_map = csdl.Variable(name=f'evaluation_map', shape=evaluation_map.shape, operation=None, value=evaluation_map)
 
-        if type(self.coefficients) is csdl.Variable:
+        if isinstance(self.coefficients, csdl.Variable):
             # output = csdl.matvec(evaluation_map, self.coefficients)
             output = csdl.sparse.matvec(evaluation_map, self.coefficients.reshape((self.coefficients.size,1)))
             output = output.reshape((output.size,))
