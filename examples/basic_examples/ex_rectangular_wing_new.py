@@ -17,6 +17,13 @@ from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
 
 import lsdo_geo
 
+'''
+TODO:
+1. Projection plot=True argument
+2. Projection along a direction (currently throwing an error)
+'''
+
+
 recorder = csdl.Recorder(inline=True)
 recorder.start()
 
@@ -24,17 +31,17 @@ geometry = lsdo_geo.import_geometry(
     "lsdo_geo/splines/b_splines/sample_geometries/rectangular_wing.stp",
     parallelize=False,
 )
-geometry.refit(parallelize=False)
+# geometry.refit(parallelize=False)
 # geometry.plot()
 
 
 # region Key locations
-leading_edge_left = geometry.project(np.array([0.0, -4.0, 0.0]))
-leading_edge_right = geometry.project(np.array([0.0, 4.0, 0.0]))
-trailing_edge_left = geometry.project(np.array([1.0, -4.0, 0.0]))
-trailing_edge_right = geometry.project(np.array([1.0, 4.0, 0.0]))
-leading_edge_center = geometry.project(np.array([0.0, 0.0, 0.0]))
-trailing_edge_center = geometry.project(np.array([1.0, 0.0, 0.0]))
+leading_edge_left = geometry.project(np.array([0.0, -4.0, 0.0]), plot=True)
+leading_edge_right = geometry.project(np.array([0.0, 4.0, 0.0]), plot=True)
+trailing_edge_left = geometry.project(np.array([1.0, -4.0, 0.0]), plot=True)
+trailing_edge_right = geometry.project(np.array([1.0, 4.0, 0.0]), plot=True)
+leading_edge_center = geometry.project(np.array([0.0, 0.0, 0.0]), plot=True)
+trailing_edge_center = geometry.project(np.array([1.0, 0.0, 0.0]), plot=True)
 # endregion
 
 # region Mesh definitions
@@ -232,20 +239,34 @@ print(test_output.value)
 
 # objective = csdl.tensordot(wingspan_stretching_b_spline.coefficients, wingspan_stretching_b_spline.coefficients, axes=([0],[0]))
 # objective = csdl.sum(wingspan_stretching_b_spline.coefficients*wingspan_stretching_b_spline.coefficients)
-objective = wingspan_stretching_b_spline.coefficients @ wingspan_stretching_b_spline.coefficients
-residual = csdl.derivative.reverse(objective, [wingspan_stretching_b_spline.coefficients])[wingspan_stretching_b_spline.coefficients]
-residual = residual.flatten()
+# objective = wingspan_stretching_b_spline.coefficients @ wingspan_stretching_b_spline.coefficients
+# residual = csdl.derivative.reverse(objective, [wingspan_stretching_b_spline.coefficients])[wingspan_stretching_b_spline.coefficients]
+# residual = residual.flatten()
 
-solver = csdl.nonlinear_solvers.Newton()
-solver.add_state(wingspan_stretching_b_spline.coefficients, residual, tolerance=1e-8, initial_value=1.)
-solver.run()
+# derivatives = csdl.derivative([objective, f2], [wingspan_stretching_b_spline.coefficients, x2], mode=reverse)
+# df_dwingspan = derivatives[objective, wingspan_stretching_b_spline.coefficients]
+# df_dwingspan = derivatives[objective][wingspan_stretching_b_spline.coefficients]
+# df_dwingspan = derivatives[0,0]
 
-print(wingspan_stretching_b_spline.coefficients.value)
-print(residual.value)
+# gradient = csdl.derivative([lagrangian], [design_variables, lagrange_multipliers], return_type='block')
+# hessian = csdl.derivative([gradient], [design_variables, langrange_multiplers], return_type='block')
+# delta_x = csdl.solve_linear(hessian, -gradient)
 
-csdl.get_current_recorder().print_graph_structure()
-csdl.get_current_recorder().visualize_graph('my_graph')
-exit()
+
+# df_dx = csdl.derivative(objective, [design_variables, lagrange_multipliers])[objective, design_variables]
+
+
+
+# solver = csdl.nonlinear_solvers.Newton()
+# solver.add_state(wingspan_stretching_b_spline.coefficients, residual, tolerance=1e-8, initial_value=1.)
+# solver.run()
+
+# print(wingspan_stretching_b_spline.coefficients.value)
+# print(residual.value)
+
+# csdl.get_current_recorder().print_graph_structure()
+# csdl.get_current_recorder().visualize_graph('my_graph')
+# exit()
 # parameterization_solver.declare_input(name="wingspan", input=wingspan)
 # parameterization_solver.declare_input(name="root_chord", input=root_chord)
 # parameterization_solver.declare_input(name="tip_chord_left", input=tip_chord_left)
@@ -349,3 +370,6 @@ print("Tip Chord Right: ", tip_chord_right.value)
 # endregion
 
 # recorder.visualize_graph('my_graph')
+# csdl.save_all_variables()
+# # csdl.inline_save('variables')
+# recorder.save_graph('graph')

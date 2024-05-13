@@ -1,154 +1,95 @@
+from __future__ import annotations
+
 import numpy as np
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
 # import pickle
 import csdl_alpha as csdl
-from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
-from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
+# from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
+# from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
+import lsdo_function_spaces as lfs
+import lsdo_geo as lg
 
 @dataclass
-class Geometry(BSplineSet):
+class Geometry(lfs.FunctionSet):
 
     def get_function_space(self):
         return self.space
     
-    def copy(self):
-        '''
-        Creates a copy of the geometry that does not point to this geometry.
-        '''
-        if self.connections is not None:
-            return Geometry(self.name+'_copy', self.space, self.coefficients, self.num_physical_dimensions.copy(),
-                    self.coefficient_indices.copy(), self.connections.copy())
-        else:
-            return Geometry(self.name+'_copy', self.space, self.coefficients, self.num_physical_dimensions.copy(),
-                    self.coefficient_indices.copy())
 
-    def declare_component(self, component_name:str, b_spline_names:list[str]=None, b_spline_search_names:list[str]=None) -> BSplineSubSet:
+    def declare_component(self, function_indices:list[int]=None, function_search_names:list[str]=None, name:str=None) -> lg.Geometry:
         '''
         Declares a component. This component will point to a sub-set of the entire geometry.
 
         Parameters
         ----------
-        component_name : str
+        function_names : list[str]
+            The names of the functions that make up the component.
+        function_search_names : list[str], optional
+            The names of the functions to search for. Names of functions will be returned for each B-spline that INCLUDES the search name.
+        name : str
             The name of the component.
-        b_spline_names : list[str]
-            The names of the B-splines that make up the component.
-        b_spline_search_names : list[str], optional
-            The names of the B-splines to search for. Names of B-splines will be returned for each B-spline that INCLUDES the search name.
         '''
-        if b_spline_names is None:
-            b_spline_names_input = []
-        else:
-            b_spline_names_input = b_spline_names.copy()
+        function_set = self.create_subset(function_indices=function_indices, function_search_names=function_search_names, name=name)
 
-        if b_spline_search_names is not None:
-            b_spline_names_input += self.space.search_b_spline_names(b_spline_search_names)
-
-        sub_set = self.declare_sub_set(sub_set_name=component_name, b_spline_names=b_spline_names_input)
-        return sub_set
+        component = lg.Geometry(functions=function_set.functions, function_names=function_set.function_names, name=name, 
+                                space=function_set.space)
+        return component
     
-    def create_sub_geometry(self, sub_geometry_name:str, b_spline_names:list[str]=None, b_spline_search_names:list[str]=None) -> BSplineSubSet:
+    def create_component_copy(self, function_indices:list[int]=None, function_search_names:list[str]=None, name:str=None) -> lg.Geometry:
         '''
-        Creates a new geometry that is a subset of the current geometry.
+        Declares a component. This component will point to a sub-set of the entire geometry.
 
         Parameters
         ----------
-        component_name : str
+        function_names : list[str]
+            The names of the functions that make up the component.
+        function_search_names : list[str], optional
+            The names of the functions to search for. Names of functions will be returned for each B-spline that INCLUDES the search name.
+        name : str
             The name of the component.
-        b_spline_names : list[str]
-            The names of the B-splines that make up the component.
-        b_spline_search_names : list[str], optional
-            The names of the B-splines to search for. Names of B-splines will be returned for each B-spline that INCLUDES the search name.
         '''
-        if b_spline_names is None:
-            b_spline_names_input = []
-        else:
-            b_spline_names_input = b_spline_names.copy()
-
-        if b_spline_search_names is not None:
-            b_spline_names_input += self.space.search_b_spline_names(b_spline_search_names)
-
-        sub_set = self.create_sub_set(sub_set_name=sub_geometry_name, b_spline_names=b_spline_names_input)
-        return sub_set
-
-    def import_geometry(self, file_name:str):
-        '''
-        Imports geometry from a file.
-
-        Parameters
-        ----------
-        file_name : str
-            The name of the file (with path) that containts the geometric information.
-        '''
-        from lsdo_geo.splines.b_splines.b_spline_functions import import_file, create_b_spline_set
-        b_splines = import_file(file_name)
-        b_spline_set = create_b_spline_set(self.name, b_splines)
-
-        self.space = b_spline_set.space
-        self.coefficients = b_spline_set.coefficients
-        self.num_physical_dimensions = b_spline_set.num_physical_dimensions
-        self.coefficient_indices = b_spline_set.coefficient_indices
-        self.connections = b_spline_set.connections
-
-    def refit(self, num_coefficients:tuple=(20,20), fit_resolution:tuple=(50,50), order:tuple=(4,4), parallelize:bool=True):
-        '''
-        Evaluates a grid over the geometry and finds the best set of coefficients/control points at the desired resolution to fit the geometry.
-
-        Parameters
-        ----------
-        num_coefficients : tuple, optional
-            The number of coefficients to use in each direction.
-        fit_resolution : tuple, optional
-            The number of points to evaluate in each direction for each B-spline to fit the geometry.
-        order : tuple, optional
-            The order of the B-splines to use in each direction.
-        '''
-        from lsdo_geo.splines.b_splines.b_spline_functions import refit_b_spline_set
-        coefficients_norm = np.linalg.norm(self.coefficients.value)
-
-        file_path = f"stored_files/refits/{self.name}_{coefficients_norm}_{num_coefficients}_{order}_{fit_resolution}_stored_refit.pickle"
-        path = Path(file_path)
-        if path.is_file():
-            with open(file_path, 'rb') as handle:
-                b_spline_set = pickle.load(handle)
-        else:
-            b_spline_set = refit_b_spline_set(self, order, num_coefficients, fit_resolution, parallelize=parallelize)
-            Path("stored_files/refits").mkdir(parents=True, exist_ok=True)
-            with open(file_path, 'wb+') as handle:
-                # Since we can't pickle csdl variables, convert them back to numpy arrays
-                b_spline_set.coefficients = b_spline_set.coefficients.value
-                pickle.dump(b_spline_set, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-        # # Since we can't pickle csdl variables, convert them back to csdl variables
-        b_spline_set.coefficients = csdl.Variable(
-            shape=b_spline_set.coefficients.shape,
-            value=b_spline_set.coefficients,
-            name=self.name+'_coefficients')
-
-        self.space = b_spline_set.space
-        self.coefficients = b_spline_set.coefficients
-        self.num_physical_dimensions = b_spline_set.num_physical_dimensions
-        self.coefficient_indices = b_spline_set.coefficient_indices
-        self.connections = b_spline_set.connections
-
-        self.num_coefficients = b_spline_set.num_coefficients
+        component = self.create_subset(function_indices=function_indices, function_search_names=function_search_names, name=name)
+        component_copy = component.copy()
+        return component_copy
 
 
-    def rotate(self, axis_origin:csdl.Variable, axis_vector:csdl.Variable, angles:csdl.Variable, b_splines:list[str]=None, units:str='degrees'):
+    # def import_geometry(self, file_name:str):
+    #     '''
+    #     Imports geometry from a file.
+
+    #     Parameters
+    #     ----------
+    #     file_name : str
+    #         The name of the file (with path) that containts the geometric information.
+    #     '''
+    #     from lsdo_geo.splines.b_splines.b_spline_functions import import_file, create_b_spline_set
+    #     b_splines = import_file(file_name)
+    #     b_spline_set = create_b_spline_set(self.name, b_splines)
+
+    #     self.space = b_spline_set.space
+    #     self.coefficients = b_spline_set.coefficients
+    #     self.num_physical_dimensions = b_spline_set.num_physical_dimensions
+    #     self.coefficient_indices = b_spline_set.coefficient_indices
+    #     self.connections = b_spline_set.connections
+
+
+    def rotate(self, axis_origin:csdl.Variable, axis_vector:csdl.Variable, angles:csdl.Variable, function_indices:list[int]=None,
+                units:str='degrees'):
         '''
         Rotates the B-spline set about an axis.
 
         Parameters
         -----------
-        b_splines : list[str]
-            The B-splines to rotate.
         axis_origin : csdl.Variable
             The origin of the axis of rotation.
         axis_vector : csdl.Variable
             The vector of the axis of rotation.
         angles : csdl.Variable
             The angle of rotation.
+        function_indices : list[int]
+            The indices of the functions to rotate.
         units : str
             The units of the angle of rotation. {degrees, radians}
         '''
@@ -161,12 +102,12 @@ class Geometry(BSplineSet):
         else:
             raise ValueError(f'Invalid units {units}.')
         
-        if b_splines is None:
-            b_splines = list(self.coefficient_indices.keys())
-        if isinstance(b_splines, str):
-            b_splines = [b_splines]
-        if not isinstance(b_splines, list):
-            raise ValueError('The B-splines must be a list of strings.')
+        if function_indices is None:
+            function_indices = np.arange(len(self.functions))
+        if isinstance(function_indices, int):
+            function_indices = [function_indices]
+        if not isinstance(function_indices, list):
+            raise ValueError('The function indices must be a list of int.')
         
         if isinstance(axis_origin, np.ndarray):
             axis_origin = csdl.Variable(shape=axis_origin.shape, value=axis_origin)
@@ -175,23 +116,17 @@ class Geometry(BSplineSet):
         if type(angles) is np.ndarray:
             angles = csdl.Variable(shape=angles.shape, value=angles)
 
-        point_indices_list = []
-        for i in range(len(b_splines)):
-            b_spline_coefficients_indices = self.coefficient_indices[b_splines[i]]
-            point_indices_list.append(b_spline_coefficients_indices)
-        points_indices = np.hstack(point_indices_list)
-        rotating_points = self.coefficients[csdl.slice[list(points_indices)]]
-
-        rotated_points = rotate_function(points=rotating_points, axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units)
-        rotated_points = rotated_points.flatten()
-
-        self.coefficients = self.coefficients.set(csdl.slice[list(points_indices)], rotated_points)
-        return self.coefficients
+        for function_index in function_indices:
+            function = self.functions[function_index]
+            rotated_coefficients = rotate_function(points=function.coefficients, axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units)
+            function.coefficients = rotated_coefficients
 
     
     def plot_meshes(self, meshes:list[csdl.Variable], mesh_plot_types:list[str]=['wireframe'], mesh_opacity:float=1., mesh_color:str='#F5F0E6',
-                b_splines:list[str]=None, b_splines_plot_types:list[str]=['surface'], b_splines_opacity:float=0.25, b_splines_color:str='#00629B',
-                b_splines_surface_texture:str="", additional_plotting_elements:list=[], camera:dict=None, show:bool=True):
+                mesh_color_map='jet', mesh_line_width:float=3.,
+                function_indices:list[str]=None, function_plot_types:list[str]=['surface'], function_opacity:float=0.25, function_color:str='#00629B',
+                function_color_map:str='jet', function_surface_texture:str="",
+                additional_plotting_elements:list=[], camera:dict=None, show:bool=True):
         '''
         Plots a mesh over the geometry.
 
@@ -199,21 +134,27 @@ class Geometry(BSplineSet):
         ----------
         meshes : list
             A list of meshes to plot.
-        mesh_plot_types : list, optional
+        mesh_plot_types : list, optional = ['wireframe']
             A list of plot types for each mesh. Options are 'wireframe', 'surface', and 'points'.
-        mesh_opacity : float, optional
+        mesh_opacity : float, optional = 1.
             The opacity of the mesh.
-        mesh_color : str, optional
+        mesh_color : str, optional = '#F5F0E6'
             The color of the mesh.
-        b_splines : list, optional
-            A list of b_splines to plot.
-        b_splines_plot_types : list, optional
+        mesh_color_map : str, optional = 'jet'
+            The color map for the mesh.
+        mesh_line_width : float, optional = 3.
+            The line width of the mesh.
+        function_indices : list, optional = None
+            A list of indices for which functions to plot.
+        function_plot_types : list, optional = ['surface']
             A list of plot types for each primitive. Options are 'wireframe', 'surface', and 'points'.
-        b_splines_opacity : float, optional
-            The opacity of the b_splines.
-        b_splines_color : str, optional
-            The color of the b_splines.
-        b_splines_surface_texture : str {"", "metallic", "glossy", "ambient",... see Vedo for more options}
+        function_opacity : float, optional = 0.25
+            The opacity of the function.
+        function_color : str, optional = '#00629B'
+            The color of the function.
+        function_color_map : str, optional = 'jet'
+            The color map for the function.
+        function_surface_texture : str {"", "metallic", "glossy", "ambient",... see Vedo for more options}
             The surface texture for the primitive surfaces. (determines how light bounces off)
             More options: https://github.com/marcomusy/vedo/blob/master/examples/basic/lightings.py
         additional_plotting_elements : list, optional
@@ -229,15 +170,16 @@ class Geometry(BSplineSet):
             A list of the vedo plotting elements.
         '''
         import vedo
+        import lsdo_function_spaces.utils.plotting_functions as pf
         plotting_elements = additional_plotting_elements.copy()
 
         if not isinstance(meshes, list) and not isinstance(meshes, tuple):
             meshes = [meshes]
 
-        # Create plotting meshes for b_splines
-        plotting_elements = self.plot(b_splines=b_splines, plot_types=b_splines_plot_types, opacity=b_splines_opacity,
-                                      color=b_splines_color, surface_texture=b_splines_surface_texture,
-                                      additional_plotting_elements=plotting_elements,show=False)
+        # Create plotting meshes for the functions/geometry
+        plotting_elements = self.plot(point_types=function_plot_types, plot_types=function_plot_types, opacity=function_opacity,
+                                      color=function_color, color_map=function_color_map, surface_texture=function_surface_texture,
+                                      additional_plotting_elements=plotting_elements, show=False)
 
         for mesh in meshes:
             if type(mesh) is csdl.Variable:
@@ -259,15 +201,15 @@ class Geometry(BSplineSet):
                 continue
 
             if 'point_cloud' in mesh_plot_types:
-                num_points = np.cumprod(points.shape[:-1])[-1]
-                plotting_elements.append(vedo.Points(points.reshape((num_points,-1)), r=4).color('#00C6D7'))
+                plotting_elements = pf.plot_points(points, opacity=mesh_opacity, color=mesh_color, color_map=mesh_color_map, 
+                                                   additional_plotting_elements=plotting_elements, show=False)
 
             if points.shape[0] == 1:
                 points = points.reshape((points.shape[1:]))
 
             if len(points.shape) == 2:  # If it's a curve
                 from vedo import Line
-                plotting_elements.append(Line(points).color(mesh_color).linewidth(3))
+                plotting_elements.append(Line(points).color(mesh_color).linewidth(mesh_line_width))
                 
                 if 'wireframe' in mesh_plot_types:
                     num_points = np.cumprod(points.shape[:-1])[-1]
@@ -299,7 +241,7 @@ class Geometry(BSplineSet):
             if 'wireframe' in mesh_plot_types:
                 # plotting_mesh = vedo.Mesh([vertices, faces]).opacity(mesh_opacity).color('blue')
                 plotting_mesh = vedo.Mesh([vertices, faces]).opacity(mesh_opacity).color(mesh_color) # Default is UCSD Sand
-                plotting_elements.append(plotting_mesh.wireframe().linewidth(3))
+                plotting_elements.append(plotting_mesh.wireframe().linewidth(mesh_line_width))
             
         if show:
             plotter = vedo.Plotter()
