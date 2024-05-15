@@ -2,132 +2,108 @@ from lsdo_geo.core.parameterization.ffd_block import FFDBlock
 
 from typing import Union
 import numpy as np
-import m3l
+import lsdo_function_spaces as lfs
 import csdl_alpha as csdl
-from lsdo_geo.splines.b_splines.b_spline import BSpline
-from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
-from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
 from lsdo_geo.core.geometry.geometry import Geometry
 
-def construct_ffd_block_around_entities(name:str, entities:list[Union[np.ndarray, csdl.Variable, BSpline, BSplineSet, BSplineSubSet]],
-                                        num_coefficients:tuple[int]=5, order:tuple[int]=2, num_physical_dimensions:int=3):
+def construct_ffd_block_around_entities(entities:list[Union[np.ndarray, csdl.Variable, lfs.Function, lfs.FunctionSet]],
+                                        num_coefficients:tuple[int]=2, degree:tuple[int]=1, name:str='ffd_block') -> FFDBlock:
     '''
     Constructs an FFD block around the given entities and embeds them within.
+
+    Parameters
+    ----------
+    entities : list[Union[np.ndarray, csdl.Variable, lfs.Function, lfs.FunctionSet]]
+        List of entities to be enclosed by the FFD block.
+    num_coefficients : tuple[int], optional = 2
+        Number of coefficients in each direction of the FFD block, by default 2.
+    degree : tuple[int], optional = 2
+        Degree of the FFD block, by default 2.
+    name : str, optional = 'ffd_block'
+        Name of the FFD block, by default 'ffd_block'.
+
+    Returns
+    -------
+    FFDBlock
+        FFD block enclosing the given entities.
     '''
-    if type(entities) is not list:
+    if not isinstance(entities, list):
         entities = [entities]
 
-    from lsdo_geo.splines.b_splines.b_spline_functions import create_cartesian_enclosure_block
     # loop over entities and get points to create enclosure block
     enclosed_points = []
     for entity in entities:
-        if type(entity) is np.ndarray:
+        if isinstance(entity, np.ndarray):
             enclosed_points.append(entity)
-        elif type(entity) is csdl.Variable:
+        elif isinstance(entity, csdl.Variable):
             enclosed_points.append(entity.value)
-        elif type(entity) is BSpline or type(entity) is BSplineSet or type(entity) is Geometry:
+        elif isinstance(entity, lfs.Function):
             enclosed_points.append(entity.coefficients.value)
-        elif type(entity) is BSplineSubSet:
-            enclosed_points.append(entity.get_coefficients().value)
+        elif isinstance(entity, lfs.FunctionSet):
+            for function in entity.functions:
+                enclosed_points.append(function.coefficients.value)
         else:
             raise Exception("Please pass in a valid entity type.")
     enclosed_points = np.hstack(enclosed_points)
 
-    b_spline_hyper_volume = create_cartesian_enclosure_block(name='b_spline_hyper_volume', points=enclosed_points,
-                                                             num_coefficients=num_coefficients, order=order, knot_vectors=None,
-                                                             num_parametric_dimensions=num_physical_dimensions, # NOTE: THIS MIGHT NOT WORK?
-                                                             num_physical_dimensions=num_physical_dimensions)
-    b_spline_hyper_volume.coefficients.name = entities[0].name + '_ffd_block_coefficients'
+    num_physical_dimensions = enclosed_points.shape[-1]
+
+    b_spline_hyper_volume = lfs.create_enclosure_block(points=enclosed_points,
+                                                             num_coefficients=num_coefficients, degree=degree, knot_vectors=None,
+                                                             num_parametric_dimensions=num_physical_dimensions,
+                                                             name='b_spline_hyper_volume')
     
-    ffd_block = FFDBlock(name=name, space=b_spline_hyper_volume.space, coefficients=b_spline_hyper_volume.coefficients,
-                         num_physical_dimensions=num_physical_dimensions, embedded_entities=entities)
+    ffd_block = FFDBlock(space=b_spline_hyper_volume.space, coefficients=b_spline_hyper_volume.coefficients, name=name, embedded_entities=entities)
     
     return ffd_block
 
 
-def construct_ffd_block_from_corners(name:str, entities:list[Union[np.ndarray, csdl.Variable, BSpline, BSplineSet, BSplineSubSet]],
+def construct_ffd_block_from_corners(entities:list[Union[np.ndarray, csdl.Variable, lfs.Function, lfs.FunctionSet, Geometry]],
                                      corners:np.ndarray,
-                                        num_coefficients:tuple[int]=5, order:tuple[int]=2, num_physical_dimensions:int=3):
-    '''
-    Constructs an FFD block around the given entities and embeds them within.
-    '''
-    if type(entities) is not list:
-        entities = [entities]
-
-    from lsdo_geo.splines.b_splines.b_spline_functions import create_cartesian_enclosure_block
-    from lsdo_geo.splines.b_splines.b_spline_functions import create_b_spline_from_corners
-    # loop over entities and get points to create enclosure block
-    enclosed_points = []
-    for entity in entities:
-        if type(entity) is np.ndarray:
-            enclosed_points.append(entity)
-        elif type(entity) is csdl.Variable:
-            enclosed_points.append(entity.value)
-        elif type(entity) is BSpline or type(entity) is BSplineSet or type(entity) is Geometry:
-            enclosed_points.append(entity.coefficients.value)
-        elif type(entity) is BSplineSubSet:
-            enclosed_points.append(entity.get_coefficients().value)
-        else:
-            raise Exception("Please pass in a valid entity type.")
-    enclosed_points = np.hstack(enclosed_points)
-
-    b_spline_hyper_volume = create_b_spline_from_corners(name, corners, order=order, num_coefficients=num_coefficients, knot_vectors=None)
-    b_spline_hyper_volume.coefficients.name = entities[0].name + '_ffd_block_coefficients'
-    
-    ffd_block = FFDBlock(name=name, space=b_spline_hyper_volume.space, coefficients=b_spline_hyper_volume.coefficients,
-                         num_physical_dimensions=num_physical_dimensions, embedded_entities=entities)
-    
-    return ffd_block
-
-
-def construct_tight_fit_ffd_block(name:str, entities:list[Union[np.ndarray, csdl.Variable, BSpline, BSplineSet, BSplineSubSet]],
-                                        num_coefficients:tuple[int]=5, order:tuple[int]=2, num_physical_dimensions:int=3):
+                                        num_coefficients:tuple[int]=2, degree:tuple[int]=1, name:str='ffd_block') -> FFDBlock:
     '''
     Constructs an FFD block around the given entities and embeds them within.
     '''
     if not isinstance(entities, list):
         entities = [entities]
 
-    from lsdo_geo.splines.b_splines.b_spline_functions import create_cartesian_enclosure_block
+    b_spline_hyper_volume = lfs.create_b_spline_from_corners(corners, degree=degree, num_coefficients=num_coefficients, knot_vectors=None,
+                                                             name='b_spline_hyper_volume_for_ffd_block')
+    # Just piggybacks on the Function to make the FFD Block
+    ffd_block = FFDBlock(space=b_spline_hyper_volume.space, coefficients=b_spline_hyper_volume.coefficients,
+                         name=name, embedded_entities=entities)
+    
+    return ffd_block
+
+
+def construct_tight_fit_ffd_block(entities:list[Union[np.ndarray, csdl.Variable, lfs.Function, lfs.FunctionSet, Geometry]],
+                                        num_coefficients:tuple[int]=5, degree:tuple[int]=2, name:str='ffd_block') -> FFDBlock:
+    '''
+    Constructs an FFD block around the given entities and embeds them within.
+    '''
+    if not isinstance(entities, list):
+        entities = [entities]
+
     # loop over entities and get points to create enclosure block
-    enclosed_points = []
-    for entity in entities:
-        if type(entity) is np.ndarray:
-            enclosed_points.append(entity)
-        elif type(entity) is csdl.Variable:
-            enclosed_points.append(entity.value)
-        elif type(entity) is BSpline or type(entity) is BSplineSet or type(entity) is Geometry:
-            enclosed_points.append(entity.coefficients.value)
-        elif type(entity) is BSplineSubSet:
-            enclosed_points.append(entity.get_coefficients().value)
-        else:
-            raise Exception("Please pass in a valid entity type.")
-    enclosed_points = np.hstack(enclosed_points)
-    # print('Time for looping over entities: ', t2-t1)
+
     
     # Steps for currently non-standard FFD blocks
     # 0) Cartesian enclosure volume (line 39) 
-    b_spline_hyper_volume = create_cartesian_enclosure_block(name='b_spline_hyper_volume', points=enclosed_points,
-                                                             num_coefficients=num_coefficients, order=order, knot_vectors=None,
-                                                             num_parametric_dimensions=num_physical_dimensions, # NOTE: THIS MIGHT NOT WORK?
-                                                             num_physical_dimensions=num_physical_dimensions)
-    b_spline_hyper_volume.coefficients.name = entities[0].name + '_ffd_block_coefficients'
+    enclosure_ffd_block = construct_ffd_block_around_entities(entities=entities, num_coefficients=num_coefficients,
+                                                              degree=degree, name='helper_volume')
 
     # b_spline_hyper_volume.plot()
     
     # 1) Generate set of parametric coordinates
-    num_spanwise_sampling = 20
+    num_spanwise_sampling = 20  # THIS MUST BE EVEN TO MAKE SURE WE DON'T GET AN AIRFOIL CROSS SECTION
     sampling_projection_direction = np.array([0., 0., 1.])
     parametric_coordinates_top = np.linspace(np.array([0.5, 0., 1.]), np.array([0.5, 1., 1.]), num_spanwise_sampling)
     # parametric_coordinates_bot = np.linspace(np.array([0.5, 0., -1.]), np.array([0.5. 1.. -1.]), num_spanwise_sampling)
 
-    top_evaluation_matrix = b_spline_hyper_volume.compute_evaluation_map(parametric_coordinates=parametric_coordinates_top)
-    # bot_evaluation_matrix = b_spline_hyper_volume.compute_evaluation_map(parametric_coordinates=parametric_coordinates_bot)
-
-    ffd_top_points = top_evaluation_matrix.dot(b_spline_hyper_volume.coefficients.value).reshape((num_spanwise_sampling, 3))
+    enclosure_top_points = enclosure_ffd_block.evaluate(parametric_coordinates_top).value
     # ffd_bot_points = bot_evaluation_matrix.dot(b_spline_hyper_volume.coefficients.value)
 
-    top_points_on_wing = entities[0].project(ffd_top_points, direction=sampling_projection_direction)
+    top_points_on_wing = entities[0].project(enclosure_top_points, direction=sampling_projection_direction, plot=False)
     # bot_points_on_wing = entities[0].project(ffd_bot_points, direction=sampling_projection_direction)
 
     # identify key surfaces
@@ -168,15 +144,15 @@ def construct_tight_fit_ffd_block(name:str, entities:list[Union[np.ndarray, csdl
         corner_1i1 = entities[0].evaluate(parametric_coordinate_10).value
         corner_1ip11 = entities[0].evaluate(parametric_coordinate_11).value
 
-        corner_0i0[2] = b_spline_hyper_volume.coefficients.value[2]  # z value of first coordinate
-        corner_0ip10[2] = b_spline_hyper_volume.coefficients.value[2]  # z value of first coordinate
-        corner_1i0[2] = b_spline_hyper_volume.coefficients.value[2]  # z value of first coordinate
-        corner_1ip10[2] = b_spline_hyper_volume.coefficients.value[2]  # z value of first coordinate
+        corner_0i0[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[2]  # z value of first coordinate
+        corner_0ip10[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[2]  # z value of first coordinate
+        corner_1i0[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[2]  # z value of first coordinate
+        corner_1ip10[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[2]  # z value of first coordinate
 
-        corner_0i1[2] = b_spline_hyper_volume.coefficients.value[5]  # z value of first coordinate
-        corner_0ip11[2] = b_spline_hyper_volume.coefficients.value[5]  # z value of first coordinate
-        corner_1i1[2] = b_spline_hyper_volume.coefficients.value[5]  # z value of first coordinate
-        corner_1ip11[2] = b_spline_hyper_volume.coefficients.value[5]  # z value of first coordinate
+        corner_0i1[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[5]  # z value of second coordinate
+        corner_0ip11[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[5]  # z value of second coordinate
+        corner_1i1[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[5]  # z value of second coordinate
+        corner_1ip11[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[5]  # z value of second coordinate
 
         if i == 0:
             corner_points[f'0{i}0'] = corner_0i0
@@ -201,7 +177,7 @@ def construct_tight_fit_ffd_block(name:str, entities:list[Union[np.ndarray, csdl
         w = int(index[2])
         corners[u,v,w,:] = corner_point.reshape((3,))
 
-    ffd_block = construct_ffd_block_from_corners(name=name, entities=entities, corners=corners, num_coefficients=num_coefficients, order=order, num_physical_dimensions=num_physical_dimensions)    
+    ffd_block = construct_ffd_block_from_corners(entities=entities, corners=corners, num_coefficients=num_coefficients, degree=degree, name=name)
     
     
     return ffd_block

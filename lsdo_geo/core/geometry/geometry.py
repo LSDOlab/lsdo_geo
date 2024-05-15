@@ -124,7 +124,7 @@ class Geometry(lfs.FunctionSet):
     
     def plot_meshes(self, meshes:list[csdl.Variable], mesh_plot_types:list[str]=['wireframe'], mesh_opacity:float=1., mesh_color:str='#F5F0E6',
                 mesh_color_map='jet', mesh_line_width:float=3.,
-                function_indices:list[str]=None, function_plot_types:list[str]=['surface'], function_opacity:float=0.25, function_color:str='#00629B',
+                function_indices:list[str]=None, function_plot_types:list[str]=['function'], function_opacity:float=0.25, function_color:str='#00629B',
                 function_color_map:str='jet', function_surface_texture:str="",
                 additional_plotting_elements:list=[], camera:dict=None, show:bool=True):
         '''
@@ -135,7 +135,7 @@ class Geometry(lfs.FunctionSet):
         meshes : list
             A list of meshes to plot.
         mesh_plot_types : list, optional = ['wireframe']
-            A list of plot types for each mesh. Options are 'wireframe', 'surface', and 'points'.
+            A list of plot types for each mesh. Options are 'wireframe', 'function', and 'points'.
         mesh_opacity : float, optional = 1.
             The opacity of the mesh.
         mesh_color : str, optional = '#F5F0E6'
@@ -146,8 +146,8 @@ class Geometry(lfs.FunctionSet):
             The line width of the mesh.
         function_indices : list, optional = None
             A list of indices for which functions to plot.
-        function_plot_types : list, optional = ['surface']
-            A list of plot types for each primitive. Options are 'wireframe', 'surface', and 'points'.
+        function_plot_types : list, optional = ['function']
+            A list of plot types for each primitive. Options are 'wireframe', 'function', and 'points'.
         function_opacity : float, optional = 0.25
             The opacity of the function.
         function_color : str, optional = '#00629B'
@@ -177,7 +177,7 @@ class Geometry(lfs.FunctionSet):
             meshes = [meshes]
 
         # Create plotting meshes for the functions/geometry
-        plotting_elements = self.plot(point_types=function_plot_types, plot_types=function_plot_types, opacity=function_opacity,
+        plotting_elements = self.plot(point_types=['evaluated_points'], plot_types=function_plot_types, opacity=function_opacity,
                                       color=function_color, color_map=function_color_map, surface_texture=function_surface_texture,
                                       additional_plotting_elements=plotting_elements, show=False)
 

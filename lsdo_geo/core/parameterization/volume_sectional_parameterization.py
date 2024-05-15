@@ -1,6 +1,6 @@
 import numpy as np
 import scipy.sparse as sps
-import m3l
+import lsdo_function_spaces as lfs
 import vedo
 import csdl_alpha as csdl
 
@@ -88,26 +88,23 @@ class VolumeSectionalParameterization:
 
     Parameters
     ----------
-    name : str
-        The name of the free form deformation (FFD) block.
-    principal_parametric_dimension : int = 0
-        The principal parametric dimension of the volume.
     parameterized_points : csdl.Variable
-        The points that are being parameterized.
-    paremeterized_points_shape : tuple[int] = None
-        The shape of the parameterized points.
-    parameters : dict[str,SectionalParameter] = None
-        The sectional parameters to use for the parameterization.
-    parameter_indices : dict[str,int] = None
-        The indices of the parameters in the parameter vector (constructed for evaluation).
+        The points to parameterize. The points should be in a structured shape.
+    principal_parametric_dimension : int = 0
+        The principal parametric dimension of the parameterized points. The sections are along this axis (axis is normal to sections).
+    linear_parameter_maps : dict[str,sps.csc_matrix] = None
+        The linear maps from the sectional parameters to the parameterized points.
+    rotational_axes : dict[str,int] = None
+        The axes to rotate about.
+    name : str = 'volume_sectional_parameterization'
     """
 
-    name: str
     parameterized_points: csdl.Variable
     principal_parametric_dimension: int = 0
     parameterized_points_shape: tuple[int] = None
     linear_parameter_maps: dict[str, sps.csc_matrix] = None
     rotational_axes: dict[str, int] = None
+    name : str = 'volume_sectional_parameterization'
 
     def __post_init__(self):
         if self.parameterized_points_shape is None:
@@ -148,14 +145,17 @@ class VolumeSectionalParameterization:
         )
 
         # Use points to create a B-spline to help with getting axes
-        import lsdo_geo.splines.b_splines.b_spline_functions as bsp
-
-        self.helpful_b_spline = bsp.fit_b_spline(
-            fitting_points=fitting_points,
-            order=(2,),
-            num_coefficients=self.parameterized_points_shape[:-1],
-            name="helpful_b_spline",
-        )
+        
+        helpful_b_spline_space = lfs.BSplineSpace(num_parametric_dimensions=len(self.parameterized_points_shape[:-1]),
+                                                  degree=1, coefficients_shape=self.parameterized_points_shape[:-1])
+        fitting_parametric_values = helpful_b_spline_space.generate_parametric_grid(grid_resolution=self.parameterized_points_shape[:-1])
+        self.helpful_b_spline = helpful_b_spline_space.fit_function(values=fitting_points, parametric_coordinates=fitting_parametric_values)
+        # self.helpful_b_spline = lfs.fit_b_spline(
+        #     fitting_points=fitting_points,
+        #     order=(2,),
+        #     num_coefficients=self.parameterized_points_shape[:-1],
+        #     name="helpful_b_spline",
+        # )
 
         self.sectional_principal_parametric_coordinate = np.linspace(
             0.0, 1.0, self.num_sections
@@ -213,7 +213,7 @@ class VolumeSectionalParameterization:
             parametric_derivative_order = tuple(parametric_derivative_order)
             translation_axis = self.helpful_b_spline.evaluate(
                 parametric_coordinates=parametric_coordinate,
-                parametric_derivative_order=parametric_derivative_order,
+                parametric_derivative_orders=parametric_derivative_order,
             ).value
             translation_axis /= np.linalg.norm(translation_axis)
 
@@ -275,12 +275,12 @@ class VolumeSectionalParameterization:
             parametric_derivative_order = tuple(parametric_derivative_order)
             stretch_axis = self.helpful_b_spline.evaluate(
                 parametric_coordinates=parametric_coordinate,
-                parametric_derivative_order=parametric_derivative_order,
+                parametric_derivative_orders=parametric_derivative_order,
             ).value
             stretch_axis /= np.linalg.norm(stretch_axis)
             section_middle = self.helpful_b_spline.evaluate(
                 parametric_coordinates=parametric_coordinate,
-                parametric_derivative_order=(0,),
+                parametric_derivative_orders=(0,),
             ).value
 
             section_axis_end_parametric_coordinate = parametric_coordinate
@@ -290,11 +290,11 @@ class VolumeSectionalParameterization:
 
             section_axis_end = self.helpful_b_spline.evaluate(
                 parametric_coordinates=section_axis_end_parametric_coordinate,
-                parametric_derivative_order=(0,),
+                parametric_derivative_orders=(0,),
             ).value
             section_axis_beginning = self.helpful_b_spline.evaluate(
                 parametric_coordinates=section_axis_beginning_parametric_coordinate,
-                parametric_derivative_order=(0,),
+                parametric_derivative_orders=(0,),
             ).value
             section_length = (section_axis_end - section_axis_beginning).dot(
                 stretch_axis
@@ -415,7 +415,8 @@ class VolumeSectionalParameterization:
                 )
 
             delta_points = csdl.sparse.matvec(parameter_map, parameter_variable.reshape((parameter_variable.size, 1)))
-            delta_points = delta_points.reshape((delta_points.size,))
+            # delta_points = delta_points.reshape((delta_points.size,))
+            delta_points = delta_points.reshape(updated_points.shape)
             updated_points = updated_points + delta_points
 
         # updated_points = self.parameterized_points.reshape((-1,))
@@ -471,7 +472,7 @@ class VolumeSectionalParameterization:
                 parametric_derivative_order = tuple(parametric_derivative_order)
                 rotation_axis = self.helpful_b_spline.evaluate(
                     parametric_coordinates=parametric_coordinate,
-                    parametric_derivative_order=parametric_derivative_order,
+                    parametric_derivative_orders=parametric_derivative_order,
                 ).value
                 rotation_axis /= np.linalg.norm(rotation_axis)
 
@@ -515,7 +516,7 @@ class VolumeSectionalParameterization:
 
     def plot(
         self,
-        opacity: float = 0.3,
+        opacity: float = 0.8,
         color: str = "#182B49",
         surface_texture: str = "",
         additional_plotting_elements: list = [],
@@ -523,6 +524,8 @@ class VolumeSectionalParameterization:
     ):
         """
         Plots the updated ffd block in section form with the updated points.
+
+        NOTE: Plotting for VolumeSectionalParameterization is only supported for 3D volumes.
         """
         plotting_elements = additional_plotting_elements.copy()
 
@@ -536,22 +539,27 @@ class VolumeSectionalParameterization:
         for i in range(self.num_sections):
             section_points = plotting_points[i, :, :, :]
 
-            section_plot_types = ["surface", "point_cloud"]
-            plotting_elements = self.helpful_b_spline.plot_section(
-                section_points,
-                plot_types=section_plot_types,
-                opacity=opacity,
-                color=color,
-                surface_texture=surface_texture,
-                additional_plotting_elements=plotting_elements,
-                show=False,
-            )
+            # section_plot_types = ["function", "point_cloud"]
+            # plotting_elements = self.helpful_b_spline.plot_section(
+            #     section_points,
+            #     plot_types=section_plot_types,
+            #     opacity=opacity,
+            #     color=color,
+            #     surface_texture=surface_texture,
+            #     additional_plotting_elements=plotting_elements,
+            #     show=False,
+            # )
+            plotting_elements = lfs.plot_surface(section_points, plot_types=['function'], opacity=opacity,
+                                                 color=color, surface_texture=surface_texture, additional_plotting_elements=plotting_elements,
+                                                 show=False)
+            plotting_elements = lfs.plot_points(section_points, opacity=1., color='#00629B', size=10, 
+                                                additional_plotting_elements=plotting_elements, show=False)
 
         if show:
             plotter = vedo.Plotter()
             plotter.show(
                 plotting_elements,
-                f"Free Form Deformation Block: {self.name}",
+                f"Parameterized Sections: {self.name}",
                 axes=1,
                 viewup="z",
                 interactive=True,
