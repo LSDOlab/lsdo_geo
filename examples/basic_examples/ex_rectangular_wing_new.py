@@ -29,7 +29,7 @@ geometry = lsdo_geo.import_geometry(
     parallelize=False,
 )
 # geometry.refit(parallelize=False) # New API if you want to do this!
-geometry.plot()
+# geometry.plot()
 
 
 # region Key locations
@@ -40,6 +40,7 @@ trailing_edge_right = geometry.project(np.array([1.0, 4.0, 0.0]))
 leading_edge_center = geometry.project(np.array([0.0, 0.0, 0.0]))
 trailing_edge_center = geometry.project(np.array([1.0, 0.0, 0.0]))
 quarter_chord_left = geometry.project(np.array([0.25, -4.0, 0.0]))
+quarter_chord_right = geometry.project(np.array([0.25, 4.0, 0.0]))
 quarter_chord_center = geometry.project(np.array([0.25, 0.0, 0.0]))
 # endregion
 
@@ -56,12 +57,12 @@ trailing_edge_parametric = geometry.project(points_to_project_on_trailing_edge, 
 trailing_edge_physical = geometry.evaluate(trailing_edge_parametric)
 
 chord_surface = csdl.linear_combination(leading_edge_physical, trailing_edge_physical, num_chordwise).value.reshape((num_chordwise, num_spanwise, 3))
-upper_surface_wireframe_parametric = geometry.project(chord_surface + np.array([0., 0., 1]), direction=np.array([0., 0., -1.]), plot=True)
+upper_surface_wireframe_parametric = geometry.project(chord_surface + np.array([0., 0., 1]), direction=np.array([0., 0., -1.]), plot=False)
 lower_surface_wireframe_parametric = geometry.project(chord_surface - np.array([0., 0., 1]), direction=np.array([0., 0., -1.]), plot=False)
-upper_surface_wireframe = geometry.evaluate(upper_surface_wireframe_parametric, plot=True)
+upper_surface_wireframe = geometry.evaluate(upper_surface_wireframe_parametric, plot=False)
 lower_surface_wireframe = geometry.evaluate(lower_surface_wireframe_parametric)
 camber_surface = csdl.linear_combination(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((num_chordwise, num_spanwise, 3))
-geometry.plot_meshes([camber_surface])
+# geometry.plot_meshes([camber_surface])
 # endregion
 
 # endregion
@@ -74,27 +75,27 @@ num_ffd_sections = 3
 num_wing_secctions = 2
 ffd_block = construct_tight_fit_ffd_block(entities=geometry, num_coefficients=(2, (num_ffd_sections // num_wing_secctions + 1), 2), degree=(1,1,1))
 # ffd_block = construct_tight_fit_ffd_block(entities=geometry, num_coefficients=(2, 3, 2), degree=(1,1,1))
-ffd_block.plot()
+# ffd_block.plot()
 
 ffd_sectional_parameterization = VolumeSectionalParameterization(
     name="ffd_sectional_parameterization",
     parameterized_points=ffd_block.coefficients,
     principal_parametric_dimension=1,
 )
-ffd_sectional_parameterization.plot()
+# ffd_sectional_parameterization.plot()
 
 space_of_linear_3_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(3,))
 space_of_linear_2_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
 
 chord_stretching_b_spline = lfs.Function(space=space_of_linear_3_dof_b_splines,
-                                         coefficients=csdl.Variable(shape=(3,), value=np.array([-0.8, 3., -0.8])))
+                                         coefficients=csdl.ImplicitVariable(shape=(3,), value=np.array([-0.8, 3., -0.8])), name='chord_stretching_b_spline_coefficients')
 
 wingspan_stretching_b_spline = lfs.Function(space=space_of_linear_2_dof_b_splines,
-                                             coefficients=csdl.Variable(shape=(2,), value=np.array([-4., 4.])))
+                                             coefficients=csdl.ImplicitVariable(shape=(2,), value=np.array([-4., 4.])), name='wingspan_stretching_b_spline_coefficients')
 
 sweep_translation_b_spline = lfs.Function(space=space_of_linear_3_dof_b_splines,
-                                            coefficients=csdl.Variable(shape=(3,), value=np.array([4.0, 0.0, 4.0])))
-sweep_translation_b_spline.plot()
+                                            coefficients=csdl.ImplicitVariable(shape=(3,), value=np.array([4.0, 0.0, 4.0])), name='sweep_translation_b_spline_coefficients')
+# sweep_translation_b_spline.plot()
 
 twist_b_spline = lfs.Function(space=space_of_linear_3_dof_b_splines,
                                 coefficients=csdl.Variable(shape=(3,), value=np.array([15, 0., 15])))
@@ -123,11 +124,11 @@ sectional_parameters.add_sectional_stretch(axis=0, stretch=chord_stretch_section
 sectional_parameters.add_sectional_translation(axis=1, translation=wingspan_stretch_sectional_parameters)
 sectional_parameters.add_sectional_translation(axis=0, translation=sweep_translation_sectional_parameters)
 
-ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=True)    # TODO: Fix plot function
+ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=False)    # TODO: Fix plot function
 
-geometry_coefficients = ffd_block.evaluate_ffd(ffd_coefficients, plot=True)
+geometry_coefficients = ffd_block.evaluate_ffd(ffd_coefficients, plot=False)
 geometry.set_coefficients(geometry_coefficients)
-geometry.plot()
+# geometry.plot()
 
 
 wingspan = csdl.norm(
@@ -143,33 +144,36 @@ tip_chord_right = csdl.norm(
     geometry.evaluate(trailing_edge_right) - geometry.evaluate(leading_edge_right)
 )
 
-spanwise_direction = geometry.evaluate(quarter_chord_left) - geometry.evaluate(quarter_chord_center)
+spanwise_direction_left = geometry.evaluate(quarter_chord_left) - geometry.evaluate(quarter_chord_center)
+spanwise_direction_right = geometry.evaluate(quarter_chord_right) - geometry.evaluate(quarter_chord_center)
 # sweep_angle = csdl.arccos(csdl.vdot(spanwise_direction, np.array([0., -1., 0.])) / csdl.norm(spanwise_direction))
-sweep_angle = csdl.arccos(-spanwise_direction[1] / csdl.norm(spanwise_direction))
+sweep_angle_left = csdl.arccos(-spanwise_direction_left[1] / csdl.norm(spanwise_direction_left))
+sweep_angle_right = csdl.arccos(spanwise_direction_right[1] / csdl.norm(spanwise_direction_right))
 
 print("Wingspan: ", wingspan.value)
 print("Root Chord: ", root_chord.value)
 print("Tip Chord Left: ", tip_chord_left.value)
 print("Tip Chord Right: ", tip_chord_right.value)
-print("Sweep Angle: ", sweep_angle.value*180/np.pi)
+print("Sweep Angle Left: ", sweep_angle_left.value*180/np.pi)
+print("Sweep Angle Right: ", sweep_angle_right.value*180/np.pi)
 
 # Create Newton solver for inner optimization
 solver = csdl.nonlinear_solvers.Newton()
-# objective = (csdl.vdot(chord_stretching_b_spline.coefficients, chord_stretching_b_spline.coefficients)
-#             + csdl.vdot(wingspan_stretching_b_spline.coefficients, wingspan_stretching_b_spline.coefficients)
-#             + csdl.vdot(sweep_translation_b_spline.coefficients, sweep_translation_b_spline.coefficients))
+objective = (csdl.vdot(chord_stretching_b_spline.coefficients, chord_stretching_b_spline.coefficients)
+            + csdl.vdot(wingspan_stretching_b_spline.coefficients, wingspan_stretching_b_spline.coefficients)
+            + csdl.vdot(sweep_translation_b_spline.coefficients, sweep_translation_b_spline.coefficients))
 # vdot doesn't have derivative right now
-objective = (csdl.sum(chord_stretching_b_spline.coefficients*chord_stretching_b_spline.coefficients)
-            + csdl.sum(wingspan_stretching_b_spline.coefficients*wingspan_stretching_b_spline.coefficients)
-            + csdl.sum(sweep_translation_b_spline.coefficients*sweep_translation_b_spline.coefficients))
+# objective = (csdl.sum(chord_stretching_b_spline.coefficients*chord_stretching_b_spline.coefficients)
+#             + csdl.sum(wingspan_stretching_b_spline.coefficients*wingspan_stretching_b_spline.coefficients)
+#             + csdl.sum(sweep_translation_b_spline.coefficients*sweep_translation_b_spline.coefficients))
 
-df_dx = csdl.derivative.reverse(objective, 
+df_dx = csdl.derivative(objective, 
                                 [chord_stretching_b_spline.coefficients, 
                                  wingspan_stretching_b_spline.coefficients, 
                                  sweep_translation_b_spline.coefficients])
-df_d_chord_stretch = df_dx[chord_stretching_b_spline.coefficients]
-df_d_wingspan_stretch = df_dx[wingspan_stretching_b_spline.coefficients]
-df_d_sweep_translation = df_dx[sweep_translation_b_spline.coefficients]
+df_d_chord_stretch = df_dx[chord_stretching_b_spline.coefficients].flatten()
+df_d_wingspan_stretch = df_dx[wingspan_stretching_b_spline.coefficients].flatten()
+df_d_sweep_translation = df_dx[sweep_translation_b_spline.coefficients].flatten()
 
 wingspan_outer_dv = csdl.Variable(shape=(1,), value=np.array([6.0]))
 root_chord_outer_dv = csdl.Variable(shape=(1,), value=np.array([2.0]))
@@ -180,17 +184,20 @@ constraint1 = wingspan - wingspan_outer_dv
 constraint2 = root_chord - root_chord_outer_dv
 constraint3 = tip_chord_left - tip_chord_outer_dv
 constraint4 = tip_chord_right - tip_chord_outer_dv
-constraint5 = sweep_angle - sweep_angle_outer_dv*np.pi/180
-constraints_vector = csdl.Variable(shape=(5,), value=0.)
+constraint5 = sweep_angle_left - sweep_angle_outer_dv
+constraint6 = sweep_angle_right - sweep_angle_outer_dv
+num_constraints = 6
+constraints_vector = csdl.Variable(shape=(num_constraints,), value=0.)
 constraints_vector = constraints_vector.set(csdl.slice[0], constraint1)
 constraints_vector = constraints_vector.set(csdl.slice[1], constraint2)
 constraints_vector = constraints_vector.set(csdl.slice[2], constraint3)
 constraints_vector = constraints_vector.set(csdl.slice[3], constraint4)
 constraints_vector = constraints_vector.set(csdl.slice[4], constraint5)
+constraints_vector = constraints_vector.set(csdl.slice[5], constraint6)
 
-lagrange_multipliers = csdl.Variable(shape=(5,), value=np.zeros((5,)))
+lagrange_multipliers = csdl.ImplicitVariable(shape=(num_constraints,), value=0., name='lagrange_multipliers')
 
-dc_dx = csdl.derivative.reverse(constraints_vector,[chord_stretching_b_spline.coefficients,
+dc_dx = csdl.derivative(constraints_vector,[chord_stretching_b_spline.coefficients,
                                                     wingspan_stretching_b_spline.coefficients,
                                                     sweep_translation_b_spline.coefficients])
 dc_d_chord_stretch = dc_dx[chord_stretching_b_spline.coefficients]
@@ -204,17 +211,44 @@ wingspan_stretch_residual = df_d_wingspan_stretch + csdl.tensordot(lagrange_mult
 # sweep_translation_residual = df_d_sweep_translation + lagrange_multipliers @ dc_d_sweep_translation
 sweep_translation_residual = df_d_sweep_translation + csdl.tensordot(lagrange_multipliers, dc_d_sweep_translation, axes=([0],[0]))
 
-solver.add_state(chord_stretching_b_spline.coefficients, chord_stretch_residual)
-solver.add_state(wingspan_stretching_b_spline.coefficients, wingspan_stretch_residual)
-solver.add_state(sweep_translation_b_spline.coefficients, sweep_translation_residual)
-solver.run()
+geometry.plot()
 
 
 print("Wingspan: ", wingspan.value)
 print("Root Chord: ", root_chord.value)
 print("Tip Chord Left: ", tip_chord_left.value)
 print("Tip Chord Right: ", tip_chord_right.value)
-print("Sweep Angle: ", sweep_angle.value*180/np.pi)
+print("Sweep Angle Left: ", sweep_angle_left.value*180/np.pi)
+print("Sweep Angle Right: ", sweep_angle_right.value*180/np.pi)
+print("Chord Stretching: ", chord_stretching_b_spline.coefficients.value)
+print("Wingspan Stretching: ", wingspan_stretching_b_spline.coefficients.value)
+print("Sweep Translation: ", sweep_translation_b_spline.coefficients.value)
+print('Chord Stretching Residual: ', chord_stretch_residual.value)
+print('Wingspan Stretching Residual: ', wingspan_stretch_residual.value)
+print('Sweep Translation Residual: ', sweep_translation_residual.value)
+print('Constraints: ', constraints_vector.value)
+
+solver.add_state(chord_stretching_b_spline.coefficients, chord_stretch_residual)
+solver.add_state(wingspan_stretching_b_spline.coefficients, wingspan_stretch_residual)
+solver.add_state(sweep_translation_b_spline.coefficients, sweep_translation_residual)
+solver.add_state(lagrange_multipliers, constraints_vector, tolerance=1e-8)
+solver.run()
+
+geometry.plot()
+
+print("Wingspan: ", wingspan.value)
+print("Root Chord: ", root_chord.value)
+print("Tip Chord Left: ", tip_chord_left.value)
+print("Tip Chord Right: ", tip_chord_right.value)
+print("Sweep Angle Left: ", sweep_angle_left.value*180/np.pi)
+print("Sweep Angle Right: ", sweep_angle_right.value*180/np.pi)
+print("Chord Stretching: ", chord_stretching_b_spline.coefficients.value)
+print("Wingspan Stretching: ", wingspan_stretching_b_spline.coefficients.value)
+print("Sweep Translation: ", sweep_translation_b_spline.coefficients.value)
+print('Chord Stretching Residual: ', chord_stretch_residual.value)
+print('Wingspan Stretching Residual: ', wingspan_stretch_residual.value)
+print('Sweep Translation Residual: ', sweep_translation_residual.value)
+print('Constraints: ', constraints_vector.value)
 
 # d_wingspan_dx = csdl.derivative.reverse(wingspan, [wingspan_stretching_b_spline.coefficients, chord_stretching_b_spline.coefficients])
 # print(d_wingspan_dx)
@@ -355,11 +389,7 @@ print("Sweep Angle: ", sweep_angle.value*180/np.pi)
 # geometry.plot()
 # geometry.plot_meshes([camber_surface])
 
-print("Wingspan: ", wingspan.value)
-print("Root Chord: ", root_chord.value)
-print("Tip Chord Left: ", tip_chord_left.value)
-print("Tip Chord Right: ", tip_chord_right.value)
-print("Sweep Angle: ", sweep_angle.value*180/np.pi)
+
 
 # endregion
 
