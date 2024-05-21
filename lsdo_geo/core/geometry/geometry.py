@@ -103,11 +103,11 @@ class Geometry(lfs.FunctionSet):
             raise ValueError(f'Invalid units {units}.')
         
         if function_indices is None:
-            function_indices = np.arange(len(self.functions))
+            function_indices = list(np.arange(len(self.functions)))
         if isinstance(function_indices, int):
             function_indices = [function_indices]
         if not isinstance(function_indices, list):
-            raise ValueError('The function indices must be a list of int.')
+            raise ValueError(f'The function indices must be a list of int, received {type(function_indices)}')
         
         if isinstance(axis_origin, np.ndarray):
             axis_origin = csdl.Variable(shape=axis_origin.shape, value=axis_origin)
@@ -118,8 +118,11 @@ class Geometry(lfs.FunctionSet):
 
         for function_index in function_indices:
             function = self.functions[function_index]
-            rotated_coefficients = rotate_function(points=function.coefficients, axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units)
-            function.coefficients = rotated_coefficients
+            rotated_coefficients = rotate_function(
+                points=function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])), 
+                axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units
+            )
+            function.coefficients = rotated_coefficients.reshape(function.coefficients.shape)
 
     
     def plot_meshes(self, meshes:list[csdl.Variable], mesh_plot_types:list[str]=['wireframe'], mesh_opacity:float=1., mesh_color:str='#F5F0E6',

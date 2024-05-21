@@ -40,6 +40,9 @@ def rotate(points:csdl.Variable, axis_origin:csdl.Variable, axis_vector:csdl.Var
     if units == 'degrees':
         angles = angles * np.pi / 180
 
+    print(axis_origin.shape)
+    print(points.shape)
+    
     points_wrt_axis = points - csdl.expand(axis_origin, points.shape, 'i->ji')
 
     output_shape = (points.shape[0], 4)
