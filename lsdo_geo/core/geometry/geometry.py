@@ -106,7 +106,7 @@ class Geometry(lfs.FunctionSet):
             function_indices = np.arange(len(self.functions))
         if isinstance(function_indices, int):
             function_indices = [function_indices]
-        if not isinstance(function_indices, list):
+        if not isinstance(function_indices, (list, np.ndarray)):
             raise ValueError('The function indices must be a list of int.')
         
         if isinstance(axis_origin, np.ndarray):
