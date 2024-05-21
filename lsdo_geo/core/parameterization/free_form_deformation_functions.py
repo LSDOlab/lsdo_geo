@@ -43,7 +43,7 @@ def construct_ffd_block_around_entities(entities:list[Union[np.ndarray, csdl.Var
             entity = entity.coefficients.value
             enclosed_points.append(entity.reshape(-1, entity.shape[-1]))
         elif isinstance(entity, lfs.FunctionSet):
-            for function in entity.functions:
+            for function in entity.functions.values():
                 entity = function.coefficients.value
                 enclosed_points.append(entity.reshape(-1, entity.shape[-1]))
         else:

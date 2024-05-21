@@ -48,7 +48,7 @@ class FFDBlock(lfs.Function):
                 embedded_points = entity.coefficients.value
             elif isinstance(entity, Geometry) or isinstance(entity, lfs.FunctionSet):
                 embedded_points = []
-                for function in entity.functions:
+                for function in entity.functions.values():
                     embedded_points.append(function.coefficients.value)
             else:
                 raise ValueError(f'Unsupported entity type: {type(entity)}')
