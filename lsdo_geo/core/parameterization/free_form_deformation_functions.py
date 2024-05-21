@@ -34,17 +34,22 @@ def construct_ffd_block_around_entities(entities:list[Union[np.ndarray, csdl.Var
     enclosed_points = []
     for entity in entities:
         if isinstance(entity, np.ndarray):
-            enclosed_points.append(entity)
+            entity = entity
+            enclosed_points.append(entity.reshape(-1, entity.shape[-1]))
         elif isinstance(entity, csdl.Variable):
-            enclosed_points.append(entity.value)
+            entity = entity.value
+            enclosed_points.append(entity.reshape(-1, entity.shape[-1]))
         elif isinstance(entity, lfs.Function):
-            enclosed_points.append(entity.coefficients.value)
+            entity = entity.coefficients.value
+            enclosed_points.append(entity.reshape(-1, entity.shape[-1]))
         elif isinstance(entity, lfs.FunctionSet):
             for function in entity.functions:
-                enclosed_points.append(function.coefficients.value)
+                entity = function.coefficients.value
+                enclosed_points.append(entity.reshape(-1, entity.shape[-1]))
         else:
             raise Exception("Please pass in a valid entity type.")
-    enclosed_points = np.hstack(enclosed_points)
+
+    enclosed_points = np.vstack(enclosed_points)
 
     num_physical_dimensions = enclosed_points.shape[-1]
 

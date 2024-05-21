@@ -20,10 +20,14 @@ def import_geometry(file_name:str, name:str='geometry', parallelize:bool=True) -
 
 
 def rotate(points:csdl.Variable, axis_origin:csdl.Variable, axis_vector:csdl.Variable, angles:csdl.Variable, units:str='degrees') -> csdl.Variable:
+    points_out_shape = None
     if len(points.shape) == 1:
         print("Rotating points is in vector format, so rotation is assuming 3d and reshaping into (-1,3)")
         points = points.reshape((points.size//3,3))
-
+    if len(points.shape) > 2:
+        points_out_shape = points.shape
+        points = points.reshape((points.size//points.shape[-1], points.shape[-1]))
+        
     if type(points) is np.ndarray:
         points = csdl.Variable(shape=points.shape, value=points)
 
@@ -98,6 +102,8 @@ def rotate(points:csdl.Variable, axis_origin:csdl.Variable, axis_vector:csdl.Var
         output_shape = (angles.shape[0], points.shape[0], points.shape[1])
         rotated_points = rotated_points_wrt_axis + csdl.expand(axis_origin, output_shape, 'i->kij')
 
+    if points_out_shape is not None:
+        rotated_points = rotated_points.reshape(points_out_shape)
     return rotated_points
 
 
