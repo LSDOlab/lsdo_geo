@@ -18,21 +18,6 @@ class Optimization:
             self.constraints = []
         if self.constraint_penalties is None:
             self.constraint_penalties = []
-    # def __init__(self, objective:csdl.Variable=None, design_variables:list[csdl.Variable]=None, 
-    #              constraints:list[csdl.Variable]=None, constraint_penalties:list[Union[float,np.ndarray]]=None):
-    #     self.objective = objective
-    #     self.design_variables = design_variables
-    #     self.constraints = constraints
-    #     self.constraint_penalties = constraint_penalties
-
-    #     if design_variables is None:
-    #         self.design_variables = []
-    #     if constraints is None:
-    #         self.constraints = []
-    #     if constraint_penalties is None:
-    #         self.constraint_penalties = []
-
-    #     # self.solver = csdl.nonlinear_solvers.Newton()
 
     def add_objective(self, objective:csdl.Variable):
         self.objective = objective
@@ -40,7 +25,7 @@ class Optimization:
     def add_design_variable(self, design_variable:csdl.Variable):
         self.design_variables.append(design_variable)
 
-    def add_constraint(self, constraint:csdl.Variable, penalty:Union[float,np.ndarray]=None):
+    def add_constraint(self, constraint:csdl.Variable, penalty:Union[float,np.ndarray,csdl.Variable]=None):
         self.constraints.append(constraint)
         self.constraint_penalties.append(penalty)
 
@@ -109,17 +94,6 @@ class Optimization:
         if self.objective is not None:
             lagrangian = self.compute_lagrangian()
             dL_dx = self.compute_lagrangian_gradient(lagrangian=lagrangian, design_variables=self.design_variables)
-        # dc_dx = self.compute_constraint_jacobian(constraints=self.constraints, design_variables=self.design_variables)
-
-        # lagrange_multipliers = []
-        # for constraint, penalty in zip(self.constraints, self.constraint_penalties):
-        #     if penalty is None:
-        #         constraint_lagrange_multipliers = csdl.ImplicitVariable(shape=(constraint.shape[0],), value=0.,
-        #                                                                 name=f'{constraint.name}_lagrange_multipliers')
-        #         lagrange_multipliers.append(constraint_lagrange_multipliers)
-        #         solver.add_state(constraint_lagrange_multipliers, constraint)
-        #     else:
-        #         lagrange_multipliers.append(None)
 
         for constraint, constraint_lagrange_multipliers in zip(self.constraints, self.lagrange_multipliers):
             if constraint_lagrange_multipliers is not None:
@@ -128,17 +102,8 @@ class Optimization:
 
         for design_variable in self.design_variables:
             residual = dL_dx[design_variable].reshape((design_variable.size,))
-            # for constraint, constraint_lagrange_multipliers in zip(self.constraints, self.lagrange_multipliers):
-            #     if constraint_lagrange_multipliers is not None:
-            #         constraint_jacobian = dc_dx[constraint,design_variable]
-            #         residual = residual + csdl.tensordot(constraint_lagrange_multipliers, constraint_jacobian, axes=([0],[0]))
             residual.add_name(f'{design_variable.name}_residual')
             solver.solver.add_state(design_variable, residual)
-
-    # def run(self):
-    #     self.setup()
-    #     self.solver.run()
-
 
 
 class NewtonOptimizer:

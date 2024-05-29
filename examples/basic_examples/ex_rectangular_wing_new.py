@@ -163,9 +163,9 @@ wingspan_stretching_b_spline.coefficients.add_name('wingspan_stretching_b_spline
 sweep_translation_b_spline.coefficients.add_name('sweep_translation_b_spline_coefficients')
 
 
-objective = (csdl.vdot(chord_stretching_b_spline.coefficients, chord_stretching_b_spline.coefficients)
-            + csdl.vdot(wingspan_stretching_b_spline.coefficients, wingspan_stretching_b_spline.coefficients)
-            + csdl.vdot(sweep_translation_b_spline.coefficients, sweep_translation_b_spline.coefficients))
+# objective = (csdl.vdot(chord_stretching_b_spline.coefficients, chord_stretching_b_spline.coefficients)
+#             + csdl.vdot(wingspan_stretching_b_spline.coefficients, wingspan_stretching_b_spline.coefficients)
+#             + csdl.vdot(sweep_translation_b_spline.coefficients, sweep_translation_b_spline.coefficients))
 
 wingspan_outer_dv = csdl.Variable(shape=(1,), value=np.array([6.0]))
 root_chord_outer_dv = csdl.Variable(shape=(1,), value=np.array([2.0]))
@@ -187,18 +187,33 @@ sweep_angle_right_constraint.add_name('sweep_angle_right_constraint')
 
 geometry.plot()
 
-from lsdo_geo.csdl.optimization import Optimization, NewtonOptimizer
-geometry_optimization = Optimization()
-geometry_optimization.add_objective(objective)
-geometry_optimization.add_design_variable(chord_stretching_b_spline.coefficients)
-geometry_optimization.add_design_variable(wingspan_stretching_b_spline.coefficients)
-geometry_optimization.add_design_variable(sweep_translation_b_spline.coefficients)
-geometry_optimization.add_constraint(wingspan_constraint)
-geometry_optimization.add_constraint(root_chord_constraint)
-geometry_optimization.add_constraint(tip_chord_left_constraint)
-geometry_optimization.add_constraint(tip_chord_right_constraint)
-geometry_optimization.add_constraint(sweep_angle_left_constraint)
-geometry_optimization.add_constraint(sweep_angle_right_constraint)
+# from lsdo_geo.csdl.optimization import Optimization, NewtonOptimizer
+# geometry_optimization = Optimization()
+# geometry_optimization.add_objective(objective)
+# geometry_optimization.add_design_variable(chord_stretching_b_spline.coefficients)
+# geometry_optimization.add_design_variable(wingspan_stretching_b_spline.coefficients)
+# geometry_optimization.add_design_variable(sweep_translation_b_spline.coefficients)
+# geometry_optimization.add_constraint(wingspan_constraint)
+# geometry_optimization.add_constraint(root_chord_constraint)
+# geometry_optimization.add_constraint(tip_chord_left_constraint)
+# geometry_optimization.add_constraint(tip_chord_right_constraint)
+# geometry_optimization.add_constraint(sweep_angle_left_constraint)
+# geometry_optimization.add_constraint(sweep_angle_right_constraint)
+
+from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver, GeometricVariables
+geometry_solver = ParameterizationSolver()
+geometry_solver.add_parameter(chord_stretching_b_spline.coefficients)
+geometry_solver.add_parameter(wingspan_stretching_b_spline.coefficients)
+geometry_solver.add_parameter(sweep_translation_b_spline.coefficients)
+
+geometric_variables = GeometricVariables()
+geometric_variables.add_geometric_variable(wingspan, wingspan_outer_dv)
+geometric_variables.add_geometric_variable(root_chord, root_chord_outer_dv)
+geometric_variables.add_geometric_variable(tip_chord_left, tip_chord_outer_dv)
+geometric_variables.add_geometric_variable(tip_chord_right, tip_chord_outer_dv)
+geometric_variables.add_geometric_variable(sweep_angle_left, sweep_angle_outer_dv)
+geometric_variables.add_geometric_variable(sweep_angle_right, sweep_angle_outer_dv)
+
 
 print("Wingspan: ", wingspan.value)
 print("Root Chord: ", root_chord.value)
@@ -210,9 +225,7 @@ print("Chord Stretching: ", chord_stretching_b_spline.coefficients.value)
 print("Wingspan Stretching: ", wingspan_stretching_b_spline.coefficients.value)
 print("Sweep Translation: ", sweep_translation_b_spline.coefficients.value)
 
-geometry_optimizer = NewtonOptimizer()
-geometry_optimizer.add_optimization(geometry_optimization)
-geometry_optimizer.run()
+geometry_solver.evaluate(geometric_variables)
 geometry.plot()
 
 print("Wingspan: ", wingspan.value)
