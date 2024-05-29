@@ -158,7 +158,124 @@ print("Sweep Angle Left: ", sweep_angle_left.value*180/np.pi)
 print("Sweep Angle Right: ", sweep_angle_right.value*180/np.pi)
 
 # Create Newton solver for inner optimization
-solver = csdl.nonlinear_solvers.Newton()
+from typing import Union
+class NewtonOptimizer:
+    def __init__(self, objective:csdl.Variable=None, design_variables:list[csdl.Variable]=None, 
+                 constraints:list[csdl.Variable]=None, constraint_penalties:list[Union[float,np.ndarray]]=None):
+        self.objective = objective
+        self.design_variables = design_variables
+        self.constraints = constraints
+        self.constraint_penalties = constraint_penalties
+
+        if design_variables is None:
+            self.design_variables = []
+        if constraints is None:
+            self.constraints = []
+        if constraint_penalties is None:
+            self.constraint_penalties = []
+
+        self.solver = csdl.nonlinear_solvers.Newton()
+
+    def add_objective(self, objective:csdl.Variable):
+        self.objective = objective
+
+    def add_design_variable(self, design_variable:csdl.Variable):
+        self.design_variables.append(design_variable)
+
+    def add_constraint(self, constraint:csdl.Variable, penalty:Union[float,np.ndarray]=None):
+        self.constraints.append(constraint)
+        self.constraint_penalties.append(penalty)
+
+
+    def compute_lagrangian(self):
+        '''
+        Constructs the CSDL variable for the lagrangian of the optimization problem.
+        '''
+        lagrangian = self.objective
+        for constraint, penalty in zip(self.constraints, self.constraint_penalties):
+            if penalty is not None:
+                lagrangian += penalty*constraint
+        self.lagrangian = lagrangian
+        return lagrangian
+
+    def compute_objective_gradient(self, objective:csdl.Variable=None, design_variables:list[csdl.Variable]=None):
+        '''
+        Constructs the CSDL variable for the objective gradient wrt each design variable.
+        '''
+        if objective is None:
+            objective = self.objective
+        if design_variables is None:
+            design_variables = self.design_variables
+
+        df_dx = csdl.derivative(self.objective, self.design_variables)
+        self.df_dx = df_dx
+        return df_dx
+    
+    def compute_lagrangian_gradient(self, lagrangian:csdl.Variable=None, design_variables:list[csdl.Variable]=None):
+        '''
+        Constructs the CSDL variable for the lagrangian gradient wrt each design variable.
+        '''
+        if lagrangian is None:
+            lagrangian = self.lagrangian
+        if design_variables is None:
+            design_variables = self.design_variables
+
+        dL_dx = csdl.derivative(self.lagrangian, self.design_variables)
+        self.dL_dx = dL_dx
+        return dL_dx
+
+    def compute_constraint_jacobian(self, constraints:list[csdl.Variable]=None, design_variables:list[csdl.Variable]=None):
+        '''
+        Constructs the CSDL variables for the jacobian of each constraint wrt each design variable
+        '''
+        if constraints is None:
+            constraints = self.constraints
+        if design_variables is None:
+            design_variables = self.design_variables
+
+        dc_dx = csdl.derivative(self.constraints, self.design_variables)
+        self.dc_dx = dc_dx
+        return dc_dx
+    
+    def setup(self):
+        '''
+        Sets up the optimization problem as an implicit model to drive the gradient to 0.
+        '''
+        if self.objective is not None:
+            lagrangian = self.compute_lagrangian()
+            dL_dx = self.compute_lagrangian_gradient(lagrangian=lagrangian, design_variables=self.design_variables)
+        dc_dx = self.compute_constraint_jacobian(constraints=self.constraints, design_variables=self.design_variables)
+
+        lagrange_multipliers = []
+        for constraint, penalty in zip(self.constraints, self.constraint_penalties):
+            if penalty is None:
+                constraint_lagrange_multipliers = csdl.ImplicitVariable(shape=(constraint.shape[0],), value=0.,
+                                                                        name=f'{constraint.name}_lagrange_multipliers')
+                lagrange_multipliers.append(constraint_lagrange_multipliers)
+                self.solver.add_state(constraint_lagrange_multipliers, constraint)
+            else:
+                lagrange_multipliers.append(None)
+                
+
+        for design_variable in self.design_variables:
+            residual = dL_dx[design_variable].reshape((design_variable.size,))
+            for constraint, constraint_lagrange_multipliers in zip(self.constraints, lagrange_multipliers):
+                if constraint_lagrange_multipliers is not None:
+                    constraint_jacobian = dc_dx[constraint,design_variable]
+                    residual = residual + csdl.tensordot(constraint_lagrange_multipliers, constraint_jacobian, axes=([0],[0]))
+            residual.add_name(f'{design_variable.name}_residual')
+            self.solver.add_state(design_variable, residual)
+
+    def run(self):
+        self.setup()
+        self.solver.run()
+
+chord_stretching_b_spline.coefficients.add_name('chord_stretching_b_spline_coefficients')
+wingspan_stretching_b_spline.coefficients.add_name('wingspan_stretching_b_spline_coefficients')
+sweep_translation_b_spline.coefficients.add_name('sweep_translation_b_spline_coefficients')
+
+
+# solver = csdl.nonlinear_solvers.Newton()
 objective = (csdl.vdot(chord_stretching_b_spline.coefficients, chord_stretching_b_spline.coefficients)
             + csdl.vdot(wingspan_stretching_b_spline.coefficients, wingspan_stretching_b_spline.coefficients)
             + csdl.vdot(sweep_translation_b_spline.coefficients, sweep_translation_b_spline.coefficients))
@@ -167,13 +284,13 @@ objective = (csdl.vdot(chord_stretching_b_spline.coefficients, chord_stretching_
 #             + csdl.sum(wingspan_stretching_b_spline.coefficients*wingspan_stretching_b_spline.coefficients)
 #             + csdl.sum(sweep_translation_b_spline.coefficients*sweep_translation_b_spline.coefficients))
 
-df_dx = csdl.derivative(objective, 
-                                [chord_stretching_b_spline.coefficients, 
-                                 wingspan_stretching_b_spline.coefficients, 
-                                 sweep_translation_b_spline.coefficients])
-df_d_chord_stretch = df_dx[chord_stretching_b_spline.coefficients].flatten()
-df_d_wingspan_stretch = df_dx[wingspan_stretching_b_spline.coefficients].flatten()
-df_d_sweep_translation = df_dx[sweep_translation_b_spline.coefficients].flatten()
+# df_dx = csdl.derivative(objective, 
+#                                 [chord_stretching_b_spline.coefficients, 
+#                                  wingspan_stretching_b_spline.coefficients, 
+#                                  sweep_translation_b_spline.coefficients])
+# df_d_chord_stretch = df_dx[chord_stretching_b_spline.coefficients].flatten()
+# df_d_wingspan_stretch = df_dx[wingspan_stretching_b_spline.coefficients].flatten()
+# df_d_sweep_translation = df_dx[sweep_translation_b_spline.coefficients].flatten()
 
 wingspan_outer_dv = csdl.Variable(shape=(1,), value=np.array([6.0]))
 root_chord_outer_dv = csdl.Variable(shape=(1,), value=np.array([2.0]))
@@ -181,35 +298,71 @@ tip_chord_outer_dv = csdl.Variable(shape=(1,), value=np.array([0.5]))
 sweep_angle_outer_dv = csdl.Variable(shape=(1,), value=np.array([45*np.pi/180]))
 
 constraint1 = wingspan - wingspan_outer_dv
+constraint1.add_name('wingspan_constraint')
 constraint2 = root_chord - root_chord_outer_dv
+constraint2.add_name('root_chord_constraint')
 constraint3 = tip_chord_left - tip_chord_outer_dv
+constraint3.add_name('tip_chord_left_constraint')
 constraint4 = tip_chord_right - tip_chord_outer_dv
+constraint4.add_name('tip_chord_right_constraint')
 constraint5 = sweep_angle_left - sweep_angle_outer_dv
+constraint5.add_name('sweep_angle_left_constraint')
 constraint6 = sweep_angle_right - sweep_angle_outer_dv
-num_constraints = 6
-constraints_vector = csdl.Variable(shape=(num_constraints,), value=0.)
-constraints_vector = constraints_vector.set(csdl.slice[0], constraint1)
-constraints_vector = constraints_vector.set(csdl.slice[1], constraint2)
-constraints_vector = constraints_vector.set(csdl.slice[2], constraint3)
-constraints_vector = constraints_vector.set(csdl.slice[3], constraint4)
-constraints_vector = constraints_vector.set(csdl.slice[4], constraint5)
-constraints_vector = constraints_vector.set(csdl.slice[5], constraint6)
+constraint6.add_name('sweep_angle_right_constraint')
+# num_constraints = 6
+# constraints_vector = csdl.Variable(shape=(num_constraints,), value=0.)
+# constraints_vector = constraints_vector.set(csdl.slice[0], constraint1)
+# constraints_vector = constraints_vector.set(csdl.slice[1], constraint2)
+# constraints_vector = constraints_vector.set(csdl.slice[2], constraint3)
+# constraints_vector = constraints_vector.set(csdl.slice[3], constraint4)
+# constraints_vector = constraints_vector.set(csdl.slice[4], constraint5)
+# constraints_vector = constraints_vector.set(csdl.slice[5], constraint6)
 
-lagrange_multipliers = csdl.ImplicitVariable(shape=(num_constraints,), value=0., name='lagrange_multipliers')
+# lagrange_multipliers = csdl.ImplicitVariable(shape=(num_constraints,), value=0., name='lagrange_multipliers')
 
-dc_dx = csdl.derivative(constraints_vector,[chord_stretching_b_spline.coefficients,
-                                                    wingspan_stretching_b_spline.coefficients,
-                                                    sweep_translation_b_spline.coefficients])
-dc_d_chord_stretch = dc_dx[chord_stretching_b_spline.coefficients]
-dc_d_wingspan_stretch = dc_dx[wingspan_stretching_b_spline.coefficients]
-dc_d_sweep_translation = dc_dx[sweep_translation_b_spline.coefficients]
+# dc_dx = csdl.derivative(constraints_vector,[chord_stretching_b_spline.coefficients,
+#                                                     wingspan_stretching_b_spline.coefficients,
+#                                                     sweep_translation_b_spline.coefficients])
+# dc_d_chord_stretch = dc_dx[chord_stretching_b_spline.coefficients]
+# dc_d_wingspan_stretch = dc_dx[wingspan_stretching_b_spline.coefficients]
+# dc_d_sweep_translation = dc_dx[sweep_translation_b_spline.coefficients]
 
 # chord_stretch_residual = df_d_chord_stretch + lagrange_multipliers @ dc_d_chord_stretch
-chord_stretch_residual = df_d_chord_stretch + csdl.tensordot(lagrange_multipliers, dc_d_chord_stretch, axes=([0],[0]))
+# chord_stretch_residual = df_d_chord_stretch + csdl.tensordot(lagrange_multipliers, dc_d_chord_stretch, axes=([0],[0]))
 # wingspan_stretch_residual = df_d_wingspan_stretch + lagrange_multipliers @ dc_d_wingspan_stretch
-wingspan_stretch_residual = df_d_wingspan_stretch + csdl.tensordot(lagrange_multipliers, dc_d_wingspan_stretch, axes=([0],[0]))
+# wingspan_stretch_residual = df_d_wingspan_stretch + csdl.tensordot(lagrange_multipliers, dc_d_wingspan_stretch, axes=([0],[0]))
 # sweep_translation_residual = df_d_sweep_translation + lagrange_multipliers @ dc_d_sweep_translation
-sweep_translation_residual = df_d_sweep_translation + csdl.tensordot(lagrange_multipliers, dc_d_sweep_translation, axes=([0],[0]))
+# sweep_translation_residual = df_d_sweep_translation + csdl.tensordot(lagrange_multipliers, dc_d_sweep_translation, axes=([0],[0]))
+
+# geometry_model = csdl.Model()
+# geometry_model.add_objective(...)
+# geometry_model.add_design_variable(...)
+# ...
+# geometry_optimizer = NewtonOptimizer(geometry_model)
+# geometry_optimizer.run()
+
+# geometry_optimizer = Optimization()
+geometry_optimizer = NewtonOptimizer()
+geometry_optimizer.add_objective(objective)
+geometry_optimizer.add_design_variable(chord_stretching_b_spline.coefficients)
+geometry_optimizer.add_design_variable(wingspan_stretching_b_spline.coefficients)
+geometry_optimizer.add_design_variable(sweep_translation_b_spline.coefficients)
+geometry_optimizer.add_constraint(constraint1)
+geometry_optimizer.add_constraint(constraint2)
+geometry_optimizer.add_constraint(constraint3)
+geometry_optimizer.add_constraint(constraint4)
+geometry_optimizer.add_constraint(constraint5)
+geometry_optimizer.add_constraint(constraint6)
+
+# states, residuals = geometry_optimizer.get_first_order_optimality()
+# geometry_solver = csdl.nonlinear_solvers.Newton()
+# geometry_solver.add_state(states, residuals)
+# geometry_solver.add_optimization(geometry_optimizer)
+geometry_optimizer.run()
+
+# outer_optimizer.add_design_variables(states)
+# outer_optimizer.add_constraints(residuals)
+# outer_optimizer.add_nested_optimization(geometry_optimizer)
 
 geometry.plot()
 
@@ -223,17 +376,18 @@ print("Sweep Angle Right: ", sweep_angle_right.value*180/np.pi)
 print("Chord Stretching: ", chord_stretching_b_spline.coefficients.value)
 print("Wingspan Stretching: ", wingspan_stretching_b_spline.coefficients.value)
 print("Sweep Translation: ", sweep_translation_b_spline.coefficients.value)
-print('Chord Stretching Residual: ', chord_stretch_residual.value)
-print('Wingspan Stretching Residual: ', wingspan_stretch_residual.value)
-print('Sweep Translation Residual: ', sweep_translation_residual.value)
-print('Constraints: ', constraints_vector.value)
+# print('Chord Stretching Residual: ', chord_stretch_residual.value)
+# print('Wingspan Stretching Residual: ', wingspan_stretch_residual.value)
+# print('Sweep Translation Residual: ', sweep_translation_residual.value)
+# print('Constraints: ', constraints_vector.value)
 
-solver.add_state(chord_stretching_b_spline.coefficients, chord_stretch_residual)
-solver.add_state(wingspan_stretching_b_spline.coefficients, wingspan_stretch_residual)
-solver.add_state(sweep_translation_b_spline.coefficients, sweep_translation_residual)
-solver.add_state(lagrange_multipliers, constraints_vector, tolerance=1e-8)
-solver.run()
+# solver.add_state(chord_stretching_b_spline.coefficients, chord_stretch_residual)
+# solver.add_state(wingspan_stretching_b_spline.coefficients, wingspan_stretch_residual)
+# solver.add_state(sweep_translation_b_spline.coefficients, sweep_translation_residual)
+# solver.add_state(lagrange_multipliers, constraints_vector, tolerance=1e-8)
+# solver.run()
 
+geometry_solver.run()
 geometry.plot()
 
 print("Wingspan: ", wingspan.value)
@@ -245,10 +399,10 @@ print("Sweep Angle Right: ", sweep_angle_right.value*180/np.pi)
 print("Chord Stretching: ", chord_stretching_b_spline.coefficients.value)
 print("Wingspan Stretching: ", wingspan_stretching_b_spline.coefficients.value)
 print("Sweep Translation: ", sweep_translation_b_spline.coefficients.value)
-print('Chord Stretching Residual: ', chord_stretch_residual.value)
-print('Wingspan Stretching Residual: ', wingspan_stretch_residual.value)
-print('Sweep Translation Residual: ', sweep_translation_residual.value)
-print('Constraints: ', constraints_vector.value)
+# print('Chord Stretching Residual: ', chord_stretch_residual.value)
+# print('Wingspan Stretching Residual: ', wingspan_stretch_residual.value)
+# print('Sweep Translation Residual: ', sweep_translation_residual.value)
+# print('Constraints: ', constraints_vector.value)
 
 # d_wingspan_dx = csdl.derivative.reverse(wingspan, [wingspan_stretching_b_spline.coefficients, chord_stretching_b_spline.coefficients])
 # print(d_wingspan_dx)
