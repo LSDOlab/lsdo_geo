@@ -4,7 +4,7 @@ import numpy as np
 import lsdo_function_spaces as lfs
 
 
-def import_geometry(file_name:str, name:str='geometry', parallelize:bool=True) -> lsdo_geo.Geometry:
+def import_geometry(file_name:str, name:str='geometry', parallelize:bool=True, scale:int=1.0) -> lsdo_geo.Geometry:
     '''
     Imports geometry from a file.
 
@@ -15,6 +15,9 @@ def import_geometry(file_name:str, name:str='geometry', parallelize:bool=True) -
     '''
     
     function_set = lfs.import_file(file_name, parallelize=parallelize)
+    if scale != 1.0:
+        for function in function_set.functions.values():
+            function.coefficients = function.coefficients * scale
     geometry = lsdo_geo.Geometry(functions=function_set.functions, function_names=function_set.function_names, name=name, space=function_set.space)
     return geometry
 
