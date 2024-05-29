@@ -6,7 +6,7 @@ import numpy as np
 import m3l
 import vedo
 
-from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver
+from lsdo_geo.core.parameterization.parameterization_solver_old import ParameterizationSolver
 from lsdo_geo.core.parameterization.free_form_deformation_functions import construct_ffd_block_around_entities
 from lsdo_geo.core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization
 from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace

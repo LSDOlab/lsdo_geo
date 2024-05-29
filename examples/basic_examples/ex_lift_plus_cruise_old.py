@@ -244,7 +244,7 @@ camber_surface = m3l.linspace(upper_surface_wireframe, lower_surface_wireframe, 
 # region Parameterization
 from lsdo_geo.core.parameterization.free_form_deformation_functions import construct_ffd_block_around_entities
 from lsdo_geo.core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization
-from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver
+from lsdo_geo.core.parameterization.parameterization_solver_old import ParameterizationSolver
 import lsdo_geo.splines.b_splines as bsp
 
 constant_b_spline_curve_1_dof_space = bsp.BSplineSpace(name='constant_b_spline_curve_1_dof_space', order=1, parametric_coefficients_shape=(1,))

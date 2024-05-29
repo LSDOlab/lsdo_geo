@@ -41,7 +41,7 @@ camber_surface = m3l.linspace(upper_surface_wireframe, lower_surface_wireframe, 
 # region Parameterization
 
 # region Create Parameterization Objects
-from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver
+from lsdo_geo.core.parameterization.parameterization_solver_old import ParameterizationSolver
 parameterization_solver = ParameterizationSolver()
 
 from lsdo_geo.core.parameterization.free_form_deformation_functions import construct_ffd_block_around_entities, construct_tight_fit_ffd_block
