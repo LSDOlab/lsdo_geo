@@ -10,6 +10,7 @@ class Optimization:
     design_variables:list[csdl.Variable]=None
     constraints:list[csdl.Variable]=None
     constraint_penalties:list[Union[float,np.ndarray]]=None
+    state_residual_pairs:list[tuple[csdl.Variable,csdl.Variable]]=None
 
     def __post_init__(self):
         if self.design_variables is None:
@@ -18,14 +19,33 @@ class Optimization:
             self.constraints = []
         if self.constraint_penalties is None:
             self.constraint_penalties = []
+        if self.state_residual_pairs is None:
+            self.state_residual_pairs = []
 
     def add_objective(self, objective:csdl.Variable):
+        '''
+        Add the objective variable to the optimization problem.
+        '''
         self.objective = objective
 
     def add_design_variable(self, design_variable:csdl.Variable):
+        '''
+        Add a design variable to the optimization problem.
+        '''
         self.design_variables.append(design_variable)
 
     def add_constraint(self, constraint:csdl.Variable, penalty:Union[float,np.ndarray,csdl.Variable]=None):
+        '''
+        Add a constraint to the optimization problem.
+
+        Parameters
+        ----------
+        constraint : csdl.Variable
+            The constraint to be added.
+        penalty : Union[float,np.ndarray,csdl.Variable], optional
+            The penalty for the constraint, by default None. If None, the penalty is treated as a lagrange multiplier.
+            If a penalty is given, it is used as the penalty scaling factor for a quadratic constraint penalty.
+        '''
         self.constraints.append(constraint)
         self.constraint_penalties.append(penalty)
 
@@ -87,7 +107,7 @@ class Optimization:
         self.dc_dx = dc_dx
         return dc_dx
     
-    def setup(self, solver:csdl.nonlinear_solvers.Newton):
+    def setup(self):
         '''
         Sets up the optimization problem as an implicit model to drive the gradient to 0.
         '''
@@ -97,25 +117,41 @@ class Optimization:
 
         for constraint, constraint_lagrange_multipliers in zip(self.constraints, self.lagrange_multipliers):
             if constraint_lagrange_multipliers is not None:
-                solver.solver.add_state(constraint_lagrange_multipliers, constraint)
-                
+                self.state_residual_pairs.append((constraint_lagrange_multipliers, constraint))
 
         for design_variable in self.design_variables:
             residual = dL_dx[design_variable].reshape((design_variable.size,))
             residual.add_name(f'{design_variable.name}_residual')
-            solver.solver.add_state(design_variable, residual)
+            self.state_residual_pairs.append((design_variable, residual))
+
 
 
 class NewtonOptimizer:
+    '''
+    A Newton Optimizer class.
+
+    NOTE: This is a temporary implementation until integration with the CSDL solvers is done
+        (the CSDL solvers need the add_optimization functionality)
+    '''
     def __init__(self) -> None:
         self.solver = csdl.nonlinear_solvers.Newton()
 
     def add_optimization(self, optimization:Optimization):
+        '''
+        Add an optimization problem to the optimizer.
+        '''
         self.optimization = optimization
 
     def setup(self):
-        self.optimization.setup(self)
+        self.optimization.setup()
+        for state, residual in self.optimization.state_residual_pairs:
+            self.solver.add_state(state, residual)
 
     def run(self):
+        '''
+        Runs the Newton Optimization.
+
+        NOTE: CSDL state/design variables are already updated and therefore are not needed to be returned.
+        '''
         self.setup()
         self.solver.run()
