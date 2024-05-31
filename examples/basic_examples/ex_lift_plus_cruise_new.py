@@ -10,7 +10,7 @@ from caddee.api import make_rotor_mesh
 
 from lsdo_geo.core.parameterization.free_form_deformation_functions import construct_ffd_block_around_entities
 from lsdo_geo.core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization
-from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver
+from lsdo_geo.core.parameterization.parameterization_solver_old import ParameterizationSolver
 import lsdo_geo.splines.b_splines as bsp
 
 # t02 = time.time()

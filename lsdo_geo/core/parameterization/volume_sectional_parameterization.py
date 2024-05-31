@@ -248,7 +248,8 @@ class VolumeSectionalParameterization:
             self.principal_parametric_dimension,
         )
         if axis not in valid_axes:
-            raise Exception(f"Please pass in a valid axis. valid axes:{valid_axes}")
+            raise Exception(f"Please pass in a valid axis. valid axes:{valid_axes}. Warning: Can't stretch along principal axis."
+                            + "You probably either want to fix your principal axis or instead translate along this axis.")
 
         num_outputs = np.prod(self.parameterized_points_shape)
 
@@ -448,7 +449,7 @@ class VolumeSectionalParameterization:
             if parameter_variable.shape != (self.num_sections,):
                 raise Exception(
                     f"Sectional parameter {parameter_name} has the wrong shape."
-                    + f"Expected: {self.num_sections}, got: {parameter_variable.shape}"
+                    + f"Expected: shape=(num_sections,) ({self.num_sections},), got: {parameter_variable.shape}"
                 )
 
             # # Use points to create a B-spline to help with getting axes

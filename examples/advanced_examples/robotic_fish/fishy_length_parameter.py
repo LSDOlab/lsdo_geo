@@ -121,7 +121,7 @@ fishy_nose = fishy.evaluate([('fisho_surface', np.array([0., 0.]))], plot=False)
 fishy_tail = fishy.evaluate([('fisho_surface', np.array([0., 1.]))], plot=False)
 fishy_length = m3l.norm(fishy_nose - fishy_tail)
 
-from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver
+from lsdo_geo.core.parameterization.parameterization_solver_old import ParameterizationSolver
 parameterization_solver = ParameterizationSolver()
 parameterization_solver.declare_input('fishy_length', input=fishy_length)
 parameterization_solver.declare_state('length_stretch_coefficients', length_stretch_coefficients)
