@@ -103,7 +103,7 @@ class Geometry(lfs.FunctionSet):
             raise ValueError(f'Invalid units {units}.')
         
         if function_indices is None:
-            function_indices = list(np.arange(len(self.functions)))
+            function_indices = list(self.functions.keys())
         if isinstance(function_indices, int):
             function_indices = [function_indices]
         if not isinstance(function_indices, list):
