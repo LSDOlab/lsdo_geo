@@ -75,7 +75,7 @@ class ParameterizationSolver:
     def setup(self):
         objective = 0
         for parameter, cost in zip(self.parameters, self.parameter_costs):
-            objective += csdl.vdot(parameter, cost*parameter)
+            objective = objective + csdl.vdot(parameter, cost*parameter)
         self.optimization.add_objective(objective)
         self.optimizer.add_optimization(self.optimization)
 

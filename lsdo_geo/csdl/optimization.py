@@ -64,7 +64,7 @@ class Optimization:
                 constraint_lagrange_multipliers = csdl.ImplicitVariable(shape=(constraint.size,), value=0.,
                                                                         name=f'{constraint.name}_lagrange_multipliers')
                 self.lagrange_multipliers.append(constraint_lagrange_multipliers)
-                lagrangian += csdl.vdot(constraint_lagrange_multipliers, constraint)
+                lagrangian = lagrangian + csdl.vdot(constraint_lagrange_multipliers, constraint)
         self.lagrangian = lagrangian
         return lagrangian
 
