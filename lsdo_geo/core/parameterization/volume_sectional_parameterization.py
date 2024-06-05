@@ -434,6 +434,7 @@ class VolumeSectionalParameterization:
         # self.parameterized_points = updated_points
 
         # Perform rotations
+        updated_points = updated_points.flatten()
         for parameter_name, axis in self.rotational_axes.items():
             parameter_type = parameter_name[: parameter_name.index("_")]
             parameter_axis = int(parameter_name[parameter_name.index("_") + 1 :])
@@ -488,24 +489,22 @@ class VolumeSectionalParameterization:
                 )
 
                 section_updated_points_sum = csdl.sum(section_updated_points, axes=(0,))
-                number_of_points_m3l = csdl.Variable(
+                number_of_points = csdl.Variable(
                     name="number_of_section_points",
                     shape=(self.num_physical_dimensions,),
                     value=np.ones((self.num_physical_dimensions,))
                     * self.num_points_per_section,
                 )
-                section_average = section_updated_points_sum / number_of_points_m3l
+                section_average = section_updated_points_sum / number_of_points
 
-                # # TODO: convert this when rotate function is moved into geometry_functions
-                # raise NotImplementedError(
-                #     "Need to m3l.rotate function to geometry_functions in new csdl."
-                # )
                 updated_points = updated_points.set(csdl.slice[[indices]], rotate(
                     points=section_updated_points,
                     axis_origin=section_average,
                     axis_vector=rotation_axis,
                     angles=angle,
                 ).reshape((updated_points[list(indices)].size,)))
+
+        updated_points = updated_points.reshape(self.parameterized_points_shape)
 
         # self.parameterized_points = updated_points
         self.updated_points = updated_points

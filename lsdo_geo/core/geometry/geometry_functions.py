@@ -62,8 +62,8 @@ def rotate(points:csdl.Variable, axis_origin:csdl.Variable, axis_vector:csdl.Var
         output_shape = (1,) + output_shape
 
     rotated_points_quaternion = csdl.Variable(shape=output_shape, name='rotated_points', value=0.)
-    for i in csdl.frange(angles.shape[0]):
-    # for i in range(angles.shape[0]):
+    # for i in csdl.frange(angles.shape[0]):
+    for i in range(angles.shape[0]):
         angle = angles[i]
 
         sin_theta_divide_by_2 = csdl.sin(angle / 2)
