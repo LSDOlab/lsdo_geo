@@ -251,7 +251,7 @@ class FFDBlock(lfs.Function):
                     elif isinstance(entity, lfs.Function):
                         embedded_points.append(entity.coefficients.value)
                     elif isinstance(entity, lfs.FunctionSet):
-                        for function in entity.functions:
+                        for function in entity.functions.values():
                             embedded_points.append(function.coefficients.value)
                     else:
                         raise ValueError(f'Unsupported entity type: {type(entity)}')
