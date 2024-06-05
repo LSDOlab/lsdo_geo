@@ -95,7 +95,7 @@ def construct_tight_fit_ffd_block(entities:list[Union[np.ndarray, csdl.Variable,
     # Steps for currently non-standard FFD blocks
     # 0) Cartesian enclosure volume (line 39) 
     enclosure_ffd_block = construct_ffd_block_around_entities(entities=entities, num_coefficients=num_coefficients,
-                                                              degree=degree, name='helper_volume')
+                                                              degree=(1,1,1), name='helper_volume')
 
     # b_spline_hyper_volume.plot()
     
