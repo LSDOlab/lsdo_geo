@@ -21,7 +21,7 @@ class GeometricVariables:
         if self.desired_values is None:
             self.desired_values = []
 
-    def add_geometric_variable(self, computed_value:csdl.Variable, desired_value:csdl.Variable):
+    def add_variable(self, computed_value:csdl.Variable, desired_value:csdl.Variable):
         self.computed_values.append(computed_value)
         self.desired_values.append(desired_value)
 
@@ -37,7 +37,7 @@ class ParameterizationSolver:
         self.parameter_costs = []
 
 
-    def add_geometric_variable(self, computed_value:csdl.Variable, desired_value:csdl.Variable, penalty:Union[float,np.ndarray,csdl.Variable]=None):
+    def add_variable(self, computed_value:csdl.Variable, desired_value:csdl.Variable, penalty:Union[float,np.ndarray,csdl.Variable]=None):
         '''
         Add/declare a geometric variable to the parameterization problem.
 
@@ -98,7 +98,7 @@ class ParameterizationSolver:
             NOTE: This will return the exact same parameter variables that were added because CSDL updates the state variables in place.
         '''
         for computed_value, desired_value in zip(geometric_variables.computed_values, geometric_variables.desired_values):
-            self.add_geometric_variable(computed_value, desired_value)
+            self.add_variable(computed_value, desired_value)
 
         self.setup()
         self.optimizer.run()

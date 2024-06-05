@@ -3,7 +3,7 @@ import numpy as np
 import lsdo_function_spaces as lfs
 
 from lsdo_geo.core.parameterization.free_form_deformation_functions import (
-    construct_tight_fit_ffd_block,
+    construct_tight_fit_ffd_block,construct_ffd_block_around_entities
 )
 from lsdo_geo.core.parameterization.volume_sectional_parameterization import (
     VolumeSectionalParameterization,
@@ -20,7 +20,6 @@ TODO:
 
 '''
 
-
 recorder = csdl.Recorder(inline=True)
 recorder.start()
 
@@ -28,8 +27,16 @@ geometry = lsdo_geo.import_geometry(
     "examples/example_geometries/rectangular_wing.stp",
     parallelize=False,
 )
-# geometry.refit(parallelize=False) # New API if you want to do this!
-# geometry.plot()
+
+# dummy_basis_matrix1 = geometry.functions[3].space.compute_basis_matrix(np.array([0., 0.5]))
+# dummy_basis_matrix2 = geometry.functions[9].space.compute_basis_matrix(np.array([0., 0.5]))
+# # geometry.functions[9].coefficients.value[:,:,:] = np.flip(geometry.functions[9].coefficients.value[:,:,:], axis=1)
+# plotting_elements = geometry.functions[3].plot(show=False, point_types=['coefficients'], plot_types=['wireframe'])
+# plotting_elements = geometry.functions[9].plot(show=False, point_types=['coefficients'], plot_types=['wireframe'], additional_plotting_elements=plotting_elements)
+# plotting_elements = geometry.functions[3].plot(show=False, point_types=['evaluated_points'], plot_types=['point_cloud'], additional_plotting_elements=plotting_elements)
+# geometry.functions[9].plot(point_types=['evaluated_points'], additional_plotting_elements=plotting_elements, plot_types=['point_cloud'])
+# # geometry.refit(parallelize=False) # New API if you want to do this!
+# # geometry.plot()
 
 
 # region Key locations
@@ -73,6 +80,7 @@ camber_surface = csdl.linear_combination(upper_surface_wireframe, lower_surface_
 
 num_ffd_sections = 3
 num_wing_secctions = 2
+# ffd_block = construct_ffd_block_around_entities(entities=geometry, num_coefficients=(2, num_ffd_sections, 2), degree=(1,1,1))
 ffd_block = construct_tight_fit_ffd_block(entities=geometry, num_coefficients=(2, (num_ffd_sections // num_wing_secctions + 1), 2), degree=(1,1,1))
 # ffd_block = construct_tight_fit_ffd_block(entities=geometry, num_coefficients=(2, 3, 2), degree=(1,1,1))
 # ffd_block.plot()
@@ -123,10 +131,11 @@ sectional_parameters = VolumeSectionalParameterizationInputs()
 sectional_parameters.add_sectional_stretch(axis=0, stretch=chord_stretch_sectional_parameters)
 sectional_parameters.add_sectional_translation(axis=1, translation=wingspan_stretch_sectional_parameters)
 sectional_parameters.add_sectional_translation(axis=0, translation=sweep_translation_sectional_parameters)
+sectional_parameters.add_sectional_rotation(axis=1, rotation=twist_sectional_parameters)
 
 ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=False)    # TODO: Fix plot function
 
-geometry_coefficients = ffd_block.evaluate_ffd(ffd_coefficients, plot=False)
+geometry_coefficients = ffd_block.evaluate(ffd_coefficients, plot=False)
 geometry.set_coefficients(geometry_coefficients)
 # geometry.plot()
 
@@ -200,6 +209,11 @@ geometry.plot()
 # geometry_optimization.add_constraint(sweep_angle_left_constraint)
 # geometry_optimization.add_constraint(sweep_angle_right_constraint)
 
+# geometry_optimizer = NewtonOptimizer()
+# geometry_optimizer.add_optimization(geometry_optimization)
+# geometry_optimizer.run()
+
+
 from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver, GeometricVariables
 geometry_solver = ParameterizationSolver()
 geometry_solver.add_parameter(chord_stretching_b_spline.coefficients)
@@ -207,12 +221,12 @@ geometry_solver.add_parameter(wingspan_stretching_b_spline.coefficients)
 geometry_solver.add_parameter(sweep_translation_b_spline.coefficients)
 
 geometric_variables = GeometricVariables()
-geometric_variables.add_geometric_variable(wingspan, wingspan_outer_dv)
-geometric_variables.add_geometric_variable(root_chord, root_chord_outer_dv)
-geometric_variables.add_geometric_variable(tip_chord_left, tip_chord_outer_dv)
-geometric_variables.add_geometric_variable(tip_chord_right, tip_chord_outer_dv)
-geometric_variables.add_geometric_variable(sweep_angle_left, sweep_angle_outer_dv)
-geometric_variables.add_geometric_variable(sweep_angle_right, sweep_angle_outer_dv)
+geometric_variables.add_variable(wingspan, wingspan_outer_dv)
+geometric_variables.add_variable(root_chord, root_chord_outer_dv)
+geometric_variables.add_variable(tip_chord_left, tip_chord_outer_dv)
+geometric_variables.add_variable(tip_chord_right, tip_chord_outer_dv)
+geometric_variables.add_variable(sweep_angle_left, sweep_angle_outer_dv)
+geometric_variables.add_variable(sweep_angle_right, sweep_angle_outer_dv)
 
 
 print("Wingspan: ", wingspan.value)
