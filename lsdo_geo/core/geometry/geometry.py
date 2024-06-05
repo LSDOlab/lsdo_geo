@@ -76,7 +76,7 @@ class Geometry(lfs.FunctionSet):
 
 
     def rotate(self, axis_origin:csdl.Variable, axis_vector:csdl.Variable, angles:csdl.Variable, function_indices:list[int]=None,
-                units:str='degrees'):
+                units:str='radians'):
         '''
         Rotates the B-spline set about an axis.
 

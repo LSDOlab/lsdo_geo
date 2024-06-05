@@ -22,7 +22,7 @@ def import_geometry(file_name:str, name:str='geometry', parallelize:bool=True, s
     return geometry
 
 
-def rotate(points:csdl.Variable, axis_origin:csdl.Variable, axis_vector:csdl.Variable, angles:csdl.Variable, units:str='degrees') -> csdl.Variable:
+def rotate(points:csdl.Variable, axis_origin:csdl.Variable, axis_vector:csdl.Variable, angles:csdl.Variable, units:str='radians') -> csdl.Variable:
     points_out_shape = None
     if len(points.shape) == 1:
         print("Rotating points is in vector format, so rotation is assuming 3d and reshaping into (-1,3)")
