@@ -25,8 +25,12 @@ class FFDBlock(lfs.Function):
     name : str = None
         If applicable, the name of the function.
     embedded_entities : list[Union[csdl.Variable,Geometry,lfs.Function,lfs.FunctionSet]]
+        The entities to be embedded within (parameterized by) the FFD block.
+    embedded_entity_parametric_coordinates : list[np.ndarray] -- list_length=len(embedded_entities), array_shape=(num_points, num_parametric_dimensions)
+        The parametric coordinates for each of the embedded entities.
     '''
     embedded_entities : list[Union[csdl.Variable,Geometry,lfs.Function,lfs.FunctionSet]] = None
+    embedded_entity_parametric_coordinates : list[np.ndarray] = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -34,11 +38,19 @@ class FFDBlock(lfs.Function):
         if not isinstance(self.embedded_entities, list):
             self.embedded_entities = [self.embedded_entities]
 
-        self.basis_matrices = []
+        # self.basis_matrices = []
         self.embed_entities(entities=self.embedded_entities)
         
 
     def embed_entities(self, entities:list[csdl.Variable,np.ndarray,Geometry,lfs.Function,lfs.FunctionSet]):
+        if self.embedded_entity_parametric_coordinates is not None:
+            if len(entities) != len(self.embedded_entity_parametric_coordinates):
+                raise ValueError(f'Number of entities ({len(entities)}) and parametric coordinates'+
+                                 f'({len(self.embedded_entity_parametric_coordinates)}) do not match.')
+            return
+        else:
+            self.embedded_entity_parametric_coordinates = []
+        
         for entity in entities:
             if isinstance(entity, np.ndarray):
                 embedded_points = entity
@@ -54,18 +66,79 @@ class FFDBlock(lfs.Function):
                 raise ValueError(f'Unsupported entity type: {type(entity)}')
 
             if not isinstance(embedded_points, list):
-                embedded_points_parametric_coordinates = self.project(points=embedded_points)
-                entity_basis_matrix = self.space.compute_basis_matrix(parametric_coordinates=embedded_points_parametric_coordinates, 
-                                                                expand_map_for_physical=False)
-                self.basis_matrices.append(entity_basis_matrix)
+                embedded_points_parametric_coordinates = self.project(points=embedded_points, force_reproject=True)
+                self.embedded_entity_parametric_coordinates.append(embedded_points_parametric_coordinates)
+                # entity_basis_matrix = self.space.compute_basis_matrix(parametric_coordinates=embedded_points_parametric_coordinates)
+                # self.basis_matrices.append(entity_basis_matrix)
             else:
-                entity_basis_matrices = []
+                entity_parametric_coordinates = []
                 for points in embedded_points:
                     embedded_points_parametric_coordinates = self.project(points=points)
-                    entity_basis_matrix = self.space.compute_basis_matrix(parametric_coordinates=embedded_points_parametric_coordinates)
-                    entity_basis_matrices.append(entity_basis_matrix)
-                self.basis_matrices.append(entity_basis_matrices)
+                    entity_parametric_coordinates.append(embedded_points_parametric_coordinates)
+                self.embedded_entity_parametric_coordinates.append(entity_parametric_coordinates)
+                #     entity_basis_matrix = self.space.compute_basis_matrix(parametric_coordinates=embedded_points_parametric_coordinates)
+                #     entity_basis_matrices.append(entity_basis_matrix)
+                # self.basis_matrices.append(entity_basis_matrices)
 
+
+    def evaluate(self, coefficients:csdl.Variable=None, parametric_coordinates:np.ndarray=None, parametric_derivative_orders:list[tuple]=None,
+                 plot:bool=False) -> csdl.Variable:
+        '''
+        Evaluates the function.
+
+        Parameters
+        ----------
+        coefficients : csdl.Variable = None -- shape=coefficients_shape
+            The coefficients of the function.
+        parametric_coordinates : np.ndarray = None -- shape=(num_points, num_parametric_dimensions)
+            OPTIONAL: The coordinates at which to evaluate the function. 
+            If None (which is the intended use case), then the function is evaluated at the parametric coordinates of the embedded entities.
+        parametric_derivative_order : tuple = None -- shape=(num_points,num_parametric_dimensions)
+            The order of the parametric derivatives to evaluate.
+        plot : bool = False
+            Whether or not to plot the function with the points from the result of the evaluation.
+        
+
+        Returns
+        -------
+        function_values : csdl.Variable
+            The function evaluated at the given coordinates.
+        '''
+        if parametric_coordinates is None:  # Perform FFD Evaluation
+            if self.embedded_entity_parametric_coordinates is None:
+                raise ValueError('No parametric coordinates provided for evaluation.')
+            parametric_coordinates = self.embedded_entity_parametric_coordinates
+
+            outputs = []
+            for entity_parametric_coordinates in parametric_coordinates:
+                if not isinstance(entity_parametric_coordinates, list):
+                    entity_parametric_coordinates = [entity_parametric_coordinates]
+                entity_outputs = []
+                for entity_parametric_coordinate in entity_parametric_coordinates:
+                    entity_outputs.append(super().evaluate(parametric_coordinates=entity_parametric_coordinate, 
+                                                           parametric_derivative_orders=parametric_derivative_orders,
+                                                           coefficients=coefficients, plot=plot))
+                if len(entity_outputs) == 1:
+                    outputs.append(entity_outputs[0])
+                else:
+                    outputs.append(entity_outputs)
+
+            if plot:
+                outputs_to_plot = []
+                for entity_points in outputs:
+                    if isinstance(entity_points, list):
+                        for entity_entity_points in entity_points:
+                            outputs_to_plot.append(entity_entity_points.value)
+                    else:
+                        outputs_to_plot.append(entity_points.value)
+                self.plot(plot_embedded_points=True, embedded_points=outputs_to_plot, opacity=0.3, show=True)
+
+            if len(outputs) == 1:
+                return outputs[0]
+        else:   # Perform Standard Function Evaluation
+            return super().evaluate(parametric_coordinates=parametric_coordinates, parametric_derivative_orders=parametric_derivative_orders,
+                             coefficients=coefficients, plot=plot)
+            
 
 
     def evaluate_ffd(self, coefficients:csdl.Variable, plot:bool=False) -> csdl.Variable:
@@ -84,44 +157,48 @@ class FFDBlock(lfs.Function):
         updated_points : csdl.Variable
             The embedded points.
         '''
-        # Perform update
-        self.coefficients = coefficients
+        return self.evaluate(coefficients=coefficients, plot=plot)
+        # if len(coefficients.shape) > 2:
+        #     coefficients = coefficients.reshape((coefficients.size//self.num_physical_dimensions, self.num_physical_dimensions))
 
-        outputs = []
-        for basis_matrix in self.basis_matrices:
-            if not isinstance(basis_matrix, list):
-                updated_points = basis_matrix @ self.coefficients
-                outputs.append(updated_points)
-            else:
-                updated_points = []
-                for entity_basis_matrix in basis_matrix:
-                    if isinstance(coefficients, csdl.Variable) and sps.issparse(entity_basis_matrix):
-                        coefficients_reshaped = coefficients.reshape((entity_basis_matrix.shape[1], coefficients.size//entity_basis_matrix.shape[1]))
-                        # NOTE: TEMPORARY IMPLEMENTATION SINCE CSDL ONLY SUPPORTS SPARSE MATVECS AND NOT MATMATS
-                        values = csdl.Variable(value=np.zeros((entity_basis_matrix.shape[0], coefficients_reshaped.shape[1])))
-                        for i in range(coefficients_reshaped.shape[1]):
-                            coefficients_column = coefficients_reshaped[:,i].reshape((coefficients_reshaped.shape[0],1))
-                            values = values.set(csdl.slice[:,i], csdl.sparse.matvec(entity_basis_matrix, coefficients_column).reshape(
-                                (entity_basis_matrix.shape[0],)))
-                    else:
-                        values = entity_basis_matrix @ coefficients.reshape((entity_basis_matrix.shape[1], -1))
-                    updated_points.append(values)
-                outputs.append(updated_points)
+        # # Perform update
+        # self.coefficients = coefficients
 
-        if plot:
-            outputs_to_plot = []
-            for entity_points in outputs:
-                if isinstance(entity_points, list):
-                    for entity_entity_points in entity_points:
-                        outputs_to_plot.append(entity_entity_points.value)
-                else:
-                    outputs_to_plot.append(entity_points.value)
-            self.plot(plot_embedded_points=True, embedded_points=outputs_to_plot, opacity=0.3, show=True)
+        # outputs = []
+        # for basis_matrix in self.basis_matrices:
+        #     if not isinstance(basis_matrix, list):
+        #         updated_points = basis_matrix @ self.coefficients
+        #         outputs.append(updated_points)
+        #     else:
+        #         updated_points = []
+        #         for entity_basis_matrix in basis_matrix:
+        #             if isinstance(coefficients, csdl.Variable) and sps.issparse(entity_basis_matrix):
+        #                 coefficients_reshaped = coefficients.reshape((entity_basis_matrix.shape[1], coefficients.size//entity_basis_matrix.shape[1]))
+        #                 # NOTE: TEMPORARY IMPLEMENTATION SINCE CSDL ONLY SUPPORTS SPARSE MATVECS AND NOT MATMATS
+        #                 values = csdl.Variable(value=np.zeros((entity_basis_matrix.shape[0], coefficients_reshaped.shape[1])))
+        #                 for i in range(coefficients_reshaped.shape[1]):
+        #                     coefficients_column = coefficients_reshaped[:,i].reshape((coefficients_reshaped.shape[0],1))
+        #                     values = values.set(csdl.slice[:,i], csdl.sparse.matvec(entity_basis_matrix, coefficients_column).reshape(
+        #                         (entity_basis_matrix.shape[0],)))
+        #             else:
+        #                 values = entity_basis_matrix @ coefficients.reshape((entity_basis_matrix.shape[1], -1))
+        #             updated_points.append(values)
+        #         outputs.append(updated_points)
 
-        if len(outputs) == 1:
-            return outputs[0]
-        else:
-            return outputs
+        # if plot:
+        #     outputs_to_plot = []
+        #     for entity_points in outputs:
+        #         if isinstance(entity_points, list):
+        #             for entity_entity_points in entity_points:
+        #                 outputs_to_plot.append(entity_entity_points.value)
+        #         else:
+        #             outputs_to_plot.append(entity_points.value)
+        #     self.plot(plot_embedded_points=True, embedded_points=outputs_to_plot, opacity=0.3, show=True)
+
+        # if len(outputs) == 1:
+        #     return outputs[0]
+        # else:
+        #     return outputs
         
 
     # def evaluate_as_function(self, parametric_coordinates:np.ndarray, parametric_derivative_orders:list[tuple]=None, coefficients:csdl.Variable=None,

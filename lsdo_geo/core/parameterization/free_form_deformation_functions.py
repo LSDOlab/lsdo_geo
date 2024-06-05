@@ -57,7 +57,7 @@ def construct_ffd_block_around_entities(entities:list[Union[np.ndarray, csdl.Var
                                                              num_coefficients=num_coefficients, degree=degree, knot_vectors=None,
                                                              num_parametric_dimensions=num_physical_dimensions,
                                                              name='b_spline_hyper_volume')
-    
+    b_spline_hyper_volume.coefficients.add_name(f'{name}_coefficients')
     ffd_block = FFDBlock(space=b_spline_hyper_volume.space, coefficients=b_spline_hyper_volume.coefficients, name=name, embedded_entities=entities)
     
     return ffd_block
@@ -105,7 +105,7 @@ def construct_tight_fit_ffd_block(entities:list[Union[np.ndarray, csdl.Variable,
     parametric_coordinates_top = np.linspace(np.array([0.5, 0., 1.]), np.array([0.5, 1., 1.]), num_spanwise_sampling)
     # parametric_coordinates_bot = np.linspace(np.array([0.5, 0., -1.]), np.array([0.5. 1.. -1.]), num_spanwise_sampling)
 
-    enclosure_top_points = enclosure_ffd_block.evaluate(parametric_coordinates_top).value
+    enclosure_top_points = enclosure_ffd_block.evaluate(parametric_coordinates=parametric_coordinates_top).value
     # ffd_bot_points = bot_evaluation_matrix.dot(b_spline_hyper_volume.coefficients.value)
 
     top_points_on_wing = entities[0].project(enclosure_top_points, direction=sampling_projection_direction, plot=False)
