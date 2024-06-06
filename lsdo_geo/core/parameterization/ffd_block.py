@@ -105,6 +105,7 @@ class FFDBlock(lfs.Function):
             The function evaluated at the given coordinates.
         '''
         if parametric_coordinates is None:  # Perform FFD Evaluation
+            self.coefficients = coefficients
             if self.embedded_entity_parametric_coordinates is None:
                 raise ValueError('No parametric coordinates provided for evaluation.')
             parametric_coordinates = self.embedded_entity_parametric_coordinates
