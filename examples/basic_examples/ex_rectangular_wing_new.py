@@ -106,7 +106,7 @@ sweep_translation_b_spline = lfs.Function(space=space_of_linear_3_dof_b_splines,
 # sweep_translation_b_spline.plot()
 
 twist_b_spline = lfs.Function(space=space_of_linear_3_dof_b_splines,
-                                coefficients=csdl.Variable(shape=(3,), value=np.array([15, 0., 15])))
+                                coefficients=csdl.Variable(shape=(3,), value=np.array([15, 0., 15])*np.pi/180), name='twist_b_spline_coefficients')
 
 # endregion
 
