@@ -284,7 +284,7 @@ class VolumeSectionalParameterization:
                 parametric_derivative_orders=(0,),
             ).value
 
-            section_axis_end_parametric_coordinate = parametric_coordinate
+            section_axis_end_parametric_coordinate = parametric_coordinate.copy()
             section_axis_end_parametric_coordinate[axis] = 1.0
             section_axis_beginning_parametric_coordinate = parametric_coordinate.copy()
             section_axis_beginning_parametric_coordinate[axis] = 0.0
@@ -303,7 +303,7 @@ class VolumeSectionalParameterization:
 
             indices = np.arange(np.prod(self.parameterized_points_shape, dtype=int))
             indices = indices.reshape(self.parameterized_points_shape)
-            indices = np.swapaxes(indices, 0, self.principal_parametric_dimension)
+            indices = np.moveaxis(indices, self.principal_parametric_dimension, 0)
             indices = indices.reshape(
                 (
                     self.num_sections,
