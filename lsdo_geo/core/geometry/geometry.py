@@ -18,7 +18,7 @@ class Geometry(lfs.FunctionSet):
         return self.space
     
 
-    def declare_component(self, function_indices:list[int]=None, function_search_names:list[str]=None, name:str=None) -> lg.Geometry:
+    def declare_component(self, function_indices:list[int]=None, function_search_names:list[str]=None, ignore_names:list[str]=[], name:str=None) -> lg.Geometry:
         '''
         Declares a component. This component will point to a sub-set of the entire geometry.
 
@@ -31,7 +31,7 @@ class Geometry(lfs.FunctionSet):
         name : str
             The name of the component.
         '''
-        function_set = self.create_subset(function_indices=function_indices, function_search_names=function_search_names, name=name)
+        function_set = self.create_subset(function_indices=function_indices, function_search_names=function_search_names, ignore_names=ignore_names, name=name)
 
         component = lg.Geometry(functions=function_set.functions, function_names=function_set.function_names, name=name, 
                                 space=function_set.space)
@@ -375,7 +375,16 @@ class Geometry(lfs.FunctionSet):
         f.close()  
         print('Complete export')
 
+    def export_obj(self, file_name:str):
+        '''
+        Exports the geometry to an OBJ file.
 
+        Parameters
+        ----------
+        file_name : str
+            The name of the file to export to.
+        '''
+        
 
 # if __name__ == "__main__":
 #     from lsdo_geo.core.geometry.geometry_functions import import_geometry
