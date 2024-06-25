@@ -53,7 +53,19 @@ class Geometry(lfs.FunctionSet):
         component = self.create_subset(function_indices=function_indices, function_search_names=function_search_names, name=name)
         component_copy = component.copy()
         return component_copy
+    
+    def copy(self) -> lg.Geometry:
+        '''
+        Copies the function set.
 
+        Returns
+        -------
+        function_set : lfs.FunctionSet
+            The copied function set.
+        '''
+        functions = {i:function.copy() for i, function in self.functions.items()}
+        function_set = lg.Geometry(functions=functions, function_names=self.function_names, name=self.name)
+        return function_set
 
     # def import_geometry(self, file_name:str):
     #     '''
