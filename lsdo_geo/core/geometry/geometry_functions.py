@@ -121,18 +121,16 @@ def vectorized_hamiltonion_product_1(q1:csdl.Variable, q2:csdl.Variable) -> csdl
     q2_2 = q2[2]
     q2_3 = q2[3]
 
-    q = csdl.Variable(shape=q1.shape, name='quaternion_product', value=0.)
-    q = q.set(csdl.slice[:,0], q1_0*q2_0 - q1_1*q2_1 - q1_2*q2_2 - q1_3*q2_3)
-    q = q.set(csdl.slice[:,1], q1_0*q2_1 + q1_1*q2_0 + q1_2*q2_3 - q1_3*q2_2)
-    q = q.set(csdl.slice[:,2], q1_0*q2_2 - q1_1*q2_3 + q1_2*q2_0 + q1_3*q2_1)
-    q = q.set(csdl.slice[:,3], q1_0*q2_3 + q1_1*q2_2 - q1_2*q2_1 + q1_3*q2_0)
+    q = csdl.vstack(
+        (q1_0*q2_0 - q1_1*q2_1 - q1_2*q2_2 - q1_3*q2_3,
+         q1_0*q2_1 + q1_1*q2_0 + q1_2*q2_3 - q1_3*q2_2,
+         q1_0*q2_2 - q1_1*q2_3 + q1_2*q2_0 + q1_3*q2_1,
+         q1_0*q2_3 + q1_1*q2_2 - q1_2*q2_1 + q1_3*q2_0,
+        ))
 
-    return q
+    return q.T()
 
 def vectorized_hamiltonion_product_2(q1:csdl.Variable, q2:csdl.Variable) -> csdl.Variable:
-    # q1 = q1.reshape((4,))
-    # q2 = q2.reshape((4,))
-
     q1_0 = q1[0]
     q1_1 = q1[1]
     q1_2 = q1[2]
@@ -143,13 +141,18 @@ def vectorized_hamiltonion_product_2(q1:csdl.Variable, q2:csdl.Variable) -> csdl
     q2_2 = q2[:,2]
     q2_3 = q2[:,3]
 
-    q = csdl.Variable(shape=q2.shape, name='quaternion_product', value=0.)
-    q = q.set(csdl.slice[:,0], q1_0*q2_0 - q1_1*q2_1 - q1_2*q2_2 - q1_3*q2_3)
-    q = q.set(csdl.slice[:,1], q1_0*q2_1 + q1_1*q2_0 + q1_2*q2_3 - q1_3*q2_2)
-    q = q.set(csdl.slice[:,2], q1_0*q2_2 - q1_1*q2_3 + q1_2*q2_0 + q1_3*q2_1)
-    q = q.set(csdl.slice[:,3], q1_0*q2_3 + q1_1*q2_2 - q1_2*q2_1 + q1_3*q2_0)
+    q = csdl.vstack(
+        (q1_0*q2_0 - q1_1*q2_1 - q1_2*q2_2 - q1_3*q2_3,
+         q1_0*q2_1 + q1_1*q2_0 + q1_2*q2_3 - q1_3*q2_2,
+         q1_0*q2_2 - q1_1*q2_3 + q1_2*q2_0 + q1_3*q2_1,
+         q1_0*q2_3 + q1_1*q2_2 - q1_2*q2_1 + q1_3*q2_0,
+        )
+    )
 
-    return q
+    # print((q2.T() - q).value)
+    # exit()
+
+    return q.T()
 
 
 

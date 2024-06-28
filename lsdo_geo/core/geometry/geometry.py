@@ -136,7 +136,6 @@ class Geometry(lfs.FunctionSet):
             )
             function.coefficients = rotated_coefficients.reshape(function.coefficients.shape)
 
-    
     def plot_meshes(self, meshes:list[csdl.Variable], mesh_plot_types:list[str]=['wireframe'], mesh_opacity:float=1., mesh_color:str='#F5F0E6',
                 mesh_color_map='jet', mesh_line_width:float=3.,
                 function_indices:list[str]=None, function_plot_types:list[str]=['function'], function_opacity:float=0.25, function_color:str='#00629B',
