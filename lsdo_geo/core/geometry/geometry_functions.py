@@ -17,7 +17,7 @@ def import_geometry(file_name:str, name:str='geometry', parallelize:bool=True, s
     function_set = lfs.import_file(file_name, parallelize=parallelize)
     if scale != 1.0:
         for function in function_set.functions.values():
-            function.coefficients = function.coefficients * scale
+            function.coefficients = csdl.Variable(value=function.coefficients.value * scale)
     geometry = lsdo_geo.Geometry(functions=function_set.functions, function_names=function_set.function_names, name=name, space=function_set.space)
     return geometry
 
