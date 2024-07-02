@@ -128,13 +128,21 @@ class Geometry(lfs.FunctionSet):
         if type(angles) is np.ndarray:
             angles = csdl.Variable(shape=angles.shape, value=angles)
 
-        for function_index in function_indices:
-            function = self.functions[function_index]
-            rotated_coefficients = rotate_function(
-                points=function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])), 
-                axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units
-            )
-            function.coefficients = rotated_coefficients.reshape(function.coefficients.shape)
+        coefficients = csdl.vstack(tuple([function.coefficients.reshape((-1,3)) for function in self.functions.values()]))
+        rotated_coefficients = rotate_function(points=coefficients, axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units)
+        i = 0
+        for function in self.functions.values():
+            len = np.prod(function.coefficients.shape[:-1])
+            function.coefficients = rotated_coefficients[i:i+len, :].reshape(function.coefficients.shape)
+            i += len
+
+        # for function_index in function_indices:
+        #     function = self.functions[function_index]
+        #     rotated_coefficients = rotate_function(
+        #         points=function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])), 
+        #         axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units
+        #     )
+        #     function.coefficients = rotated_coefficients.reshape(function.coefficients.shape)
 
     def plot_meshes(self, meshes:list[csdl.Variable], mesh_plot_types:list[str]=['wireframe'], mesh_opacity:float=1., mesh_color:str='#F5F0E6',
                 mesh_color_map='jet', mesh_line_width:float=3.,

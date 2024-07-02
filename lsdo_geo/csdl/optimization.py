@@ -134,7 +134,7 @@ class NewtonOptimizer:
         (the CSDL solvers need the add_optimization functionality)
     '''
     def __init__(self) -> None:
-        self.solver = csdl.nonlinear_solvers.Newton(residual_jac_kwargs={"loop": False, "concatenate_ofs": True})
+        self.solver = csdl.nonlinear_solvers.Newton(residual_jac_kwargs={"loop": True, "concatenate_ofs": True})
 
     def add_optimization(self, optimization:Optimization):
         '''
