@@ -82,7 +82,7 @@ class FFDBlock(lfs.Function):
 
 
     def evaluate(self, coefficients:csdl.Variable=None, parametric_coordinates:np.ndarray=None, parametric_derivative_orders:list[tuple]=None,
-                 plot:bool=False) -> csdl.Variable:
+                 plot:bool=False, non_csdl=False) -> csdl.Variable:
         '''
         Evaluates the function.
 
@@ -118,7 +118,7 @@ class FFDBlock(lfs.Function):
                 for entity_parametric_coordinate in entity_parametric_coordinates:
                     entity_outputs.append(super().evaluate(parametric_coordinates=entity_parametric_coordinate, 
                                                            parametric_derivative_orders=parametric_derivative_orders,
-                                                           coefficients=coefficients, plot=plot))
+                                                           coefficients=coefficients, plot=plot, non_csdl=non_csdl))
                 if len(entity_outputs) == 1:
                     outputs.append(entity_outputs[0])
                 else:
@@ -129,16 +129,22 @@ class FFDBlock(lfs.Function):
                 for entity_points in outputs:
                     if isinstance(entity_points, list):
                         for entity_entity_points in entity_points:
-                            outputs_to_plot.append(entity_entity_points.value)
+                            if isinstance(entity_entity_points, csdl.Variable):
+                                outputs_to_plot.append(entity_entity_points.value)
+                            else:
+                                outputs_to_plot.append(entity_entity_points)
                     else:
-                        outputs_to_plot.append(entity_points.value)
+                        if isinstance(entity_points, csdl.Variable):
+                            outputs_to_plot.append(entity_points.value)
+                        else:
+                            outputs_to_plot.append(entity_points)
                 self.plot(plot_embedded_points=True, embedded_points=outputs_to_plot, opacity=0.3, show=True)
 
             if len(outputs) == 1:
                 return outputs[0]
         else:   # Perform Standard Function Evaluation
             return super().evaluate(parametric_coordinates=parametric_coordinates, parametric_derivative_orders=parametric_derivative_orders,
-                             coefficients=coefficients, plot=plot)
+                             coefficients=coefficients, plot=plot, non_csdl=non_csdl)
             
 
 
