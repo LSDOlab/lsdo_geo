@@ -1,7 +1,6 @@
 import numpy as np
 import scipy.sparse as sps
 import lsdo_function_spaces as lfs
-import vedo
 import csdl_alpha as csdl
 
 from dataclasses import dataclass
@@ -561,6 +560,7 @@ class VolumeSectionalParameterization:
                                                 additional_plotting_elements=plotting_elements, show=False)
 
         if show:
+            import vedo
             plotter = vedo.Plotter()
             plotter.show(
                 plotting_elements,
