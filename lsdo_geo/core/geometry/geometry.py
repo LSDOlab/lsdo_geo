@@ -14,6 +14,16 @@ import lsdo_geo as lg
 @dataclass
 class Geometry(lfs.FunctionSet):
 
+    def copy(self):
+        '''
+        Creates a copy of the geometry
+        '''
+        function_set = super().copy()
+        geometry_copy = Geometry(functions=function_set.functions, function_names=function_set.function_names, name=self.name,
+                                    space=function_set.space)
+        return geometry_copy
+
+    
     def get_function_space(self):
         return self.space
     
@@ -116,13 +126,41 @@ class Geometry(lfs.FunctionSet):
         if type(angles) is np.ndarray:
             angles = csdl.Variable(shape=angles.shape, value=angles)
 
-        for function_index in function_indices:
-            function = self.functions[function_index]
+        # # Unvectorized:
+        # for function_index in function_indices:
+        #     function = self.functions[function_index]
+        #     rotated_coefficients = rotate_function(
+        #         points=function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])), 
+        #         axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units
+        #     )
+        #     function.coefficients = rotated_coefficients.reshape(function.coefficients.shape)
+
+        # Vectorized:
+        if len(function_indices) == 1:
+            function = self.functions[function_indices[0]]
             rotated_coefficients = rotate_function(
                 points=function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])), 
                 axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units
             )
             function.coefficients = rotated_coefficients.reshape(function.coefficients.shape)
+        else:
+            stacked_coefficients = []
+            for function_index in function_indices:
+                function = self.functions[function_index]
+                stacked_coefficients.append(function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])))
+            stacked_coefficients = csdl.vstack(stacked_coefficients)
+
+            rotated_coefficients = rotate_function(
+                points=stacked_coefficients, 
+                axis_origin=axis_origin, axis_vector=axis_vector, angles=angles, units=units
+            )
+
+            counter = 0
+            for i, function_index in enumerate(function_indices):
+                function = self.functions[function_index]
+                num_coefficient_points = function.coefficients.size // function.coefficients.shape[-1]
+                function.coefficients = rotated_coefficients[counter:counter+num_coefficient_points,:].reshape(function.coefficients.shape)
+                counter += num_coefficient_points
 
     
     def plot_meshes(self, meshes:list[csdl.Variable], mesh_plot_types:list[str]=['wireframe'], mesh_opacity:float=1., mesh_color:str='#F5F0E6',

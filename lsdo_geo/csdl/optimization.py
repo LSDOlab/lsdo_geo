@@ -22,17 +22,28 @@ class Optimization:
         if self.state_residual_pairs is None:
             self.state_residual_pairs = []
 
+        self.design_variable_initial_values = []
+
+
     def add_objective(self, objective:csdl.Variable):
         '''
         Add the objective variable to the optimization problem.
         '''
         self.objective = objective
 
-    def add_design_variable(self, design_variable:csdl.Variable):
+
+    def add_design_variable(self, design_variable:csdl.Variable, initial_value:Union[csdl.Variable,float,np.ndarray]=None):
         '''
         Add a design variable to the optimization problem.
         '''
         self.design_variables.append(design_variable)
+        self.design_variable_initial_values.append(initial_value)
+        if initial_value is not None:
+            if isinstance(initial_value, csdl.Variable):
+                design_variable.set_value(initial_value.value)
+            else:
+                design_variable.set_value(initial_value)
+
 
     def add_constraint(self, constraint:csdl.Variable, penalty:Union[float,np.ndarray,csdl.Variable]=None):
         '''
@@ -61,12 +72,13 @@ class Optimization:
                 lagrangian += penalty*constraint
                 self.lagrange_multipliers.append(None)
             else:
-                constraint_lagrange_multipliers = csdl.ImplicitVariable(shape=(constraint.size,), value=0.,
+                constraint_lagrange_multipliers = csdl.Variable(shape=(constraint.size,), value=0.,
                                                                         name=f'{constraint.name}_lagrange_multipliers')
                 self.lagrange_multipliers.append(constraint_lagrange_multipliers)
                 lagrangian = lagrangian + csdl.vdot(constraint_lagrange_multipliers, constraint)
         self.lagrangian = lagrangian
         return lagrangian
+
 
     def compute_objective_gradient(self, objective:csdl.Variable=None, design_variables:list[csdl.Variable]=None):
         '''
@@ -81,6 +93,7 @@ class Optimization:
         self.df_dx = df_dx
         return df_dx
     
+
     def compute_lagrangian_gradient(self, lagrangian:csdl.Variable=None, design_variables:list[csdl.Variable]=None):
         '''
         Constructs the CSDL variable for the lagrangian gradient wrt each design variable.
@@ -93,6 +106,7 @@ class Optimization:
         dL_dx = csdl.derivative(self.lagrangian, self.design_variables)
         self.dL_dx = dL_dx
         return dL_dx
+
 
     def compute_constraint_jacobian(self, constraints:list[csdl.Variable]=None, design_variables:list[csdl.Variable]=None):
         '''
@@ -107,6 +121,7 @@ class Optimization:
         self.dc_dx = dc_dx
         return dc_dx
     
+
     def setup(self):
         '''
         Sets up the optimization problem as an implicit model to drive the gradient to 0.
@@ -119,10 +134,13 @@ class Optimization:
             if constraint_lagrange_multipliers is not None:
                 self.state_residual_pairs.append((constraint_lagrange_multipliers, constraint))
 
-        for design_variable in self.design_variables:
+        for i, design_variable in enumerate(self.design_variables):
             residual = dL_dx[design_variable].reshape((design_variable.size,))
             residual.add_name(f'{design_variable.name}_residual')
-            self.state_residual_pairs.append((design_variable, residual))
+            if self.design_variable_initial_values[i] is not None:
+                self.state_residual_pairs.append(((design_variable, self.design_variable_initial_values[i]), residual))
+            else:
+                self.state_residual_pairs.append((design_variable, residual))
 
 
 
@@ -135,6 +153,7 @@ class NewtonOptimizer:
     '''
     def __init__(self) -> None:
         self.solver = csdl.nonlinear_solvers.Newton()
+        self.has_been_setup = False
 
     def add_optimization(self, optimization:Optimization):
         '''
@@ -145,7 +164,11 @@ class NewtonOptimizer:
     def setup(self):
         self.optimization.setup()
         for state, residual in self.optimization.state_residual_pairs:
-            self.solver.add_state(state, residual)
+            if isinstance(state, tuple):
+                self.solver.add_state(state[0], residual, initial_value=state[1])
+            else:
+                self.solver.add_state(state, residual)
+        self.has_been_setup = True
 
     def run(self):
         '''
@@ -153,5 +176,6 @@ class NewtonOptimizer:
 
         NOTE: CSDL state/design variables are already updated and therefore are not needed to be returned.
         '''
-        self.setup()
+        if not self.has_been_setup:
+            self.setup()
         self.solver.run()

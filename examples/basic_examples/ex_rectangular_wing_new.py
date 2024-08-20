@@ -25,6 +25,7 @@ recorder.start()
 
 geometry = lsdo_geo.import_geometry(
     "examples/example_geometries/rectangular_wing.stp",
+    # "examples/example_geometries/simple_wing.stp",
     parallelize=False,
 )
 
@@ -134,8 +135,13 @@ sectional_parameters.add_sectional_translation(axis=0, translation=sweep_transla
 sectional_parameters.add_sectional_rotation(axis=1, rotation=twist_sectional_parameters)
 
 ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=False)    # TODO: Fix plot function
+ffd_coefficients.name = 'ffd_coefficients'
+ffd_coefficients._save = True
 
 geometry_coefficients = ffd_block.evaluate(ffd_coefficients, plot=False)
+print(geometry_coefficients)
+test = geometry_coefficients[4]
+test._save = True
 geometry.set_coefficients(geometry_coefficients)
 # geometry.plot()
 
@@ -240,6 +246,12 @@ print("Wingspan Stretching: ", wingspan_stretching_b_spline.coefficients.value)
 print("Sweep Translation: ", sweep_translation_b_spline.coefficients.value)
 
 geometry_solver.evaluate(geometric_variables)
+
+rotation_axis = np.array([0., 0., 1.])
+rotation_origin = geometry.project(np.array([0.0, 0.0, 0.0]))
+rotation_angle = 45
+geometry.rotate(rotation_origin, rotation_axis, rotation_angle)
+
 geometry.plot()
 
 print("Wingspan: ", wingspan.value)

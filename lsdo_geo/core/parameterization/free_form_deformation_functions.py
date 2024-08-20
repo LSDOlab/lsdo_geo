@@ -100,7 +100,7 @@ def construct_tight_fit_ffd_block(entities:list[Union[np.ndarray, csdl.Variable,
     # b_spline_hyper_volume.plot()
     
     # 1) Generate set of parametric coordinates
-    num_spanwise_sampling = 100  # THIS MUST BE EVEN TO MAKE SURE WE DON'T GET AN AIRFOIL CROSS SECTION
+    num_spanwise_sampling = 10  # THIS MUST BE EVEN TO MAKE SURE WE DON'T GET AN AIRFOIL CROSS SECTION
     sampling_projection_direction = np.array([0., 0., 1.])
     parametric_coordinates_top = np.linspace(np.array([0.5, 0., 1.]), np.array([0.5, 1., 1.]), num_spanwise_sampling)
     # parametric_coordinates_bot = np.linspace(np.array([0.5, 0., -1.]), np.array([0.5. 1.. -1.]), num_spanwise_sampling)
@@ -108,7 +108,7 @@ def construct_tight_fit_ffd_block(entities:list[Union[np.ndarray, csdl.Variable,
     enclosure_top_points = enclosure_ffd_block.evaluate(parametric_coordinates=parametric_coordinates_top).value
     # ffd_bot_points = bot_evaluation_matrix.dot(b_spline_hyper_volume.coefficients.value)
 
-    top_points_on_wing = entities[0].project(enclosure_top_points, direction=sampling_projection_direction, plot=False)
+    top_points_on_wing = entities[0].project(enclosure_top_points, direction=sampling_projection_direction, plot=True)
     # bot_points_on_wing = entities[0].project(ffd_bot_points, direction=sampling_projection_direction)
 
     # identify key surfaces
@@ -118,7 +118,7 @@ def construct_tight_fit_ffd_block(entities:list[Union[np.ndarray, csdl.Variable,
         if entity_name in entity_counters:
             entity_counters[entity_name] += 1
         else:
-            entity_counters[entity_name] = 0
+            entity_counters[entity_name] = 1
 
     key_entities = []
     for entity_name, entity_count in entity_counters.items():
