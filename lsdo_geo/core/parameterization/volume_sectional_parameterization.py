@@ -1,7 +1,6 @@
 import numpy as np
 import scipy.sparse as sps
 import lsdo_function_spaces as lfs
-import vedo
 import csdl_alpha as csdl
 
 from dataclasses import dataclass
@@ -214,7 +213,8 @@ class VolumeSectionalParameterization:
             translation_axis = self.helpful_b_spline.evaluate(
                 parametric_coordinates=parametric_coordinate,
                 parametric_derivative_orders=parametric_derivative_order,
-            ).value
+                non_csdl=True
+            )
             translation_axis /= np.linalg.norm(translation_axis)
 
             indices = np.arange(np.prod(self.parameterized_points_shape, dtype=int))
@@ -277,12 +277,14 @@ class VolumeSectionalParameterization:
             stretch_axis = self.helpful_b_spline.evaluate(
                 parametric_coordinates=parametric_coordinate,
                 parametric_derivative_orders=parametric_derivative_order,
-            ).value
+                non_csdl=True
+            )
             stretch_axis /= np.linalg.norm(stretch_axis)
             section_middle = self.helpful_b_spline.evaluate(
                 parametric_coordinates=parametric_coordinate,
                 parametric_derivative_orders=(0,),
-            ).value
+                non_csdl=True
+            )
 
             section_axis_end_parametric_coordinate = parametric_coordinate.copy()
             section_axis_end_parametric_coordinate[axis] = 1.0
@@ -292,11 +294,13 @@ class VolumeSectionalParameterization:
             section_axis_end = self.helpful_b_spline.evaluate(
                 parametric_coordinates=section_axis_end_parametric_coordinate,
                 parametric_derivative_orders=(0,),
-            ).value
+                non_csdl=True
+            )
             section_axis_beginning = self.helpful_b_spline.evaluate(
                 parametric_coordinates=section_axis_beginning_parametric_coordinate,
                 parametric_derivative_orders=(0,),
-            ).value
+                non_csdl=True
+            )
             section_length = (section_axis_end - section_axis_beginning).dot(
                 stretch_axis
             )
@@ -556,6 +560,7 @@ class VolumeSectionalParameterization:
                                                 additional_plotting_elements=plotting_elements, show=False)
 
         if show:
+            import vedo
             plotter = vedo.Plotter()
             plotter.show(
                 plotting_elements,

@@ -105,7 +105,7 @@ def construct_tight_fit_ffd_block(entities:list[Union[np.ndarray, csdl.Variable,
     parametric_coordinates_top = np.linspace(np.array([0.5, 0., 1.]), np.array([0.5, 1., 1.]), num_spanwise_sampling)
     # parametric_coordinates_bot = np.linspace(np.array([0.5, 0., -1.]), np.array([0.5. 1.. -1.]), num_spanwise_sampling)
 
-    enclosure_top_points = enclosure_ffd_block.evaluate(parametric_coordinates=parametric_coordinates_top).value
+    enclosure_top_points = enclosure_ffd_block.evaluate(parametric_coordinates=parametric_coordinates_top, non_csdl=True)
     # ffd_bot_points = bot_evaluation_matrix.dot(b_spline_hyper_volume.coefficients.value)
 
     top_points_on_wing = entities[0].project(enclosure_top_points, direction=sampling_projection_direction, plot=True)
@@ -139,15 +139,15 @@ def construct_tight_fit_ffd_block(entities:list[Union[np.ndarray, csdl.Variable,
             parametric_coordinate_10 = [(key_entity, np.array([0., 1.]))]   # u,v are swapped/inverted between wing and ffd
             parametric_coordinate_11 = [(key_entity, np.array([1., 1.]))]   # u,v are swapped/inverted between wing and ffd
 
-        corner_0i0 = entities[0].evaluate(parametric_coordinate_00).value
-        corner_0ip10 = entities[0].evaluate(parametric_coordinate_01).value
-        corner_1i0 = entities[0].evaluate(parametric_coordinate_10).value
-        corner_1ip10 = entities[0].evaluate(parametric_coordinate_11).value
+        corner_0i0 = entities[0].evaluate(parametric_coordinate_00, non_csdl=True)
+        corner_0ip10 = entities[0].evaluate(parametric_coordinate_01, non_csdl=True)
+        corner_1i0 = entities[0].evaluate(parametric_coordinate_10, non_csdl=True)
+        corner_1ip10 = entities[0].evaluate(parametric_coordinate_11, non_csdl=True)
 
-        corner_0i1 = entities[0].evaluate(parametric_coordinate_00).value
-        corner_0ip11 = entities[0].evaluate(parametric_coordinate_01).value
-        corner_1i1 = entities[0].evaluate(parametric_coordinate_10).value
-        corner_1ip11 = entities[0].evaluate(parametric_coordinate_11).value
+        corner_0i1 = entities[0].evaluate(parametric_coordinate_00, non_csdl=True)
+        corner_0ip11 = entities[0].evaluate(parametric_coordinate_01, non_csdl=True)
+        corner_1i1 = entities[0].evaluate(parametric_coordinate_10, non_csdl=True)
+        corner_1ip11 = entities[0].evaluate(parametric_coordinate_11, non_csdl=True)
 
         corner_0i0[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[2]  # z value of first coordinate
         corner_0ip10[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[2]  # z value of first coordinate

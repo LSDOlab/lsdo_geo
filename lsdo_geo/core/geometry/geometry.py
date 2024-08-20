@@ -28,7 +28,7 @@ class Geometry(lfs.FunctionSet):
         return self.space
     
 
-    def declare_component(self, function_indices:list[int]=None, function_search_names:list[str]=None, name:str=None) -> lg.Geometry:
+    def declare_component(self, function_indices:list[int]=None, function_search_names:list[str]=None, ignore_names:list[str]=[], name:str=None) -> lg.Geometry:
         '''
         Declares a component. This component will point to a sub-set of the entire geometry.
 
@@ -41,7 +41,7 @@ class Geometry(lfs.FunctionSet):
         name : str
             The name of the component.
         '''
-        function_set = self.create_subset(function_indices=function_indices, function_search_names=function_search_names, name=name)
+        function_set = self.create_subset(function_indices=function_indices, function_search_names=function_search_names, ignore_names=ignore_names, name=name)
 
         component = lg.Geometry(functions=function_set.functions, function_names=function_set.function_names, name=name, 
                                 space=function_set.space)
@@ -63,7 +63,19 @@ class Geometry(lfs.FunctionSet):
         component = self.create_subset(function_indices=function_indices, function_search_names=function_search_names, name=name)
         component_copy = component.copy()
         return component_copy
+    
+    def copy(self) -> lg.Geometry:
+        '''
+        Copies the function set.
 
+        Returns
+        -------
+        function_set : lfs.FunctionSet
+            The copied function set.
+        '''
+        functions = {i:function.copy() for i, function in self.functions.items()}
+        function_set = lg.Geometry(functions=functions, function_names=self.function_names, name=self.name)
+        return function_set
 
     # def import_geometry(self, file_name:str):
     #     '''
@@ -135,7 +147,7 @@ class Geometry(lfs.FunctionSet):
         #     )
         #     function.coefficients = rotated_coefficients.reshape(function.coefficients.shape)
 
-        # Vectorized:
+        # # Vectorized:
         if len(function_indices) == 1:
             function = self.functions[function_indices[0]]
             rotated_coefficients = rotate_function(
@@ -162,7 +174,7 @@ class Geometry(lfs.FunctionSet):
                 function.coefficients = rotated_coefficients[counter:counter+num_coefficient_points,:].reshape(function.coefficients.shape)
                 counter += num_coefficient_points
 
-    
+
     def plot_meshes(self, meshes:list[csdl.Variable], mesh_plot_types:list[str]=['wireframe'], mesh_opacity:float=1., mesh_color:str='#F5F0E6',
                 mesh_color_map='jet', mesh_line_width:float=3.,
                 function_indices:list[str]=None, function_plot_types:list[str]=['function'], function_opacity:float=0.25, function_color:str='#00629B',
@@ -294,7 +306,135 @@ class Geometry(lfs.FunctionSet):
     def plot_2d_mesh(self, mesh):
         pass
 
+    def export_iges(self, file_name:str):
+        '''
+        Exports the geometry to an IGES file.
 
+        Parameters
+        ----------
+        file_name : str
+            The name of the file to export to.
+        '''
+        """
+        Write the surface to IGES format
+        Parameters
+        ----------
+        fileName : str
+            File name of iges file. Should have .igs extension.
+        """
+        f = open(file_name, 'w')
+        print('Exporting', file_name)
+        #TODO Change to correct information
+        f.write('                                                                        S      1\n')
+        f.write('1H,,1H;,7H128-000,11H128-000.IGS,9H{unknown},9H{unknown},16,6,15,13,15, G      1\n')
+        f.write('7H128-000,1.,6,1HM,8,0.016,15H19970830.165254, 0.0001,0.,               G      2\n')
+        f.write('21Hdennette@wiz-worx.com,23HLegacy PDD AP Committee,11,3,               G      3\n')
+        f.write('13H920717.080000,23HMIL-PRF-28000B0,CLASS 1;                            G      4\n')
+        Dcount = 1
+        Pcount = 1
+        for surf in self.functions.values():
+            space = surf.space
+            paraEntries = 13 + (len(space.knot_indices[0])) + (len(space.knot_indices[1])) + space.coefficients_shape[0] * space.coefficients_shape[1] + 3 * space.coefficients_shape[0] * space.coefficients_shape[1] + 1
+            paraLines = (paraEntries - 10) // 3 + 2
+            if np.mod(paraEntries - 10, 3) != 0:
+                paraLines += 1
+            f.write("     128%8d       0       0       1       0       0       000000001D%7d\n" % (Pcount, Dcount))
+            f.write(
+            "     128       0       2%8d       0                               0D%7d\n" % (paraLines, Dcount + 1)
+            )
+            Dcount += 2
+            Pcount += paraLines
+        Pcount  = 1
+        counter = 1
+        for surf in self.functions.values():
+            space = surf.space
+            f.write(
+                "%10d,%10d,%10d,%10d,%10d,          %7dP%7d\n"
+                % (128, space.coefficients_shape[0] - 1, space.coefficients_shape[1] - 1, space.degree[0], space.degree[1], Pcount, counter)
+            )
+            counter += 1
+            f.write("%10d,%10d,%10d,%10d,%10d,          %7dP%7d\n" % (0, 0, 1, 0, 0, Pcount, counter))
+
+            counter += 1
+            pos_counter = 0
+            knots_u = space.knots[space.knot_indices[0]]
+            knots_v = space.knots[space.knot_indices[1]]
+            for i in range(len(knots_u)):
+                pos_counter += 1
+                f.write("%20.12g," % (np.real(knots_u[i])))
+                if np.mod(pos_counter, 3) == 0:
+                    f.write("  %7dP%7d\n" % (Pcount, counter))
+                    counter += 1
+                    pos_counter = 0
+
+            for i in range(len(knots_v)):
+                pos_counter += 1
+                f.write("%20.12g," % (np.real(knots_v[i])))
+                if np.mod(pos_counter, 3) == 0:
+                    f.write("  %7dP%7d\n" % (Pcount, counter))
+                    counter += 1
+                    pos_counter = 0
+
+            for i in range(space.coefficients_shape[0] * space.coefficients_shape[1]):
+                pos_counter += 1
+                f.write("%20.12g," % (1.0))
+                if np.mod(pos_counter, 3) == 0:
+                    f.write("  %7dP%7d\n" % (Pcount, counter))
+                    counter += 1
+                    pos_counter = 0
+
+            for j in range(space.coefficients_shape[1]):
+                for i in range(space.coefficients_shape[0]):
+                    for idim in range(3):
+                        pos_counter += 1
+                        if isinstance(surf.coefficients, csdl.Variable):
+                            coefficients = surf.coefficients.value
+                        else:
+                            coefficients = surf.coefficients
+                        cntrl_pts = np.reshape(coefficients, (space.coefficients_shape[0], space.coefficients_shape[1],3))
+                        f.write("%20.12g," % (np.real(cntrl_pts[i, j, idim])))
+                        if np.mod(pos_counter, 3) == 0:
+                            f.write("  %7dP%7d\n" % (Pcount, counter))
+                            counter += 1
+                            pos_counter = 0
+
+            for i in range(4):
+                pos_counter += 1
+                if i == 0:
+                    f.write("%20.12g," % (np.real(knots_u[0])))
+                if i == 1:
+                    f.write("%20.12g," % (np.real(knots_u[1])))
+                if i == 2:
+                    f.write("%20.12g," % (np.real(knots_v[0])))
+                if i == 3:
+                    f.write("%20.12g;" % (np.real(knots_v[1])))
+                if np.mod(pos_counter, 3) == 0:
+                    f.write("  %7dP%7d\n" % (Pcount, counter))
+                    counter += 1
+                    pos_counter = 0
+                else:  
+                    if i == 3:
+                        for j in range(3 - pos_counter):
+                            f.write("%21s" % (" "))
+                        pos_counter = 0
+                        f.write("  %7dP%7d\n" % (Pcount, counter))
+                        counter += 1
+
+            Pcount += 2 
+        f.write('S%7dG%7dD%7dP%7d%40sT%6s1\n'%(1, 4, Dcount-1, counter-1, ' ', ' '))
+        f.close()  
+        print('Complete export')
+
+    def export_obj(self, file_name:str):
+        '''
+        Exports the geometry to an OBJ file.
+
+        Parameters
+        ----------
+        file_name : str
+            The name of the file to export to.
+        '''
+        
 
 # if __name__ == "__main__":
 #     from lsdo_geo.core.geometry.geometry_functions import import_geometry

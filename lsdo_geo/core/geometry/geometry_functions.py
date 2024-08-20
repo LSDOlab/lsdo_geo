@@ -17,7 +17,7 @@ def import_geometry(file_name:str, name:str='geometry', parallelize:bool=True, s
     function_set = lfs.import_file(file_name, parallelize=parallelize)
     if scale != 1.0:
         for function in function_set.functions.values():
-            function.coefficients = function.coefficients * scale
+            function.coefficients = csdl.Variable(value=function.coefficients.value * scale)
     geometry = lsdo_geo.Geometry(functions=function_set.functions, function_names=function_set.function_names, name=name, space=function_set.space)
     return geometry
 
@@ -138,14 +138,11 @@ def vectorized_hamiltonion_product_1(q1:csdl.Variable, q2:csdl.Variable) -> csdl
     q_4 = q1_0*q2_3 + q1_1*q2_2 - q1_2*q2_1 + q1_3*q2_0
 
     q = csdl.vstack((q_1, q_2, q_3, q_4))
-    q = csdl.transpose(q)
+    q = q.T()
 
     return q
 
 def vectorized_hamiltonion_product_2(q1:csdl.Variable, q2:csdl.Variable) -> csdl.Variable:
-    # q1 = q1.reshape((4,))
-    # q2 = q2.reshape((4,))
-
     q1_0 = q1[0]
     q1_1 = q1[1]
     q1_2 = q1[2]
@@ -168,7 +165,7 @@ def vectorized_hamiltonion_product_2(q1:csdl.Variable, q2:csdl.Variable) -> csdl
     q_4 = q1_0*q2_3 + q1_1*q2_2 - q1_2*q2_1 + q1_3*q2_0
 
     q = csdl.vstack((q_1, q_2, q_3, q_4))
-    q = csdl.transpose(q)
+    q = q.T()
 
     return q
 

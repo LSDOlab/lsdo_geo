@@ -103,7 +103,7 @@ class Optimization:
         if design_variables is None:
             design_variables = self.design_variables
 
-        dL_dx = csdl.derivative(self.lagrangian, self.design_variables)
+        dL_dx = csdl.derivative(self.lagrangian, self.design_variables, loop=False)
         self.dL_dx = dL_dx
         return dL_dx
 
@@ -152,7 +152,8 @@ class NewtonOptimizer:
         (the CSDL solvers need the add_optimization functionality)
     '''
     def __init__(self) -> None:
-        self.solver = csdl.nonlinear_solvers.Newton()
+        # self.solver = csdl.nonlinear_solvers.Newton()
+        self.solver = csdl.nonlinear_solvers.Newton(residual_jac_kwargs={"loop": True, "concatenate_ofs": True})
         self.has_been_setup = False
 
     def add_optimization(self, optimization:Optimization):
