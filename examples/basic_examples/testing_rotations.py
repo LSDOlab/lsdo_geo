@@ -5,16 +5,19 @@ import m3l
 import numpy as np
 from python_csdl_backend import Simulator
 
-geometry = import_geometry('lsdo_geo/splines/b_splines/sample_geometries/rectangular_wing.stp', parallelize=False)
-geometry.refit(parallelize=False, fit_resolution=(50,50))
+# recorder = csdl.Recorder(inline=True)
+# recorder.start()
 
+geometry = import_geometry('examples/example_geometries/rectangular_wing.stp', parallelize=False)
+geometry.refit(parallelize=False, fit_resolution=(50,50))
 m3l_model = m3l.Model()
 
 # axis_origin = geometry.evaluate(geometry.project(np.array([0.5, -10., 0.5])))
 # axis_vector = geometry.evaluate(geometry.project(np.array([0.5, 10., 0.5]))) - axis_origin
 axis_origin = np.array([0.5, 0., 0.])
 axis_vector = np.array([0., 1., 0.])
-angles = 45
+# angles = 45
+angles = np.array([45., -45.])
 
 leading_edge_parametric_coordinates = [
         ('WingGeom, 0, 3', np.array([1.,  0.])),
@@ -44,9 +47,9 @@ geometry3_csdl_name = geometry3.coefficients.operation.name + '.' + geometry3.co
 
 # geometry.plot()
 
-# geometry2.plot()
+geometry2.plot()
 
-# geometry3.plot()
+geometry3.plot()
 
 # leading_edge1 = geometry.evaluate(leading_edge_parametric_coordinates)
 leading_edge3 = geometry3.evaluate(leading_edge_parametric_coordinates)

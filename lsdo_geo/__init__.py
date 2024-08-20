@@ -1,11 +1,10 @@
-from lsdo_geo.splines.b_splines.b_spline_set_space import BSplineSetSpace
-from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
-from lsdo_geo.splines.b_splines.b_spline_set import BSplineSet
-from lsdo_geo.splines.b_splines.b_spline_space import BSplineSpace
-
 from lsdo_geo.core.geometry.geometry import Geometry
 from lsdo_geo.core.geometry.geometry_functions import *
 from lsdo_geo.core.parameterization.free_form_deformation_functions import *
+from lsdo_geo.core.parameterization.ffd_block import FFDBlock
+from lsdo_geo.core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization, VolumeSectionalParameterizationInputs
+from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver, GeometricVariables
+
 
 from pathlib import Path
 

@@ -1,20 +1,24 @@
 import time
-# import lsdo_geo
+import lsdo_geo
+import lsdo_function_spaces as lfs
 # t01 = time.time()
-from lsdo_geo.core.geometry.geometry_functions import import_geometry
-import m3l
+import csdl_alpha as csdl
 import numpy as np
-from python_csdl_backend import Simulator
+# from python_csdl_backend import Simulator
 from caddee import GEOMETRY_FILES_FOLDER
 import lsdo_geo as lg
 from caddee.api import make_rotor_mesh
+
+
 # t02 = time.time()
 # print(t02-t01)
+recorder = csdl.Recorder(inline=True)
+recorder.start()
 
 t1 = time.time()
-geometry = lg.import_geometry(GEOMETRY_FILES_FOLDER / 'LPC_final_custom_blades.stp', parallelize=True)
+geometry = lg.import_geometry(GEOMETRY_FILES_FOLDER / 'LPC_final_custom_blades.stp', parallelize=False)
 t2 = time.time()
-geometry.refit(parallelize=True)
+# geometry.refit(parallelize=False)
 t3 = time.time()
 # geometry.plot()
 t4 = time.time()
@@ -22,8 +26,6 @@ t4 = time.time()
 print('import time: ', t2-t1)
 print('refit time: ', t3-t2)
 print('plot time: ', t4-t3)
-
-m3l_model = m3l.Model()
 
 # region Declaring all components
 # Wing, tails, fuselage
@@ -252,218 +254,218 @@ fuselage_rear_point_on_pusher_disk_parametric = pp_disk.project(fuselage_rear)
 
 # endregion
 
-# region rotor meshes
-num_radial = 30
-num_spanwise_vlm_rotor = 8
-num_chord_vlm_rotor = 2
+# # region rotor meshes
+# num_radial = 30
+# num_spanwise_vlm_rotor = 8
+# num_chord_vlm_rotor = 2
 
-# Pusher prop
-pp_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=pp_disk,
-    origin=np.array([32.625, 0., 7.79]),
-    y1=np.array([31.94, 0.00, 3.29]),
-    y2=np.array([31.94, 0.00, 12.29]),
-    z1=np.array([31.94, -4.50, 7.78]),
-    z2=np.array([31.94, 4.45, 7.77]),
-    create_disk_mesh=False,
-    plot=False,
-)
+# # Pusher prop
+# pp_mesh = make_rotor_mesh(
+#     geometry=geometry,
+#     num_radial=num_radial,
+#     disk_component=pp_disk,
+#     origin=np.array([32.625, 0., 7.79]),
+#     y1=np.array([31.94, 0.00, 3.29]),
+#     y2=np.array([31.94, 0.00, 12.29]),
+#     z1=np.array([31.94, -4.50, 7.78]),
+#     z2=np.array([31.94, 4.45, 7.77]),
+#     create_disk_mesh=False,
+#     plot=False,
+# )
 
 
-# Rear left outer
-rlo_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=rlo_disk,
-    origin=np.array([19.2, -18.75, 9.01]),
-    y1=np.array([19.2, -13.75, 9.01]),
-    y2=np.array([19.2, -23.75, 9.01]),
-    z1=np.array([14.2, -18.75, 9.01]),
-    z2=np.array([24.2, -18.75, 9.01]),
-    create_disk_mesh=False,
-    plot=False,
-)
+# # Rear left outer
+# rlo_mesh = make_rotor_mesh(
+#     geometry=geometry,
+#     num_radial=num_radial,
+#     disk_component=rlo_disk,
+#     origin=np.array([19.2, -18.75, 9.01]),
+#     y1=np.array([19.2, -13.75, 9.01]),
+#     y2=np.array([19.2, -23.75, 9.01]),
+#     z1=np.array([14.2, -18.75, 9.01]),
+#     z2=np.array([24.2, -18.75, 9.01]),
+#     create_disk_mesh=False,
+#     plot=False,
+# )
 
-rlo_disk_origin_para = rlo_disk.project(np.array([19.2, -18.75, 9.01]))
-rlo_disk_y1_para = rlo_disk.project(np.array([19.2, -13.75, 9.01]))
-rlo_disk_y2_para = rlo_disk.project(np.array([19.2, -23.75, 9.01]))
-rlo_disk_z1_para = rlo_disk.project(np.array([14.2, -18.75, 9.01]))
-rlo_disk_z2_para = rlo_disk.project(np.array([24.2, -18.75, 9.01]))
+# rlo_disk_origin_para = rlo_disk.project(np.array([19.2, -18.75, 9.01]))
+# rlo_disk_y1_para = rlo_disk.project(np.array([19.2, -13.75, 9.01]))
+# rlo_disk_y2_para = rlo_disk.project(np.array([19.2, -23.75, 9.01]))
+# rlo_disk_z1_para = rlo_disk.project(np.array([14.2, -18.75, 9.01]))
+# rlo_disk_z2_para = rlo_disk.project(np.array([24.2, -18.75, 9.01]))
 
-rlo_r1 = m3l.norm((geometry.evaluate(rlo_disk_y1_para) - geometry.evaluate(rlo_disk_y2_para))) 
-rlo_r2 = m3l.norm((geometry.evaluate(rlo_disk_z1_para) - geometry.evaluate(rlo_disk_z2_para)))
+# rlo_r1 = csdl.norm((geometry.evaluate(rlo_disk_y1_para) - geometry.evaluate(rlo_disk_y2_para))) 
+# rlo_r2 = csdl.norm((geometry.evaluate(rlo_disk_z1_para) - geometry.evaluate(rlo_disk_z2_para)))
 
-# Rear right outer 
-rro_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=rro_disk,
-    origin=np.array([19.2, 18.75, 9.01]),
-    y1=np.array([19.2, 23.75, 9.01]),
-    y2=np.array([19.2, 13.75, 9.01]),
-    z1=np.array([14.2, 18.75, 9.01]),
-    z2=np.array([24.2, 18.75, 9.01]),
-    create_disk_mesh=False,
-    plot=False,
-)
+# # Rear right outer 
+# rro_mesh = make_rotor_mesh(
+#     geometry=geometry,
+#     num_radial=num_radial,
+#     disk_component=rro_disk,
+#     origin=np.array([19.2, 18.75, 9.01]),
+#     y1=np.array([19.2, 23.75, 9.01]),
+#     y2=np.array([19.2, 13.75, 9.01]),
+#     z1=np.array([14.2, 18.75, 9.01]),
+#     z2=np.array([24.2, 18.75, 9.01]),
+#     create_disk_mesh=False,
+#     plot=False,
+# )
 
-rro_disk_origin_para = rro_disk.project(np.array([19.2, 18.75, 9.01]))
-rro_disk_y1_para = rro_disk.project(np.array([19.2, 23.75, 9.01]))
-rro_disk_y2_para = rro_disk.project(np.array([19.2, 13.75, 9.01]))
-rro_disk_z1_para = rro_disk.project(np.array([14.2, 18.75, 9.01]))
-rro_disk_z2_para = rro_disk.project(np.array([24.2, 18.75, 9.01]))
+# rro_disk_origin_para = rro_disk.project(np.array([19.2, 18.75, 9.01]))
+# rro_disk_y1_para = rro_disk.project(np.array([19.2, 23.75, 9.01]))
+# rro_disk_y2_para = rro_disk.project(np.array([19.2, 13.75, 9.01]))
+# rro_disk_z1_para = rro_disk.project(np.array([14.2, 18.75, 9.01]))
+# rro_disk_z2_para = rro_disk.project(np.array([24.2, 18.75, 9.01]))
 
-rro_r1 = m3l.norm((geometry.evaluate(rro_disk_y1_para) - geometry.evaluate(rro_disk_y2_para))) 
-rro_r2 = m3l.norm((geometry.evaluate(rro_disk_z1_para) - geometry.evaluate(rro_disk_z2_para)))
+# rro_r1 = csdl.norm((geometry.evaluate(rro_disk_y1_para) - geometry.evaluate(rro_disk_y2_para))) 
+# rro_r2 = csdl.norm((geometry.evaluate(rro_disk_z1_para) - geometry.evaluate(rro_disk_z2_para)))
 
-# Front left outer 
-flo_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=flo_disk,
-    origin=np.array([5.07, -18.75, 6.73]),
-    y1=np.array([5.070, -13.750, 6.730]),
-    y2=np.array([5.070, -23.750, 6.730]),
-    z1=np.array([0.070, -18.750, 6.730]),
-    z2=np.array([10.070, -18.750, 6.730]),
-    create_disk_mesh=False,
-    plot=False,
-)
+# # Front left outer 
+# flo_mesh = make_rotor_mesh(
+#     geometry=geometry,
+#     num_radial=num_radial,
+#     disk_component=flo_disk,
+#     origin=np.array([5.07, -18.75, 6.73]),
+#     y1=np.array([5.070, -13.750, 6.730]),
+#     y2=np.array([5.070, -23.750, 6.730]),
+#     z1=np.array([0.070, -18.750, 6.730]),
+#     z2=np.array([10.070, -18.750, 6.730]),
+#     create_disk_mesh=False,
+#     plot=False,
+# )
 
-flo_disk_origin_para = flo_disk.project(np.array([5.07, -18.75, 6.73]))
-flo_disk_y1_para = flo_disk.project(np.array([5.070, -13.750, 6.730]))
-flo_disk_y2_para = flo_disk.project(np.array([5.070, -23.750, 6.730]))
-flo_disk_z1_para = flo_disk.project(np.array([0.070, -18.750, 6.730]))
-flo_disk_z2_para = flo_disk.project(np.array([10.070, -18.750, 6.730]))
+# flo_disk_origin_para = flo_disk.project(np.array([5.07, -18.75, 6.73]))
+# flo_disk_y1_para = flo_disk.project(np.array([5.070, -13.750, 6.730]))
+# flo_disk_y2_para = flo_disk.project(np.array([5.070, -23.750, 6.730]))
+# flo_disk_z1_para = flo_disk.project(np.array([0.070, -18.750, 6.730]))
+# flo_disk_z2_para = flo_disk.project(np.array([10.070, -18.750, 6.730]))
 
-flo_r1 = m3l.norm((geometry.evaluate(flo_disk_y1_para) - geometry.evaluate(flo_disk_y2_para))) 
-flo_r2 = m3l.norm((geometry.evaluate(flo_disk_z1_para) - geometry.evaluate(flo_disk_z2_para)))
+# flo_r1 = csdl.norm((geometry.evaluate(flo_disk_y1_para) - geometry.evaluate(flo_disk_y2_para))) 
+# flo_r2 = csdl.norm((geometry.evaluate(flo_disk_z1_para) - geometry.evaluate(flo_disk_z2_para)))
 
-# Front right outer 
-fro_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=fro_disk,
-    origin=np.array([5.07, 18.75, 6.73]),
-    y1=np.array([5.070, 23.750, 6.730]),
-    y2=np.array([5.070, 13.750, 6.730]),
-    z1=np.array([0.070, 18.750, 6.730]),
-    z2=np.array([10.070, 18.750, 6.730]),
-    create_disk_mesh=False,
-    plot=False,
-)
+# # Front right outer 
+# fro_mesh = make_rotor_mesh(
+#     geometry=geometry,
+#     num_radial=num_radial,
+#     disk_component=fro_disk,
+#     origin=np.array([5.07, 18.75, 6.73]),
+#     y1=np.array([5.070, 23.750, 6.730]),
+#     y2=np.array([5.070, 13.750, 6.730]),
+#     z1=np.array([0.070, 18.750, 6.730]),
+#     z2=np.array([10.070, 18.750, 6.730]),
+#     create_disk_mesh=False,
+#     plot=False,
+# )
 
-fro_disk_origin_para = fro_disk.project(np.array([5.07, 18.75, 6.73]))
-fro_disk_y1_para = fro_disk.project(np.array([5.070, 23.750, 6.730]))
-fro_disk_y2_para = fro_disk.project(np.array([5.070, 13.750, 6.730]))
-fro_disk_z1_para = fro_disk.project(np.array([0.070, 18.750, 6.730]))
-fro_disk_z2_para = fro_disk.project(np.array([10.070, 18.750, 6.730]))
+# fro_disk_origin_para = fro_disk.project(np.array([5.07, 18.75, 6.73]))
+# fro_disk_y1_para = fro_disk.project(np.array([5.070, 23.750, 6.730]))
+# fro_disk_y2_para = fro_disk.project(np.array([5.070, 13.750, 6.730]))
+# fro_disk_z1_para = fro_disk.project(np.array([0.070, 18.750, 6.730]))
+# fro_disk_z2_para = fro_disk.project(np.array([10.070, 18.750, 6.730]))
 
-fro_r1 = m3l.norm((geometry.evaluate(fro_disk_y1_para) - geometry.evaluate(fro_disk_y2_para))) 
-fro_r2 = m3l.norm((geometry.evaluate(fro_disk_z1_para) - geometry.evaluate(fro_disk_z2_para)))
+# fro_r1 = csdl.norm((geometry.evaluate(fro_disk_y1_para) - geometry.evaluate(fro_disk_y2_para))) 
+# fro_r2 = csdl.norm((geometry.evaluate(fro_disk_z1_para) - geometry.evaluate(fro_disk_z2_para)))
 
-# Rear left inner
-rli_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=rli_disk,
-    origin=np.array([18.760, -8.537, 9.919]),
-    y1=np.array([18.760, -3.499, 9.996]),
-    y2=np.array([18.760, -13.401, 8.604]),
-    z1=np.array([13.760, -8.450, 9.300]),
-    z2=np.array([23.760, -8.450, 9.300]),
-    create_disk_mesh=False,
-    plot=False,
-)
+# # Rear left inner
+# rli_mesh = make_rotor_mesh(
+#     geometry=geometry,
+#     num_radial=num_radial,
+#     disk_component=rli_disk,
+#     origin=np.array([18.760, -8.537, 9.919]),
+#     y1=np.array([18.760, -3.499, 9.996]),
+#     y2=np.array([18.760, -13.401, 8.604]),
+#     z1=np.array([13.760, -8.450, 9.300]),
+#     z2=np.array([23.760, -8.450, 9.300]),
+#     create_disk_mesh=False,
+#     plot=False,
+# )
 
-rli_disk_origin_para = rli_disk.project(np.array([18.760, -8.537, 9.919]))
-rli_disk_y1_para = rli_disk.project(np.array([18.760, -3.499, 9.996]))
-rli_disk_y2_para = rli_disk.project(np.array([18.760, -13.401, 8.604]))
-rli_disk_z1_para = rli_disk.project(np.array([13.760, -8.450, 9.30]))
-rli_disk_z2_para = rli_disk.project(np.array([23.760, -8.450, 9.300]))
+# rli_disk_origin_para = rli_disk.project(np.array([18.760, -8.537, 9.919]))
+# rli_disk_y1_para = rli_disk.project(np.array([18.760, -3.499, 9.996]))
+# rli_disk_y2_para = rli_disk.project(np.array([18.760, -13.401, 8.604]))
+# rli_disk_z1_para = rli_disk.project(np.array([13.760, -8.450, 9.30]))
+# rli_disk_z2_para = rli_disk.project(np.array([23.760, -8.450, 9.300]))
 
-rli_r1 = m3l.norm((geometry.evaluate(rli_disk_y1_para) - geometry.evaluate(rli_disk_y2_para))) 
-rli_r2 = m3l.norm((geometry.evaluate(rli_disk_z1_para) - geometry.evaluate(rli_disk_z2_para)))
+# rli_r1 = csdl.norm((geometry.evaluate(rli_disk_y1_para) - geometry.evaluate(rli_disk_y2_para))) 
+# rli_r2 = csdl.norm((geometry.evaluate(rli_disk_z1_para) - geometry.evaluate(rli_disk_z2_para)))
 
-# Rear right inner
-rri_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=rri_disk,
-    origin=np.array([18.760, 8.537, 9.919]),
-    y1=np.array([18.760, 13.401, 8.604]),
-    y2=np.array([18.760, 3.499, 9.996]),
-    z1=np.array([13.760, 8.450, 9.300]),
-    z2=np.array([23.760, 8.450, 9.300]),
-    create_disk_mesh=False,
-    plot=False,
-)
+# # Rear right inner
+# rri_mesh = make_rotor_mesh(
+#     geometry=geometry,
+#     num_radial=num_radial,
+#     disk_component=rri_disk,
+#     origin=np.array([18.760, 8.537, 9.919]),
+#     y1=np.array([18.760, 13.401, 8.604]),
+#     y2=np.array([18.760, 3.499, 9.996]),
+#     z1=np.array([13.760, 8.450, 9.300]),
+#     z2=np.array([23.760, 8.450, 9.300]),
+#     create_disk_mesh=False,
+#     plot=False,
+# )
 
-rri_disk_origin_para = rri_disk.project(np.array([18.760, 8.537, 9.919]))
-rri_disk_y1_para = rri_disk.project(np.array([18.760, 13.401, 8.60]))
-rri_disk_y2_para = rri_disk.project(np.array([18.760, 3.499, 9.996]))
-rri_disk_z1_para = rri_disk.project(np.array([13.760, 8.450, 9.300]))
-rri_disk_z2_para = rri_disk.project(np.array([23.760, 8.450, 9.300]))
+# rri_disk_origin_para = rri_disk.project(np.array([18.760, 8.537, 9.919]))
+# rri_disk_y1_para = rri_disk.project(np.array([18.760, 13.401, 8.60]))
+# rri_disk_y2_para = rri_disk.project(np.array([18.760, 3.499, 9.996]))
+# rri_disk_z1_para = rri_disk.project(np.array([13.760, 8.450, 9.300]))
+# rri_disk_z2_para = rri_disk.project(np.array([23.760, 8.450, 9.300]))
 
-rri_r1 = m3l.norm((geometry.evaluate(rri_disk_y1_para) - geometry.evaluate(rri_disk_y2_para))) 
-rri_r2 = m3l.norm((geometry.evaluate(rri_disk_z1_para) - geometry.evaluate(rri_disk_z2_para)))
+# rri_r1 = csdl.norm((geometry.evaluate(rri_disk_y1_para) - geometry.evaluate(rri_disk_y2_para))) 
+# rri_r2 = csdl.norm((geometry.evaluate(rri_disk_z1_para) - geometry.evaluate(rri_disk_z2_para)))
 
-# Front left inner
-fli_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=fli_disk,
-    origin=np.array([4.630, -8.217, 7.659]),
-    y1=np.array([4.630, -3.179, 7.736]),
-    y2=np.array([4.630, -13.081, 6.344]),
-    z1=np.array([-0.370, -8.130, 7.040]),
-    z2=np.array([9.630, -8.130, 7.040]),
-    create_disk_mesh=False,
-    plot=False,
-)
+# # Front left inner
+# fli_mesh = make_rotor_mesh(
+#     geometry=geometry,
+#     num_radial=num_radial,
+#     disk_component=fli_disk,
+#     origin=np.array([4.630, -8.217, 7.659]),
+#     y1=np.array([4.630, -3.179, 7.736]),
+#     y2=np.array([4.630, -13.081, 6.344]),
+#     z1=np.array([-0.370, -8.130, 7.040]),
+#     z2=np.array([9.630, -8.130, 7.040]),
+#     create_disk_mesh=False,
+#     plot=False,
+# )
 
-fli_disk_origin_para = fli_disk.project(np.array([4.630, -8.217, 7.659]))
-fli_disk_y1_para = fli_disk.project(np.array([4.630, -3.179, 7.736]))
-fli_disk_y2_para = fli_disk.project(np.array([4.630, -13.081, 6.344]))
-fli_disk_z1_para = fli_disk.project(np.array([-0.370, -8.130, 7.040]))
-fli_disk_z2_para = fli_disk.project(np.array([9.630, -8.130, 7.040]))
+# fli_disk_origin_para = fli_disk.project(np.array([4.630, -8.217, 7.659]))
+# fli_disk_y1_para = fli_disk.project(np.array([4.630, -3.179, 7.736]))
+# fli_disk_y2_para = fli_disk.project(np.array([4.630, -13.081, 6.344]))
+# fli_disk_z1_para = fli_disk.project(np.array([-0.370, -8.130, 7.040]))
+# fli_disk_z2_para = fli_disk.project(np.array([9.630, -8.130, 7.040]))
 
-fli_r1 = m3l.norm((geometry.evaluate(fli_disk_y1_para) - geometry.evaluate(fli_disk_y2_para))/2) 
-fli_r2 = m3l.norm((geometry.evaluate(fli_disk_z1_para) - geometry.evaluate(fli_disk_z2_para))/2)
+# fli_r1 = csdl.norm((geometry.evaluate(fli_disk_y1_para) - geometry.evaluate(fli_disk_y2_para))/2) 
+# fli_r2 = csdl.norm((geometry.evaluate(fli_disk_z1_para) - geometry.evaluate(fli_disk_z2_para))/2)
 
-# Front right inner
-fri_mesh = make_rotor_mesh(
-    geometry=geometry,
-    num_radial=num_radial,
-    disk_component=fri_disk,
-    origin=np.array([4.630, 8.217, 7.659]), 
-    y1=np.array([4.630, 13.081, 6.344]),
-    y2=np.array([4.630, 3.179, 7.736]),
-    z1=np.array([-0.370, 8.130, 7.040]),
-    z2=np.array([9.630, 8.130, 7.040]),
-    create_disk_mesh=False,
-    plot=False,
-)
+# # Front right inner
+# fri_mesh = make_rotor_mesh(
+#     geometry=geometry,
+#     num_radial=num_radial,
+#     disk_component=fri_disk,
+#     origin=np.array([4.630, 8.217, 7.659]), 
+#     y1=np.array([4.630, 13.081, 6.344]),
+#     y2=np.array([4.630, 3.179, 7.736]),
+#     z1=np.array([-0.370, 8.130, 7.040]),
+#     z2=np.array([9.630, 8.130, 7.040]),
+#     create_disk_mesh=False,
+#     plot=False,
+# )
 
-fri_disk_origin_para = fri_disk.project(np.array([4.630, 8.217, 7.659]))
-fri_disk_y1_para = fri_disk.project(np.array([4.630, 13.081, 6.344]))
-fri_disk_y2_para = fri_disk.project(np.array([4.630, 3.179, 7.736]))
-fri_disk_z1_para = fri_disk.project(np.array([-0.370, 8.130, 7.040]))
-fri_disk_z2_para = fri_disk.project(np.array([9.630, 8.130, 7.04]))
+# fri_disk_origin_para = fri_disk.project(np.array([4.630, 8.217, 7.659]))
+# fri_disk_y1_para = fri_disk.project(np.array([4.630, 13.081, 6.344]))
+# fri_disk_y2_para = fri_disk.project(np.array([4.630, 3.179, 7.736]))
+# fri_disk_z1_para = fri_disk.project(np.array([-0.370, 8.130, 7.040]))
+# fri_disk_z2_para = fri_disk.project(np.array([9.630, 8.130, 7.04]))
 
-fri_r1 = m3l.norm((geometry.evaluate(fri_disk_y1_para) - geometry.evaluate(fri_disk_y2_para))/2) 
-fri_r2 = m3l.norm((geometry.evaluate(fri_disk_z1_para) - geometry.evaluate(fri_disk_z2_para))/2)
+# fri_r1 = csdl.norm((geometry.evaluate(fri_disk_y1_para) - geometry.evaluate(fri_disk_y2_para))/2) 
+# fri_r2 = csdl.norm((geometry.evaluate(fri_disk_z1_para) - geometry.evaluate(fri_disk_z2_para))/2)
 
-radius_1_list = [rlo_r1, rli_r1, rri_r1, rro_r1,
-                 flo_r1, fli_r1, fri_r1, fro_r1]
+# radius_1_list = [rlo_r1, rli_r1, rri_r1, rro_r1,
+#                  flo_r1, fli_r1, fri_r1, fro_r1]
 
-radius_2_list = [rlo_r2, rli_r2, rri_r2, rro_r2,
-                 flo_r2, fli_r2, fri_r2, fro_r2]
-# endregion
+# radius_2_list = [rlo_r2, rli_r2, rri_r2, rro_r2,
+#                  flo_r2, fli_r2, fri_r2, fro_r2]
+# # endregion
 
-# region Projection for meshes
+# # region Projection for meshes
 num_spanwise_vlm = 17
 num_chordwise_vlm = 5
 leading_edge_line_parametric = wing.project(np.linspace(np.array([8.356, -26., 7.618]), np.array([8.356, 26., 7.618]), num_spanwise_vlm), 
@@ -472,132 +474,121 @@ trailing_edge_line_parametric = wing.project(np.linspace(np.array([15.4, -25.250
                                   direction=np.array([0., 0., -1.]), grid_search_density_parameter=20.)
 leading_edge_line = geometry.evaluate(leading_edge_line_parametric)
 trailing_edge_line = geometry.evaluate(trailing_edge_line_parametric)
-chord_surface = m3l.linspace(leading_edge_line, trailing_edge_line, num_chordwise_vlm)
+chord_surface = csdl.linspace(leading_edge_line, trailing_edge_line, num_chordwise_vlm)
 upper_surface_wireframe_parametric = wing.project(chord_surface.value.reshape((num_chordwise_vlm,num_spanwise_vlm,3))+np.array([0., 0., 1.]), 
                                        direction=np.array([0., 0., -1.]), plot=False, grid_search_density_parameter=40.)
 lower_surface_wireframe_parametric = wing.project(chord_surface.value.reshape((num_chordwise_vlm,num_spanwise_vlm,3))+np.array([0., 0., -1.]), 
                                        direction=np.array([0., 0., 1.]), plot=False, grid_search_density_parameter=40.)
 upper_surface_wireframe = geometry.evaluate(upper_surface_wireframe_parametric)
 lower_surface_wireframe = geometry.evaluate(lower_surface_wireframe_parametric)
-camber_surface = m3l.linspace(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((num_chordwise_vlm, num_spanwise_vlm, 3))
+camber_surface = csdl.linspace(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((num_chordwise_vlm, num_spanwise_vlm, 3))
 # geometry.plot_meshes([camber_surface])
 # endregion
 # exit()
 # region Parameterization
-from lsdo_geo.core.parameterization.free_form_deformation_functions import construct_ffd_block_around_entities
-from lsdo_geo.core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization
-from lsdo_geo.core.parameterization.parameterization_solver_old import ParameterizationSolver
-import lsdo_geo.splines.b_splines as bsp
 
-constant_b_spline_curve_1_dof_space = bsp.BSplineSpace(name='constant_b_spline_curve_1_dof_space', order=1, parametric_coefficients_shape=(1,))
-linear_b_spline_curve_2_dof_space = bsp.BSplineSpace(name='linear_b_spline_curve_2_dof_space', order=2, parametric_coefficients_shape=(2,))
-linear_b_spline_curve_3_dof_space = bsp.BSplineSpace(name='linear_b_spline_curve_3_dof_space', order=3, parametric_coefficients_shape=(3,))
-cubic_b_spline_curve_5_dof_space = bsp.BSplineSpace(name='cubic_b_spline_curve_5_dof_space', order=4, parametric_coefficients_shape=(5,))
+constant_b_spline_curve_1_dof_space = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(1,))
+linear_b_spline_curve_2_dof_space = lfs.BSplineSpace(num_parametric_dimensions=1, degree=2, coefficients_shape=(2,))
+linear_b_spline_curve_3_dof_space = lfs.BSplineSpace(num_parametric_dimensions=1, degree=3, coefficients_shape=(3,))
+cubic_b_spline_curve_5_dof_space = lfs.BSplineSpace(num_parametric_dimensions=1, degree=4, coefficients_shape=(5,))
 
 # region Parameterization Setup
-parameterization_solver = ParameterizationSolver()
+parameterization_solver = lsdo_geo.ParameterizationSolver()
 
 # region Wing Parameterization setup
-wing_ffd_block = construct_ffd_block_around_entities('wing_ffd_block', entities=wing, num_coefficients=(2,11,2), order=(2,4,2))
-wing_ffd_block.coefficients.name = 'wing_ffd_block_coefficients'
-wing_ffd_block_sectional_parameterization = VolumeSectionalParameterization(name='wing_sectional_parameterization',
+wing_ffd_block = lsdo_geo.construct_ffd_block_around_entities(name='wing_ffd_block', entities=wing, num_coefficients=(2,11,2), degree=(1,3,1))
+wing_ffd_block_sectional_parameterization = lsdo_geo.VolumeSectionalParameterization(name='wing_sectional_parameterization',
                                                                             parameterized_points=wing_ffd_block.coefficients,
-                                                                            parameterized_points_shape=wing_ffd_block.coefficients_shape,
                                                                             principal_parametric_dimension=1)
-wing_ffd_block_sectional_parameterization.add_sectional_stretch(name='sectional_wing_chord_stretch', axis=0)
-wing_ffd_block_sectional_parameterization.add_sectional_translation(name='sectional_wingspan_stretch', axis=1)
-# wing_ffd_block_sectional_parameterization.add_sectional_rotation(name='sectional_wing_twist', axis=1)
-wing_ffd_block_sectional_parameterization.add_sectional_translation(name='sectional_wing_translation_x', axis=0)
-wing_ffd_block_sectional_parameterization.add_sectional_translation(name='sectional_wing_translation_z', axis=2)
+# wing_ffd_block_sectional_parameterization.add_sectional_stretch(name='sectional_wing_chord_stretch', axis=0)
+# wing_ffd_block_sectional_parameterization.add_sectional_translation(name='sectional_wingspan_stretch', axis=1)
+# # wing_ffd_block_sectional_parameterization.add_sectional_rotation(name='sectional_wing_twist', axis=1)
+# wing_ffd_block_sectional_parameterization.add_sectional_translation(name='sectional_wing_translation_x', axis=0)
+# wing_ffd_block_sectional_parameterization.add_sectional_translation(name='sectional_wing_translation_z', axis=2)
 
-wing_chord_stretch_coefficients = m3l.Variable(name='wing_chord_stretch_coefficients', shape=(3,), value=np.array([0., 0., 0.]))
-wing_chord_stretch_b_spline = bsp.BSpline(name='wing_chord_stretch_b_spline', space=linear_b_spline_curve_3_dof_space, 
-                                          coefficients=wing_chord_stretch_coefficients, num_physical_dimensions=1)
+wing_chord_stretch_coefficients = csdl.Variable(name='wing_chord_stretch_coefficients', value=np.array([0., 0., 0.]))
+wing_chord_stretch_b_spline = lfs.Function(name='wing_chord_stretch_b_spline', space=linear_b_spline_curve_3_dof_space, 
+                                          coefficients=wing_chord_stretch_coefficients)
 
-wing_wingspan_stretch_coefficients = m3l.Variable(name='wing_wingspan_stretch_coefficients', shape=(2,), value=np.array([-0., 0.]))
-wing_wingspan_stretch_b_spline = bsp.BSpline(name='wing_wingspan_stretch_b_spline', space=linear_b_spline_curve_2_dof_space, 
-                                          coefficients=wing_wingspan_stretch_coefficients, num_physical_dimensions=1)
+wing_wingspan_stretch_coefficients = csdl.Variable(name='wing_wingspan_stretch_coefficients', value=np.array([-0., 0.]))
+wing_wingspan_stretch_b_spline = lfs.Function(name='wing_wingspan_stretch_b_spline', space=linear_b_spline_curve_2_dof_space, 
+                                          coefficients=wing_wingspan_stretch_coefficients)
 
-# wing_twist_coefficients = m3l.Variable(name='wing_twist_coefficients', shape=(5,), value=np.array([0., 0., 0., 0., 0.]))
-# wing_twist_b_spline = bsp.BSpline(name='wing_twist_b_spline', space=cubic_b_spline_curve_5_dof_space,
-#                                           coefficients=wing_twist_coefficients, num_physical_dimensions=1)
+wing_twist_coefficients = csdl.Variable(name='wing_twist_coefficients', value=np.array([0., 0., 0., 0., 0.]))
+wing_twist_b_spline = lfs.Function(name='wing_twist_b_spline', space=cubic_b_spline_curve_5_dof_space,
+                                          coefficients=wing_twist_coefficients)
 
-wing_translation_x_coefficients = m3l.Variable(name='wing_translation_x_coefficients', shape=(1,), value=np.array([0.]))
-wing_translation_x_b_spline = bsp.BSpline(name='wing_translation_x_b_spline', space=constant_b_spline_curve_1_dof_space,
-                                          coefficients=wing_translation_x_coefficients, num_physical_dimensions=1)
+wing_translation_x_coefficients = csdl.Variable(name='wing_translation_x_coefficients', value=np.array([0.]))
+wing_translation_x_b_spline = lfs.Function(name='wing_translation_x_b_spline', space=constant_b_spline_curve_1_dof_space,
+                                          coefficients=wing_translation_x_coefficients)
 
-wing_translation_z_coefficients = m3l.Variable(name='wing_translation_z_coefficients', shape=(1,), value=np.array([0.]))
-wing_translation_z_b_spline = bsp.BSpline(name='wing_translation_z_b_spline', space=constant_b_spline_curve_1_dof_space,
-                                          coefficients=wing_translation_z_coefficients, num_physical_dimensions=1)
+wing_translation_z_coefficients = csdl.Variable(name='wing_translation_z_coefficients', value=np.array([0.]))
+wing_translation_z_b_spline = lfs.Function(name='wing_translation_z_b_spline', space=constant_b_spline_curve_1_dof_space,
+                                          coefficients=wing_translation_z_coefficients)
 
-parameterization_solver.declare_state(name='wing_chord_stretch_coefficients', state=wing_chord_stretch_coefficients)
-parameterization_solver.declare_state(name='wing_wingspan_stretch_coefficients', state=wing_wingspan_stretch_coefficients, penalty_factor=1.e3)
-parameterization_solver.declare_state(name='wing_translation_x_coefficients', state=wing_translation_x_coefficients)
-parameterization_solver.declare_state(name='wing_translation_z_coefficients', state=wing_translation_z_coefficients)
+parameterization_solver.add_parameter(state=wing_chord_stretch_coefficients)
+parameterization_solver.add_parameter(state=wing_wingspan_stretch_coefficients, cost=1.e3)
+parameterization_solver.add_parameter(state=wing_translation_x_coefficients)
+parameterization_solver.add_parameter(state=wing_translation_z_coefficients)
 # endregion
 
 # region Horizontal Stabilizer setup
-h_tail_ffd_block = construct_ffd_block_around_entities('h_tail_ffd_block', entities=h_tail, num_coefficients=(2,11,2), order=(2,4,2))
-h_tail_ffd_block_sectional_parameterization = VolumeSectionalParameterization(name='h_tail_sectional_parameterization',
+h_tail_ffd_block = lsdo_geo.construct_ffd_block_around_entities(name='h_tail_ffd_block', entities=h_tail, num_coefficients=(2,11,2), degree=(1,3,1))
+h_tail_ffd_block_sectional_parameterization = lsdo_geo.VolumeSectionalParameterization(name='h_tail_sectional_parameterization',
                                                                             parameterized_points=h_tail_ffd_block.coefficients,
-                                                                            parameterized_points_shape=h_tail_ffd_block.coefficients_shape,
                                                                             principal_parametric_dimension=1)
 h_tail_ffd_block_sectional_parameterization.add_sectional_stretch(name='sectional_h_tail_chord_stretch', axis=0)
 h_tail_ffd_block_sectional_parameterization.add_sectional_translation(name='sectional_h_tail_span_stretch', axis=1)
-# h_tail_ffd_block_sectional_parameterization.add_sectional_rotation(name='sectional_h_tail_twist', axis=1)
+h_tail_ffd_block_sectional_parameterization.add_sectional_rotation(name='sectional_h_tail_twist', axis=1)
 h_tail_ffd_block_sectional_parameterization.add_sectional_translation(name='sectional_h_tail_translation_x', axis=0)
 # Don't need to add translation_y because the span stretch covers that
 h_tail_ffd_block_sectional_parameterization.add_sectional_translation(name='sectional_h_tail_translation_z', axis=2)
 
-h_tail_chord_stretch_coefficients = m3l.Variable(name='h_tail_chord_stretch_coefficients', shape=(3,), value=np.array([0., 0., 0.]))
-h_tail_chord_stretch_b_spline = bsp.BSpline(name='h_tail_chord_stretch_b_spline', space=linear_b_spline_curve_3_dof_space, 
-                                          coefficients=h_tail_chord_stretch_coefficients, num_physical_dimensions=1)
+h_tail_chord_stretch_coefficients = csdl.Variable(name='h_tail_chord_stretch_coefficients', value=np.array([0., 0., 0.]))
+h_tail_chord_stretch_b_spline = lfs.Function(name='h_tail_chord_stretch_b_spline', space=linear_b_spline_curve_3_dof_space, 
+                                          coefficients=h_tail_chord_stretch_coefficients)
 
-h_tail_span_stretch_coefficients = m3l.Variable(name='h_tail_span_stretch_coefficients', shape=(2,), value=np.array([-0., 0.]))
-h_tail_span_stretch_b_spline = bsp.BSpline(name='h_tail_span_stretch_b_spline', space=linear_b_spline_curve_2_dof_space, 
-                                          coefficients=h_tail_span_stretch_coefficients, num_physical_dimensions=1)
+h_tail_span_stretch_coefficients = csdl.Variable(name='h_tail_span_stretch_coefficients', value=np.array([-0., 0.]))
+h_tail_span_stretch_b_spline = lfs.Function(name='h_tail_span_stretch_b_spline', space=linear_b_spline_curve_2_dof_space, 
+                                          coefficients=h_tail_span_stretch_coefficients)
 
-# h_tail_twist_coefficients = m3l.Variable(name='h_tail_twist_coefficients', shape=(5,), value=np.array([0., 0., 0., 0., 0.]))
-# h_tail_twist_b_spline = bsp.BSpline(name='h_tail_twist_b_spline', space=cubic_b_spline_curve_5_dof_space,
-#                                           coefficients=h_tail_twist_coefficients, num_physical_dimensions=1)
+# h_tail_twist_coefficients = csdl.Variable(name='h_tail_twist_coefficients', value=np.array([0., 0., 0., 0., 0.]))
+# h_tail_twist_b_spline = lfs.Function(name='h_tail_twist_b_spline', space=cubic_b_spline_curve_5_dof_space,
+#                                           coefficients=h_tail_twist_coefficients)
 
-h_tail_translation_x_coefficients = m3l.Variable(name='h_tail_translation_x_coefficients', shape=(1,), value=np.array([0.]))
-h_tail_translation_x_b_spline = bsp.BSpline(name='h_tail_translation_x_b_spline', space=constant_b_spline_curve_1_dof_space,
-                                          coefficients=h_tail_translation_x_coefficients, num_physical_dimensions=1)
-h_tail_translation_z_coefficients = m3l.Variable(name='h_tail_translation_z_coefficients', shape=(1,), value=np.array([0.]))
-h_tail_translation_z_b_spline = bsp.BSpline(name='h_tail_translation_z_b_spline', space=constant_b_spline_curve_1_dof_space,
-                                          coefficients=h_tail_translation_z_coefficients, num_physical_dimensions=1)
+h_tail_translation_x_coefficients = csdl.Variable(name='h_tail_translation_x_coefficients', value=np.array([0.]))
+h_tail_translation_x_b_spline = lfs.Function(name='h_tail_translation_x_b_spline', space=constant_b_spline_curve_1_dof_space,
+                                          coefficients=h_tail_translation_x_coefficients)
+h_tail_translation_z_coefficients = csdl.Variable(name='h_tail_translation_z_coefficients', value=np.array([0.]))
+h_tail_translation_z_b_spline = lfs.Function(name='h_tail_translation_z_b_spline', space=constant_b_spline_curve_1_dof_space,
+                                          coefficients=h_tail_translation_z_coefficients)
 
-parameterization_solver.declare_state(name='h_tail_chord_stretch_coefficients', state=h_tail_chord_stretch_coefficients)
-parameterization_solver.declare_state(name='h_tail_span_stretch_coefficients', state=h_tail_span_stretch_coefficients)
-parameterization_solver.declare_state(name='h_tail_translation_x_coefficients', state=h_tail_translation_x_coefficients)
-parameterization_solver.declare_state(name='h_tail_translation_z_coefficients', state=h_tail_translation_z_coefficients)
+parameterization_solver.add_parameter(state=h_tail_chord_stretch_coefficients)
+parameterization_solver.add_parameter(state=h_tail_span_stretch_coefficients)
+parameterization_solver.add_parameter(state=h_tail_translation_x_coefficients)
+parameterization_solver.add_parameter(state=h_tail_translation_z_coefficients)
 # endregion
 
 # region Fuselage setup
-fuselage_ffd_block = construct_ffd_block_around_entities('fuselage_ffd_block', entities=[fuselage, nose_hub], num_coefficients=(2,2,2), order=(2,2,2))
-fuselage_ffd_block.coefficients.name = 'fuselage_ffd_block_coefficients'
-fuselage_ffd_block_sectional_parameterization = VolumeSectionalParameterization(name='fuselage_sectional_parameterization',
+fuselage_ffd_block = lsdo_geo.construct_ffd_block_around_entities('fuselage_ffd_block', entities=[fuselage, nose_hub], num_coefficients=(2,2,2), degree=(1,1,1))
+fuselage_ffd_block_sectional_parameterization = lsdo_geo.VolumeSectionalParameterization(name='fuselage_sectional_parameterization',
                                                                             parameterized_points=fuselage_ffd_block.coefficients,
-                                                                            parameterized_points_shape=fuselage_ffd_block.coefficients_shape,
                                                                             principal_parametric_dimension=0)
 fuselage_ffd_block_sectional_parameterization.add_sectional_translation(name='sectional_fuselage_stretch', axis=0)
 
-fuselage_stretch_coefficients = m3l.Variable(name='fuselage_stretch_coefficients', shape=(2,), value=np.array([0., -0.]))
-fuselage_stretch_b_spline = bsp.BSpline(name='fuselage_stretch_b_spline', space=linear_b_spline_curve_2_dof_space, 
-                                          coefficients=fuselage_stretch_coefficients, num_physical_dimensions=1)
+fuselage_stretch_coefficients = csdl.Variable(name='fuselage_stretch_coefficients', shape=(2,), value=np.array([0., -0.]))
+fuselage_stretch_b_spline = lfs.Function(name='fuselage_stretch_b_spline', space=linear_b_spline_curve_2_dof_space, 
+                                          coefficients=fuselage_stretch_coefficients)
 
-parameterization_solver.declare_state(name='fuselage_stretch_coefficients', state=fuselage_stretch_coefficients)
+parameterization_solver.add_parameter(state=fuselage_stretch_coefficients)
 # endregion
 
 # region Lift Rotors setup
 def add_rigid_body_translation(components_name, components, principal_parametric_dimension=0, change_radius=False):
-    components_ffd_block = construct_ffd_block_around_entities(f'{components_name}_ffd_block', entities=components, num_coefficients=(2,2,2),
-                                                               order=(2,2,2))
-    components_ffd_block.coefficients.name = components_name + '_coefficients'
-    components_ffd_block_sectional_parameterization = VolumeSectionalParameterization(name=f'{components_name}_sectional_parameterization',
+    components_ffd_block = lsdo_geo.construct_ffd_block_around_entities(name=f'{components_name}_ffd_block', entities=components, num_coefficients=(2,2,2),
+                                                               degree=(1,1,1))
+    components_ffd_block_sectional_parameterization = lsdo_geo.VolumeSectionalParameterization(name=f'{components_name}_sectional_parameterization',
                                                                                 parameterized_points=components_ffd_block.coefficients,
-                                                                                parameterized_points_shape=components_ffd_block.coefficients_shape,
                                                                                 principal_parametric_dimension=principal_parametric_dimension)
     components_ffd_block_sectional_parameterization.add_sectional_translation(name=f'{components_name}_translation_x', axis=0)
     components_ffd_block_sectional_parameterization.add_sectional_translation(name=f'{components_name}_translation_y', axis=1)
@@ -606,25 +597,25 @@ def add_rigid_body_translation(components_name, components, principal_parametric
     if change_radius is True:
         components_ffd_block_sectional_parameterization.add_sectional_stretch(name=f'{components_name}_stretch_y', axis=1)
 
-        components_translation_x_coefficients = m3l.Variable(name=f'{components_name}_translation_x_coefficients', shape=(2,), value=np.array([0., 0.]))
-        components_translation_x_b_spline = bsp.BSpline(name=f'{components_name}_translation_x_b_spline', space=linear_b_spline_curve_2_dof_space, 
-                                                coefficients=components_translation_x_coefficients, num_physical_dimensions=1)
+        components_translation_x_coefficients = csdl.Variable(name=f'{components_name}_translation_x_coefficients', value=np.array([0., 0.]))
+        components_translation_x_b_spline = lfs.Function(name=f'{components_name}_translation_x_b_spline', space=linear_b_spline_curve_2_dof_space, 
+                                                coefficients=components_translation_x_coefficients)
     
-        components_stretch_y_coefficients = m3l.Variable(name=f'{components_name}_stretch_y_coefficients', shape=(1, ), value=np.array([0.]))
-        components_stretch_y_b_spline = bsp.BSpline(name=f'{components_name}_stretch_y_b_spline', space=constant_b_spline_curve_1_dof_space, 
-                                                    coefficients=components_stretch_y_coefficients, num_physical_dimensions=1)
+        components_stretch_y_coefficients = csdl.Variable(name=f'{components_name}_stretch_y_coefficients', value=np.array([0.]))
+        components_stretch_y_b_spline = lfs.Function(name=f'{components_name}_stretch_y_b_spline', space=constant_b_spline_curve_1_dof_space, 
+                                                    coefficients=components_stretch_y_coefficients)
     else:
-        components_translation_x_coefficients = m3l.Variable(name=f'{components_name}_translation_x_coefficients', shape=(1,), value=np.array([0.]))
-        components_translation_x_b_spline = bsp.BSpline(name=f'{components_name}_translation_x_b_spline', space=constant_b_spline_curve_1_dof_space, 
-                                                coefficients=components_translation_x_coefficients, num_physical_dimensions=1)
+        components_translation_x_coefficients = csdl.Variable(name=f'{components_name}_translation_x_coefficients', value=np.array([0.]))
+        components_translation_x_b_spline = lfs.Function(name=f'{components_name}_translation_x_b_spline', space=constant_b_spline_curve_1_dof_space, 
+                                                coefficients=components_translation_x_coefficients)
     
-    components_translation_y_coefficients = m3l.Variable(name=f'{components_name}_translation_y_coefficients', shape=(1,), value=np.array([0.]))
-    components_translation_y_b_spline = bsp.BSpline(name=f'{components_name}_translation_y_b_spline', space=constant_b_spline_curve_1_dof_space, 
-                                            coefficients=components_translation_y_coefficients, num_physical_dimensions=1)
+    components_translation_y_coefficients = csdl.Variable(name=f'{components_name}_translation_y_coefficients', value=np.array([0.]))
+    components_translation_y_b_spline = lfs.Function(name=f'{components_name}_translation_y_b_spline', space=constant_b_spline_curve_1_dof_space, 
+                                            coefficients=components_translation_y_coefficients)
     
-    components_translation_z_coefficients = m3l.Variable(name=f'{components_name}_translation_z_coefficients', shape=(1,), value=np.array([0.]))
-    components_translation_z_b_spline = bsp.BSpline(name=f'{components_name}_translation_z_b_spline', space=constant_b_spline_curve_1_dof_space, 
-                                            coefficients=components_translation_z_coefficients, num_physical_dimensions=1)
+    components_translation_z_coefficients = csdl.Variable(name=f'{components_name}_translation_z_coefficients', value=np.array([0.]))
+    components_translation_z_b_spline = lfs.Function(name=f'{components_name}_translation_z_b_spline', space=constant_b_spline_curve_1_dof_space, 
+                                            coefficients=components_translation_z_coefficients)
 
     if change_radius is False:
         return [components_translation_x_b_spline, components_translation_y_b_spline, components_translation_z_b_spline], \
@@ -642,10 +633,10 @@ for component_set in lift_rotor_related_components:
     lift_rotor_parameterization_objects[f'{components_name}_sectional_parameterization'] = component_sectional_parameterization
     lift_rotor_parameterization_objects[f'{components_name}_ffd_block'] = component_ffd_block
 
-    parameterization_solver.declare_state(name=f'{components_name}_translation_x_coefficients', state=component_parameterization_b_splines[0].coefficients)
-    parameterization_solver.declare_state(name=f'{components_name}_translation_y_coefficients', state=component_parameterization_b_splines[1].coefficients)
-    parameterization_solver.declare_state(name=f'{components_name}_translation_z_coefficients', state=component_parameterization_b_splines[2].coefficients)
-    parameterization_solver.declare_state(name=f'{components_name}_stretch_y_coefficients', state=component_parameterization_b_splines[3].coefficients)
+    parameterization_solver.add_parameter(state=component_parameterization_b_splines[0].coefficients)
+    parameterization_solver.add_parameter(state=component_parameterization_b_splines[1].coefficients)
+    parameterization_solver.add_parameter(state=component_parameterization_b_splines[2].coefficients)
+    parameterization_solver.add_parameter(state=component_parameterization_b_splines[3].coefficients)
 
 # endregion
 
@@ -659,9 +650,9 @@ for component in boom_components:
     boom_parameterization_objects[f'{components_name}_sectional_parameterization'] = component_sectional_parameterization
     boom_parameterization_objects[f'{components_name}_ffd_block'] = component_ffd_block
 
-    parameterization_solver.declare_state(name=f'{components_name}_translation_x_coefficients', state=component_parameterization_b_splines[0].coefficients)
-    parameterization_solver.declare_state(name=f'{components_name}_translation_y_coefficients', state=component_parameterization_b_splines[1].coefficients)
-    parameterization_solver.declare_state(name=f'{components_name}_translation_z_coefficients', state=component_parameterization_b_splines[2].coefficients)
+    parameterization_solver.add_parameter(state=component_parameterization_b_splines[0].coefficients)
+    parameterization_solver.add_parameter(state=component_parameterization_b_splines[1].coefficients)
+    parameterization_solver.add_parameter(state=component_parameterization_b_splines[2].coefficients)
 # endregion
 
 # region pusher
@@ -674,9 +665,9 @@ pusher_parameterization_objects[f'{components_name}_parameterization_b_splines']
 pusher_parameterization_objects[f'{components_name}_sectional_parameterization'] = component_sectional_parameterization
 pusher_parameterization_objects[f'{components_name}_ffd_block'] = component_ffd_block
 
-parameterization_solver.declare_state(name=f'{components_name}_translation_x_coefficients', state=component_parameterization_b_splines[0].coefficients)
-parameterization_solver.declare_state(name=f'{components_name}_translation_y_coefficients', state=component_parameterization_b_splines[1].coefficients)
-parameterization_solver.declare_state(name=f'{components_name}_translation_z_coefficients', state=component_parameterization_b_splines[2].coefficients)
+parameterization_solver.add_parameter(state=component_parameterization_b_splines[0].coefficients)
+parameterization_solver.add_parameter(state=component_parameterization_b_splines[1].coefficients)
+parameterization_solver.add_parameter(state=component_parameterization_b_splines[2].coefficients)
 # endregion
 
 # region Vertical Stabilizer setup
@@ -689,9 +680,9 @@ vtail_parameterization_objects[f'{components_name}_parameterization_b_splines'] 
 vtail_parameterization_objects[f'{components_name}_sectional_parameterization'] = component_sectional_parameterization
 vtail_parameterization_objects[f'{components_name}_ffd_block'] = component_ffd_block
 
-parameterization_solver.declare_state(name=f'{components_name}_translation_x_coefficients', state=component_parameterization_b_splines[0].coefficients)
-parameterization_solver.declare_state(name=f'{components_name}_translation_y_coefficients', state=component_parameterization_b_splines[1].coefficients)
-parameterization_solver.declare_state(name=f'{components_name}_translation_z_coefficients', state=component_parameterization_b_splines[2].coefficients)
+parameterization_solver.add_parameter(state=component_parameterization_b_splines[0].coefficients)
+parameterization_solver.add_parameter(state=component_parameterization_b_splines[1].coefficients)
+parameterization_solver.add_parameter(state=component_parameterization_b_splines[2].coefficients)
 # endregion
 
 # endregion
@@ -922,42 +913,42 @@ geometry.assign_coefficients(coefficients=component_coefficients, b_spline_names
 parameterization_inputs = {}
 
 # region wing design parameterization inputs
-wingspan = m3l.norm(geometry.evaluate(wing_le_right) - geometry.evaluate(wing_le_left))
-root_chord = m3l.norm(geometry.evaluate(wing_te_center) - geometry.evaluate(wing_le_center))
-tip_chord_left = m3l.norm(geometry.evaluate(wing_te_left) - geometry.evaluate(wing_le_left))
-tip_chord_right = m3l.norm(geometry.evaluate(wing_te_right) - geometry.evaluate(wing_le_right))
+wingspan = csdl.norm(geometry.evaluate(wing_le_right) - geometry.evaluate(wing_le_left))
+root_chord = csdl.norm(geometry.evaluate(wing_te_center) - geometry.evaluate(wing_le_center))
+tip_chord_left = csdl.norm(geometry.evaluate(wing_te_left) - geometry.evaluate(wing_le_left))
+tip_chord_right = csdl.norm(geometry.evaluate(wing_te_right) - geometry.evaluate(wing_le_right))
 
 parameterization_solver.declare_input(name='wingspan', input=wingspan)
 parameterization_solver.declare_input(name='root_chord', input=root_chord)
 parameterization_solver.declare_input(name='tip_chord_left', input=tip_chord_left)
 parameterization_solver.declare_input(name='tip_chord_right', input=tip_chord_right)
 
-parameterization_inputs['wingspan'] = m3l.Variable(name='wingspan', shape=(1,), value=np.array([60.]), dv_flag=True)
-parameterization_inputs['root_chord'] = m3l.Variable(name='root_chord', shape=(1,), value=np.array([5.]), dv_flag=True)
-parameterization_inputs['tip_chord_left'] = m3l.Variable(name='tip_chord_left', shape=(1,), value=np.array([1.]))
-parameterization_inputs['tip_chord_right'] = m3l.Variable(name='tip_chord_right', shape=(1,), value=np.array([1.]))
+parameterization_inputs['wingspan'] = csdl.Variable(name='wingspan', value=np.array([60.]), dv_flag=True)
+parameterization_inputs['root_chord'] = csdl.Variable(name='root_chord', value=np.array([5.]), dv_flag=True)
+parameterization_inputs['tip_chord_left'] = csdl.Variable(name='tip_chord_left', value=np.array([1.]))
+parameterization_inputs['tip_chord_right'] = csdl.Variable(name='tip_chord_right', value=np.array([1.]))
 # endregion
 
 # region h_tail design parameterization inputs
-h_tail_span = m3l.norm(geometry.evaluate(tail_le_right) - geometry.evaluate(tail_le_left))
-h_tail_root_chord = m3l.norm(geometry.evaluate(tail_te_center) - geometry.evaluate(tail_le_center))
-h_tail_tip_chord_left = m3l.norm(geometry.evaluate(tail_te_left) - geometry.evaluate(tail_le_left))
-h_tail_tip_chord_right = m3l.norm(geometry.evaluate(tail_te_right) - geometry.evaluate(tail_le_right))
+h_tail_span = csdl.norm(geometry.evaluate(tail_le_right) - geometry.evaluate(tail_le_left))
+h_tail_root_chord = csdl.norm(geometry.evaluate(tail_te_center) - geometry.evaluate(tail_le_center))
+h_tail_tip_chord_left = csdl.norm(geometry.evaluate(tail_te_left) - geometry.evaluate(tail_le_left))
+h_tail_tip_chord_right = csdl.norm(geometry.evaluate(tail_te_right) - geometry.evaluate(tail_le_right))
 
 parameterization_solver.declare_input(name='h_tail_span', input=h_tail_span)
 parameterization_solver.declare_input(name='h_tail_root_chord', input=h_tail_root_chord)
 parameterization_solver.declare_input(name='h_tail_tip_chord_left', input=h_tail_tip_chord_left)
 parameterization_solver.declare_input(name='h_tail_tip_chord_right', input=h_tail_tip_chord_right)
 
-parameterization_inputs['h_tail_span'] = m3l.Variable(name='h_tail_span', shape=(1,), value=np.array([12.]), dv_flag=True)
-parameterization_inputs['h_tail_root_chord'] = m3l.Variable(name='h_tail_root_chord', shape=(1,), value=np.array([3.]), dv_flag=True)
-parameterization_inputs['h_tail_tip_chord_left'] = m3l.Variable(name='h_tail_tip_chord_left', shape=(1,), value=np.array([2.]))
-parameterization_inputs['h_tail_tip_chord_right'] = m3l.Variable(name='h_tail_tip_chord_right', shape=(1,), value=np.array([2.]))
+parameterization_inputs['h_tail_span'] = csdl.Variable(name='h_tail_span', value=np.array([12.]), dv_flag=True)
+parameterization_inputs['h_tail_root_chord'] = csdl.Variable(name='h_tail_root_chord', value=np.array([3.]), dv_flag=True)
+parameterization_inputs['h_tail_tip_chord_left'] = csdl.Variable(name='h_tail_tip_chord_left', value=np.array([2.]))
+parameterization_inputs['h_tail_tip_chord_right'] = csdl.Variable(name='h_tail_tip_chord_right', value=np.array([2.]))
 # endregion
 
 # region tail moment arm inputs
-tail_moment_arm = m3l.norm(geometry.evaluate(tail_qc) - geometry.evaluate(wing_qc))
-# tail_moment_arm = m3l.norm(geometry.evaluate(fuselage_tail_te_center) - geometry.evaluate(fuselage_wing_te_center))
+tail_moment_arm = csdl.norm(geometry.evaluate(tail_qc) - geometry.evaluate(wing_qc))
+# tail_moment_arm = csdl.norm(geometry.evaluate(fuselage_tail_te_center) - geometry.evaluate(fuselage_wing_te_center))
 
 wing_fuselage_connection = geometry.evaluate(wing_te_center) - geometry.evaluate(fuselage_wing_te_center)
 h_tail_fuselage_connection = geometry.evaluate(tail_te_center) - geometry.evaluate(fuselage_tail_te_center)
@@ -966,27 +957,27 @@ parameterization_solver.declare_input(name='tail_moment_arm', input=tail_moment_
 parameterization_solver.declare_input(name='wing_to_fuselage_connection', input=wing_fuselage_connection)
 parameterization_solver.declare_input(name='h_tail_to_fuselage_connection', input=h_tail_fuselage_connection)
 
-parameterization_inputs['tail_moment_arm'] = m3l.Variable(name='tail_moment_arm', shape=(1,), value=np.array([25.]), dv_flag=True)
-parameterization_inputs['wing_to_fuselage_connection'] = m3l.Variable(name='wing_to_fuselage_connection', shape=(3,), value=wing_fuselage_connection.value)
-parameterization_inputs['h_tail_to_fuselage_connection'] = m3l.Variable(name='h_tail_to_fuselage_connection', shape=(3,), value=h_tail_fuselage_connection.value)
+parameterization_inputs['tail_moment_arm'] = csdl.Variable(name='tail_moment_arm', value=np.array([25.]), dv_flag=True)
+parameterization_inputs['wing_to_fuselage_connection'] = csdl.Variable(name='wing_to_fuselage_connection', value=wing_fuselage_connection.value)
+parameterization_inputs['h_tail_to_fuselage_connection'] = csdl.Variable(name='h_tail_to_fuselage_connection', value=h_tail_fuselage_connection.value)
 # endregion
 
 # region v-tail inputs
 vtail_parametric = geometry.evaluate(v_tail.project(np.array([30.543, 0., 8.231])))
 vtail_fuselage_connection = geometry.evaluate(fueslage_rear_points_parametric) - vtail_parametric
 parameterization_solver.declare_input(name='vtail_fuselage_connection', input=vtail_fuselage_connection)
-parameterization_inputs['vtail_fuselage_connection'] = m3l.Variable(name='vtail_fuselage_connection', shape=(3,), value=vtail_fuselage_connection.value)
+parameterization_inputs['vtail_fuselage_connection'] = csdl.Variable(name='vtail_fuselage_connection', value=vtail_fuselage_connection.value)
 # endregion
 
 # region lift + pusher rotor parameterization inputs
 pusher_fuselage_connection = geometry.evaluate(fueslage_rear_points_parametric) - geometry.evaluate(fuselage_rear_point_on_pusher_disk_parametric)
 parameterization_solver.declare_input(name='fuselage_pusher_connection', input=pusher_fuselage_connection)
-parameterization_inputs['fuselage_pusher_connection'] = m3l.Variable(name='fuselage_pusher_connection', shape=(3,), value=pusher_fuselage_connection.value)
+parameterization_inputs['fuselage_pusher_connection'] = csdl.Variable(name='fuselage_pusher_connection', value=pusher_fuselage_connection.value)
 
-flo_radius = fro_radius = front_outer_radius = m3l.Variable(name='front_outer_radius', shape=(1, ), value=10/2, dv_flag=False, lower=5/2, upper=15/2, scaler=1e-1)
-fli_radius = fri_radius = front_inner_radius = m3l.Variable(name='front_inner_radius', shape=(1, ), value=10/2, dv_flag=False, lower=5/2, upper=15/2, scaler=1e-1)
-rlo_radius = rro_radius = rear_outer_radius = m3l.Variable(name='rear_outer_radius',  shape=(1, ),value=10/2, dv_flag=False, lower=5/2, upper=15/2, scaler=1e-1)
-rli_radius = rri_radius = rear_inner_radius = m3l.Variable(name='rear_inner_radius', shape=(1, ), value=10/2, dv_flag=False, lower=5/2, upper=15/2, scaler=1e-1)
+flo_radius = fro_radius = front_outer_radius = csdl.Variable(name='front_outer_radiu ), value=10/2, dv_flag=False, lower=5/2, upper=15/2, scaler=1e-1)
+fli_radius = fri_radius = front_inner_radius = csdl.Variable(name='front_inner_radiu ), value=10/2, dv_flag=False, lower=5/2, upper=15/2, scaler=1e-1)
+rlo_radius = rro_radius = rear_outer_radius = csdl.Variable(name='rear_outer_radius',  shape=(1, ),value=10/2, dv_flag=False, lower=5/2, upper=15/2, scaler=1e-1)
+rli_radius = rri_radius = rear_inner_radius = csdl.Variable(name='rear_inner_radiu ), value=10/2, dv_flag=False, lower=5/2, upper=15/2, scaler=1e-1)
 dv_radius_list = [rlo_radius, rli_radius, rri_radius, rro_radius, flo_radius, fli_radius, fri_radius, fro_radius]
 
 disk_centers = [rlo_disk_center, rli_disk_center, rri_disk_center, rro_disk_center, flo_disk_center, fli_disk_center, fri_disk_center, fro_disk_center]
@@ -1004,10 +995,10 @@ for i in range(len(disk_centers)):
     parameterization_solver.declare_input(name=rotor_prefixes[i]+'_r1', input=radius_1_list[i])
     parameterization_solver.declare_input(name=rotor_prefixes[i]+'_r2', input=radius_2_list[i])
     
-    parameterization_inputs[rotor_prefixes[i]+'_lift_rotor_connection'] = m3l.Variable(name=rotor_prefixes[i]+'_lift_rotor_connection', shape=(3,), value=disk_connection.value)
-    parameterization_inputs[rotor_prefixes[i]+'_wing_boom_connection'] = m3l.Variable(name=rotor_prefixes[i]+'_wing_boom_connection', shape=(3,), value=boom_connection.value)
-    parameterization_inputs[rotor_prefixes[i]+'_r1'] = m3l.Variable(name=rotor_prefixes[i]+'_r1', shape=(1,), value=3.5)
-    parameterization_inputs[rotor_prefixes[i]+'_r2'] = m3l.Variable(name=rotor_prefixes[i]+'_r2', shape=(1,), value=3.5)
+    parameterization_inputs[rotor_prefixes[i]+'_lift_rotor_connection'] = csdl.Variable(name=rotor_prefixes[i]+'_lift_rotor_connection', value=disk_connection.value)
+    parameterization_inputs[rotor_prefixes[i]+'_wing_boom_connection'] = csdl.Variable(name=rotor_prefixes[i]+'_wing_boom_connection', value=boom_connection.value)
+    parameterization_inputs[rotor_prefixes[i]+'_r1'] = csdl.Variable(name=rotor_prefixes[i]+'_r1', value=3.5)
+    parameterization_inputs[rotor_prefixes[i]+'_r2'] = csdl.Variable(name=rotor_prefixes[i]+'_r2', value=3.5)
 
 # endregion
 
@@ -1056,9 +1047,9 @@ sectional_h_tail_span_stretch = h_tail_span_stretch_b_spline.evaluate(section_pa
 sectional_h_tail_translation_x = h_tail_translation_x_b_spline.evaluate(section_parametric_coordinates)
 sectional_h_tail_translation_z = h_tail_translation_z_b_spline.evaluate(section_parametric_coordinates)
 
-h_tail_twist_coefficients = m3l.Variable(name='h_tail_twist_coefficients', shape=(5,), value=np.array([0., 0., 0., 0., 0.]))
-h_tail_twist_b_spline = bsp.BSpline(name='h_tail_twist_b_spline', space=cubic_b_spline_curve_5_dof_space,
-                                          coefficients=h_tail_twist_coefficients, num_physical_dimensions=1)
+h_tail_twist_coefficients = csdl.Variable(name='h_tail_twist_coefficients', shape=(5,), value=np.array([0., 0., 0., 0., 0.]))
+h_tail_twist_b_spline = lfs.Function(name='h_tail_twist_b_spline', space=cubic_b_spline_curve_5_dof_space,
+                                          coefficients=h_tail_twist_coefficients)
 sectional_h_tail_twist = h_tail_span_stretch_b_spline.evaluate(section_parametric_coordinates)
 
 sectional_parameters = {
@@ -1235,19 +1226,14 @@ geometry.plot()
 # region Mesh Evaluation
 upper_surface_wireframe = geometry.evaluate(upper_surface_wireframe_parametric)
 lower_surface_wireframe = geometry.evaluate(lower_surface_wireframe_parametric)
-vlm_mesh = m3l.linspace(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((num_chordwise_vlm, num_spanwise_vlm, 3))
-dummy_objective = m3l.norm(vlm_mesh.reshape((-1,)))
+vlm_mesh = csdl.linspace(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((num_chordwise_vlm, num_spanwise_vlm, 3))
+dummy_objective = csdl.norm(vlm_mesh.reshape((-1,)))
 # endregion
 
 # endregion
-# m3l_model.register_output(geometry.coefficients)
-m3l_model.register_output(vlm_mesh)
-m3l_model.register_output(dummy_objective)
-# m3l_model.add_objective(dummy_objective)
-
-csdl_model = m3l_model.assemble()
-sim = Simulator(csdl_model)
-sim.run()
+# No simulator implemented yet
+# sim = Simulator(csdl_model)
+# sim.run()
 print(geometry.coefficients.operation.name)
 print(geometry.coefficients.name)
 
