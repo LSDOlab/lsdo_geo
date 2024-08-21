@@ -13,6 +13,13 @@ import lsdo_geo as lg
 
 @dataclass
 class Geometry(lfs.FunctionSet):
+    representations:dict[str,lg.Mesh] = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.representations is None:
+            self.representations = {}
+
 
     def copy(self):
         '''
@@ -20,12 +27,52 @@ class Geometry(lfs.FunctionSet):
         '''
         function_set = super().copy()
         geometry_copy = Geometry(functions=function_set.functions, function_names=function_set.function_names, name=self.name,
-                                    space=function_set.space)
+                                    space=function_set.space, representations=self.representations)
         return geometry_copy
 
     
     def get_function_space(self):
         return self.space
+    
+
+    def add_representation(self, representation:lg.Mesh):
+        '''
+        Adds a representation to the geometry.
+
+        Parameters
+        ----------
+        name : str
+            The name of the representation.
+        representation : lg.Mesh
+            The representation to add.
+        '''
+        self.representations[representation.name] = representation
+
+    
+    def evaluate_representations(self, representations:list[lg.Mesh], plot:bool=False) -> list[csdl.Variable]:
+        '''
+        Evaluates a representation or a list of representations.
+
+        Parameters
+        ----------
+        name : str
+            The name of the representation.
+        plot : bool, optional
+            Whether or not to plot the representation.
+        '''
+        if isinstance(representations, lg.Mesh):
+            representations = [representations]
+
+        evaluated_representations = []
+        for representation in representations:
+            representation = self.representations[representation.name]
+            evaluated_representations.append(representation.evaluate(self, plot=plot))
+
+        if len(evaluated_representations) == 1:
+            evaluated_representation = evaluated_representations[0]
+            return evaluated_representation
+        
+        return evaluated_representations
     
 
     def declare_component(self, function_indices:list[int]=None, function_search_names:list[str]=None, ignore_names:list[str]=[], name:str=None) -> lg.Geometry:
@@ -64,18 +111,18 @@ class Geometry(lfs.FunctionSet):
         component_copy = component.copy()
         return component_copy
     
-    def copy(self) -> lg.Geometry:
-        '''
-        Copies the function set.
+    # def copy(self) -> lg.Geometry:
+    #     '''
+    #     Copies the function set.
 
-        Returns
-        -------
-        function_set : lfs.FunctionSet
-            The copied function set.
-        '''
-        functions = {i:function.copy() for i, function in self.functions.items()}
-        function_set = lg.Geometry(functions=functions, function_names=self.function_names, name=self.name)
-        return function_set
+    #     Returns
+    #     -------
+    #     function_set : lfs.FunctionSet
+    #         The copied function set.
+    #     '''
+    #     functions = {i:function.copy() for i, function in self.functions.items()}
+    #     function_set = lg.Geometry(functions=functions, function_names=self.function_names, name=self.name)
+    #     return function_set
 
     # def import_geometry(self, file_name:str):
     #     '''
