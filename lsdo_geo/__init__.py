@@ -1,10 +1,10 @@
-from lsdo_geo.core.geometry.geometry import Geometry
-from lsdo_geo.core.geometry.geometry_functions import *
-from lsdo_geo.core.geometry.mesh import Mesh
-from lsdo_geo.core.parameterization.free_form_deformation_functions import *
-from lsdo_geo.core.parameterization.ffd_block import FFDBlock
-from lsdo_geo.core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization, VolumeSectionalParameterizationInputs
-from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver, GeometricVariables
+from .core.geometry.geometry import Geometry
+from .core.geometry.geometry_functions import *
+from .core.geometry.mesh import Mesh
+from .core.parameterization.free_form_deformation_functions import *
+from .core.parameterization.ffd_block import FFDBlock
+from .core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization, VolumeSectionalParameterizationInputs
+from .core.parameterization.parameterization_solver import ParameterizationSolver, GeometricVariables
 
 from pathlib import Path
 
