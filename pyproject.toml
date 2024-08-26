@@ -36,5 +36,8 @@ docs = [
     'sphinxcontrib-bibtex',
 ]
 
+[tool.setuptools]
+package-dir = {"" = "."}
+
 [tool.setuptools.packages.find]
 exclude = ["tutorials"]
