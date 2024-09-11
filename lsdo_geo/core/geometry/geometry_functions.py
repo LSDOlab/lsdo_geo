@@ -25,7 +25,7 @@ def import_geometry(file_name:str, name:str='geometry', parallelize:bool=True, s
 def rotate(points:csdl.Variable, axis_origin:csdl.Variable, axis_vector:csdl.Variable, angles:csdl.Variable, units:str='radians') -> csdl.Variable:
     points_out_shape = None
     if len(points.shape) == 1:
-        print("Rotating points is in vector format, so rotation is assuming 3d and reshaping into (-1,3)")
+        # print("Rotating points is in vector format, so rotation is assuming 3d and reshaping into (-1,3)")
         points = points.reshape((points.size//3,3))
     if len(points.shape) > 2:
         points_out_shape = points.shape
@@ -37,6 +37,68 @@ def rotate(points:csdl.Variable, axis_origin:csdl.Variable, axis_vector:csdl.Var
     if type(axis_origin) is np.ndarray:
         axis_origin = csdl.Variable(shape=axis_origin.shape, value=axis_origin)
     
+    # If axis vector is aligned with x, y, or z axis, then instead using rotation matrix (more efficient)
+    if isinstance(axis_vector, np.ndarray):
+        origin_expanded = csdl.expand(axis_origin, points.shape, 'i->ji')
+        if np.allclose(axis_vector, np.array([1,0,0])) or np.allclose(axis_vector, np.array([-1,0,0])):
+            if np.allclose(axis_vector, np.array([-1,0,0])):
+                angles = -angles
+            # rotation_matrix = np.array([[1, 0, 0],
+            #                             [0, np.cos(angles), -np.sin(angles)],
+            #                             [0, np.sin(angles), np.cos(angles)]])
+            # rotated_points = np.dot(points, rotation_matrix)
+            cos_angle = csdl.cos(angles)
+            sin_angle = csdl.sin(angles)
+            rotation_matrix = csdl.Variable(shape=(3,3), value=0.)
+            rotation_matrix = rotation_matrix.set(csdl.slice[0,0], 1)
+            rotation_matrix = rotation_matrix.set(csdl.slice[1,1], cos_angle)
+            rotation_matrix = rotation_matrix.set(csdl.slice[1,2], sin_angle)
+            rotation_matrix = rotation_matrix.set(csdl.slice[2,1], -sin_angle)
+            rotation_matrix = rotation_matrix.set(csdl.slice[2,2], cos_angle)
+            # rotated_points = csdl.tensordot(points, rotation_matrix, axes=([-1], [0]))
+            rotated_points = csdl.matmat(points - origin_expanded, rotation_matrix)
+            rotated_points = rotated_points + origin_expanded
+            return rotated_points
+        elif np.allclose(axis_vector, np.array([0,1,0])) or np.allclose(axis_vector, np.array([0,-1,0])):
+            if np.allclose(axis_vector, np.array([0,-1,0])):
+                angles = -angles
+            # rotation_matrix = np.array([[np.cos(angles), 0, np.sin(angles)],
+            #                             [0, 1, 0],
+            #                             [-np.sin(angles), 0, np.cos(angles)]])
+            # rotated_points = np.dot(points, rotation_matrix)
+            cos_angle = csdl.cos(angles)
+            sin_angle = csdl.sin(angles)
+            rotation_matrix = csdl.Variable(shape=(3,3), value=0.)
+            rotation_matrix = rotation_matrix.set(csdl.slice[0,0], cos_angle)
+            rotation_matrix = rotation_matrix.set(csdl.slice[0,2], -sin_angle)
+            rotation_matrix = rotation_matrix.set(csdl.slice[1,1], 1)
+            rotation_matrix = rotation_matrix.set(csdl.slice[2,0], sin_angle)
+            rotation_matrix = rotation_matrix.set(csdl.slice[2,2], cos_angle)
+            # rotated_points = csdl.tensordot(points, rotation_matrix, axes=([-1], [0]))
+            rotated_points = csdl.matmat(points - origin_expanded, rotation_matrix)
+            rotated_points = rotated_points + origin_expanded
+            return rotated_points
+        elif np.allclose(axis_vector, np.array([0,0,1])) or np.allclose(axis_vector, np.array([0,0,-1])):
+            if np.allclose(axis_vector, np.array([0,-1,0])):
+                angles = -angles
+            # rotation_matrix = np.array([[np.cos(angles), -np.sin(angles), 0],
+            #                             [np.sin(angles), np.cos(angles), 0],
+            #                             [0, 0, 1]])
+            # rotated_points = np.dot(points, rotation_matrix)
+            cos_angle = csdl.cos(angles)
+            sin_angle = csdl.sin(angles)
+            rotation_matrix = csdl.Variable(shape=(3,3), value=0.)
+            rotation_matrix = rotation_matrix.set(csdl.slice[0,0], cos_angle)
+            rotation_matrix = rotation_matrix.set(csdl.slice[0,1], sin_angle)
+            rotation_matrix = rotation_matrix.set(csdl.slice[1,0], -sin_angle)
+            rotation_matrix = rotation_matrix.set(csdl.slice[1,1], cos_angle)
+            rotation_matrix = rotation_matrix.set(csdl.slice[2,2], 1)
+            # rotated_points = csdl.tensordot(points, rotation_matrix, axes=([-1], [0]))
+            rotated_points = csdl.matmat(points - origin_expanded, rotation_matrix)
+            rotated_points = rotated_points + origin_expanded
+            return rotated_points
+
+
     if isinstance(axis_vector, np.ndarray):
         axis_vector = csdl.Variable(shape=axis_vector.shape, value=axis_vector)
 

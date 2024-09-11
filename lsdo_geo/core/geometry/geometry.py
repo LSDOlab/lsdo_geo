@@ -65,7 +65,7 @@ class Geometry(lfs.FunctionSet):
 
         evaluated_representations = []
         for representation in representations:
-            representation = self.representations[representation.name]
+            # representation = self.representations[representation.name]
             evaluated_representations.append(representation.evaluate(self, plot=plot))
 
         if len(evaluated_representations) == 1:
@@ -180,8 +180,8 @@ class Geometry(lfs.FunctionSet):
         
         if isinstance(axis_origin, np.ndarray):
             axis_origin = csdl.Variable(shape=axis_origin.shape, value=axis_origin)
-        if type(axis_vector) is np.ndarray:
-            axis_vector = csdl.Variable(shape=axis_vector.shape, value=axis_vector)
+        # if type(axis_vector) is np.ndarray:
+        #     axis_vector = csdl.Variable(shape=axis_vector.shape, value=axis_vector)
         if type(angles) is np.ndarray:
             angles = csdl.Variable(shape=angles.shape, value=angles)
 
@@ -194,7 +194,7 @@ class Geometry(lfs.FunctionSet):
         #     )
         #     function.coefficients = rotated_coefficients.reshape(function.coefficients.shape)
 
-        # # Vectorized:
+        # Vectorized:
         if len(function_indices) == 1:
             function = self.functions[function_indices[0]]
             rotated_coefficients = rotate_function(

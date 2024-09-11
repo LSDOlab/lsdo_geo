@@ -108,7 +108,7 @@ def construct_tight_fit_ffd_block(entities:list[Union[np.ndarray, csdl.Variable,
     enclosure_top_points = enclosure_ffd_block.evaluate(parametric_coordinates=parametric_coordinates_top, non_csdl=True)
     # ffd_bot_points = bot_evaluation_matrix.dot(b_spline_hyper_volume.coefficients.value)
 
-    top_points_on_wing = entities[0].project(enclosure_top_points, direction=sampling_projection_direction, plot=True)
+    top_points_on_wing = entities[0].project(enclosure_top_points, direction=sampling_projection_direction, plot=False)
     # bot_points_on_wing = entities[0].project(ffd_bot_points, direction=sampling_projection_direction)
 
     # identify key surfaces
