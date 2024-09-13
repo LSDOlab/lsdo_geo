@@ -28,6 +28,7 @@ geometry = lsdo_geo.import_geometry(
     # "examples/example_geometries/simple_wing.stp",
     parallelize=False,
 )
+# geometry.plot()
 
 # dummy_basis_matrix1 = geometry.functions[3].space.compute_basis_matrix(np.array([0., 0.5]))
 # dummy_basis_matrix2 = geometry.functions[9].space.compute_basis_matrix(np.array([0., 0.5]))
@@ -136,7 +137,7 @@ sectional_parameters.add_sectional_rotation(axis=1, rotation=twist_sectional_par
 
 ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=False)    # TODO: Fix plot function
 ffd_coefficients.name = 'ffd_coefficients'
-ffd_coefficients._save = True
+# ffd_coefficients._save = True
 
 geometry_coefficients = ffd_block.evaluate(ffd_coefficients, plot=False)
 print(geometry_coefficients)
@@ -187,20 +188,20 @@ root_chord_outer_dv = csdl.Variable(shape=(1,), value=np.array([2.0]))
 tip_chord_outer_dv = csdl.Variable(shape=(1,), value=np.array([0.5]))
 sweep_angle_outer_dv = csdl.Variable(shape=(1,), value=np.array([45*np.pi/180]))
 
-wingspan_constraint = wingspan - wingspan_outer_dv
-wingspan_constraint.add_name('wingspan_constraint')
-root_chord_constraint = root_chord - root_chord_outer_dv
-root_chord_constraint.add_name('root_chord_constraint')
-tip_chord_left_constraint = tip_chord_left - tip_chord_outer_dv
-tip_chord_left_constraint.add_name('tip_chord_left_constraint')
-tip_chord_right_constraint = tip_chord_right - tip_chord_outer_dv
-tip_chord_right_constraint.add_name('tip_chord_right_constraint')
-sweep_angle_left_constraint = sweep_angle_left - sweep_angle_outer_dv
-sweep_angle_left_constraint.add_name('sweep_angle_left_constraint')
-sweep_angle_right_constraint = sweep_angle_right - sweep_angle_outer_dv
-sweep_angle_right_constraint.add_name('sweep_angle_right_constraint')
+# wingspan_constraint = wingspan - wingspan_outer_dv
+# wingspan_constraint.add_name('wingspan_constraint')
+# root_chord_constraint = root_chord - root_chord_outer_dv
+# root_chord_constraint.add_name('root_chord_constraint')
+# tip_chord_left_constraint = tip_chord_left - tip_chord_outer_dv
+# tip_chord_left_constraint.add_name('tip_chord_left_constraint')
+# tip_chord_right_constraint = tip_chord_right - tip_chord_outer_dv
+# tip_chord_right_constraint.add_name('tip_chord_right_constraint')
+# sweep_angle_left_constraint = sweep_angle_left - sweep_angle_outer_dv
+# sweep_angle_left_constraint.add_name('sweep_angle_left_constraint')
+# sweep_angle_right_constraint = sweep_angle_right - sweep_angle_outer_dv
+# sweep_angle_right_constraint.add_name('sweep_angle_right_constraint')
 
-geometry.plot()
+# geometry.plot()
 
 # from lsdo_geo.csdl.optimization import Optimization, NewtonOptimizer
 # geometry_optimization = Optimization()
@@ -245,14 +246,16 @@ print("Chord Stretching: ", chord_stretching_b_spline.coefficients.value)
 print("Wingspan Stretching: ", wingspan_stretching_b_spline.coefficients.value)
 print("Sweep Translation: ", sweep_translation_b_spline.coefficients.value)
 
-geometry_solver.evaluate(geometric_variables)
-
-rotation_axis = np.array([0., 0., 1.])
-rotation_origin = geometry.project(np.array([0.0, 0.0, 0.0]))
-rotation_angle = 45
-geometry.rotate(rotation_origin, rotation_axis, rotation_angle)
-
 geometry.plot()
+geometry_solver.evaluate(geometric_variables)
+geometry.plot()
+
+
+# rotation_axis = np.array([0., 0., 1.])
+# rotation_origin = geometry.project(np.array([0.0, 0.0, 0.0]))
+# rotation_angle = 45
+# geometry.rotate(rotation_origin, rotation_axis, rotation_angle)
+
 
 print("Wingspan: ", wingspan.value)
 print("Root Chord: ", root_chord.value)
