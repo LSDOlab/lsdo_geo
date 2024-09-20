@@ -142,6 +142,8 @@ class FFDBlock(lfs.Function):
 
             if len(outputs) == 1:
                 return outputs[0]
+            else:
+                return outputs
         else:   # Perform Standard Function Evaluation
             return super().evaluate(parametric_coordinates=parametric_coordinates, parametric_derivative_orders=parametric_derivative_orders,
                              coefficients=coefficients, plot=plot, non_csdl=non_csdl)

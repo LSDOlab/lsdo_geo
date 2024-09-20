@@ -313,7 +313,7 @@ class Geometry(lfs.FunctionSet):
                 
                 if 'wireframe' in mesh_plot_types:
                     num_points = np.cumprod(points.shape[:-1])[-1]
-                    plotting_elements.append(vedo.Points(points.reshape((num_points,-1)), r=12).color(mesh_color))
+                    plotting_elements.append(vedo.Points(points.reshape((num_points,-1)), r=20).color(mesh_color))
                 continue
 
             if ('surface' in mesh_plot_types or 'wireframe' in mesh_plot_types) and len(points.shape) == 3: # If it's a surface
