@@ -29,6 +29,8 @@ class Optimization:
         '''
         Add the objective variable to the optimization problem.
         '''
+        if objective.size != 1:
+            raise ValueError('Objective must be a scalar variable.')
         self.objective = objective
 
 

@@ -28,7 +28,7 @@ geometry = lsdo_geo.import_geometry(
     # "examples/example_geometries/simple_wing.stp",
     parallelize=False,
 )
-# geometry.plot()
+geometry.plot()
 
 # dummy_basis_matrix1 = geometry.functions[3].space.compute_basis_matrix(np.array([0., 0.5]))
 # dummy_basis_matrix2 = geometry.functions[9].space.compute_basis_matrix(np.array([0., 0.5]))
@@ -66,12 +66,14 @@ trailing_edge_parametric = geometry.project(points_to_project_on_trailing_edge, 
 trailing_edge_physical = geometry.evaluate(trailing_edge_parametric)
 
 chord_surface = csdl.linear_combination(leading_edge_physical, trailing_edge_physical, num_chordwise).value.reshape((num_chordwise, num_spanwise, 3))
-upper_surface_wireframe_parametric = geometry.project(chord_surface + np.array([0., 0., 1]), direction=np.array([0., 0., -1.]), plot=False)
-lower_surface_wireframe_parametric = geometry.project(chord_surface - np.array([0., 0., 1]), direction=np.array([0., 0., -1.]), plot=False)
+upper_surface_wireframe_parametric = geometry.project(chord_surface + np.array([0., 0., 1]), direction=np.array([0., 0., -1.]),
+                                                      grid_search_density_parameter=10, plot=True)
+lower_surface_wireframe_parametric = geometry.project(chord_surface - np.array([0., 0., 1]), direction=np.array([0., 0., -1.]),
+                                                      grid_search_density_parameter=10, plot=True)
 upper_surface_wireframe = geometry.evaluate(upper_surface_wireframe_parametric, plot=False)
-lower_surface_wireframe = geometry.evaluate(lower_surface_wireframe_parametric)
+lower_surface_wireframe = geometry.evaluate(lower_surface_wireframe_parametric, plot=False)
 camber_surface = csdl.linear_combination(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((num_chordwise, num_spanwise, 3))
-# geometry.plot_meshes([camber_surface])
+geometry.plot_meshes([camber_surface])
 # endregion
 
 # endregion

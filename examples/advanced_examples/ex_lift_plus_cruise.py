@@ -473,9 +473,9 @@ leading_edge_line = geometry.evaluate(leading_edge_line_parametric)
 trailing_edge_line = geometry.evaluate(trailing_edge_line_parametric)
 chord_surface = csdl.linear_combination(leading_edge_line, trailing_edge_line, wing_num_chordwise_vlm)
 wing_upper_surface_wireframe_parametric = wing.project(chord_surface.value.reshape((wing_num_chordwise_vlm,wing_num_spanwise_vlm,3))+np.array([0., 0., 1.]), 
-                                       direction=np.array([0., 0., -1.]), plot=False, grid_search_density_parameter=20.)
+                                       direction=np.array([0., 0., -1.]), plot=False, grid_search_density_parameter=10.)
 wing_lower_surface_wireframe_parametric = wing.project(chord_surface.value.reshape((wing_num_chordwise_vlm,wing_num_spanwise_vlm,3))+np.array([0., 0., -1.]), 
-                                       direction=np.array([0., 0., 1.]), plot=False, grid_search_density_parameter=20.)
+                                       direction=np.array([0., 0., 1.]), plot=False, grid_search_density_parameter=10.)
 upper_surface_wireframe = geometry.evaluate(wing_upper_surface_wireframe_parametric)
 lower_surface_wireframe = geometry.evaluate(wing_lower_surface_wireframe_parametric)
 wing_camber_surface = csdl.linear_combination(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((wing_num_chordwise_vlm, wing_num_spanwise_vlm, 3))

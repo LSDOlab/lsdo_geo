@@ -5,8 +5,8 @@ from lsdo_geo.core.geometry.geometry import Geometry
 from typing import Union
 import scipy.sparse as sps
 
-from dataclasses import dataclass
-@dataclass
+# from dataclasses import dataclass
+# @dataclass
 class FFDBlock(lfs.Function):
     '''
     Free-form deformation block class.
@@ -29,11 +29,14 @@ class FFDBlock(lfs.Function):
     embedded_entity_parametric_coordinates : list[np.ndarray] -- list_length=len(embedded_entities), array_shape=(num_points, num_parametric_dimensions)
         The parametric coordinates for each of the embedded entities.
     '''
-    embedded_entities : list[Union[csdl.Variable,Geometry,lfs.Function,lfs.FunctionSet]] = None
-    embedded_entity_parametric_coordinates : list[np.ndarray] = None
 
-    def __post_init__(self):
-        super().__post_init__()
+    def __init__(self, space:lfs.FunctionSpace, coefficients:csdl.Variable=None, name:str=None,
+                    embedded_entities:list[Union[csdl.Variable,Geometry,lfs.Function,lfs.FunctionSet]]=None,
+                    embedded_entity_parametric_coordinates:list[np.ndarray]=None):
+
+        super().__init__(space=space, coefficients=coefficients, name=name)
+        self.embedded_entities = embedded_entities
+        self.embedded_entity_parametric_coordinates = embedded_entity_parametric_coordinates
 
         if not isinstance(self.embedded_entities, list):
             self.embedded_entities = [self.embedded_entities]
@@ -66,14 +69,14 @@ class FFDBlock(lfs.Function):
                 raise ValueError(f'Unsupported entity type: {type(entity)}')
 
             if not isinstance(embedded_points, list):
-                embedded_points_parametric_coordinates = self.project(points=embedded_points, force_reproject=True)
+                embedded_points_parametric_coordinates = self.project(points=embedded_points, projection_tolerance=1e-4, force_reproject=False)
                 self.embedded_entity_parametric_coordinates.append(embedded_points_parametric_coordinates)
                 # entity_basis_matrix = self.space.compute_basis_matrix(parametric_coordinates=embedded_points_parametric_coordinates)
                 # self.basis_matrices.append(entity_basis_matrix)
             else:
                 entity_parametric_coordinates = []
                 for points in embedded_points:
-                    embedded_points_parametric_coordinates = self.project(points=points)
+                    embedded_points_parametric_coordinates = self.project(points=points, projection_tolerance=1e-4)
                     entity_parametric_coordinates.append(embedded_points_parametric_coordinates)
                 self.embedded_entity_parametric_coordinates.append(entity_parametric_coordinates)
                 #     entity_basis_matrix = self.space.compute_basis_matrix(parametric_coordinates=embedded_points_parametric_coordinates)
