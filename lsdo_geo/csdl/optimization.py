@@ -71,7 +71,7 @@ class Optimization:
         lagrangian = self.objective
         for constraint, penalty in zip(self.constraints, self.constraint_penalties):
             if penalty is not None:
-                lagrangian += penalty*constraint
+                lagrangian += penalty*csdl.vdot(constraint, constraint)
                 self.lagrange_multipliers.append(None)
             else:
                 constraint_lagrange_multipliers = csdl.Variable(shape=(constraint.size,), value=0.,

@@ -14,16 +14,40 @@ class GeometricVariables:
     '''
     computed_values : list[csdl.Variable] = None
     desired_values : list[csdl.Variable] = None
+    penalty_values: list[csdl.Variable] = None
 
     def __post_init__(self):
         if self.computed_values is None:
             self.computed_values = []
         if self.desired_values is None:
             self.desired_values = []
+        if self.penalty_values is None:
+            self.penalty_values = []
+        if len(self.computed_values) != len(self.desired_values):
+            raise ValueError('The computed and desired values must be the same length.')
+        if len(self.computed_values) != len(self.penalty_values):
+            raise ValueError('The computed and penalty values must be the same length.')
+        if len(self.desired_values) != len(self.penalty_values):
+            raise ValueError('The desired and penalty values must be the same length.')
 
-    def add_variable(self, computed_value:csdl.Variable, desired_value:csdl.Variable):
+    def add_variable(self, computed_value:csdl.Variable, desired_value:csdl.Variable, penalty_value:csdl.Variable=None):
+        '''
+        Add a geometric variable to the parameterization problem.
+        Parameters
+        ----------
+        computed_value : csdl.Variable
+            The computed value of the geometric variable. This is the quantity as computed from the geometry.
+            This will be driven to the desired value.
+        desired_value : csdl.Variable
+            The desired value of the geometric variable. This is usually the csdl variable that is the design variable from the optimizer, or can
+            be a constant input (like any other csdl variable).
+        penalty_value : csdl.Variable, optional
+            The penalty to be applied to the constraint, by default None. If None, lagrange multipliers are used.
+            If not None, the penalty is the scaling factor for a quadratic constraint penalty term.
+        '''        
         self.computed_values.append(computed_value)
         self.desired_values.append(desired_value)
+        self.penalty_values.append(penalty_value)
 
 
 class ParameterizationSolver:
@@ -97,8 +121,14 @@ class ParameterizationSolver:
             The computed values of the geometric variables. 
             NOTE: This will return the exact same parameter variables that were added because CSDL updates the state variables in place.
         '''
-        for computed_value, desired_value in zip(geometric_variables.computed_values, geometric_variables.desired_values):
-            self.add_variable(computed_value, desired_value)
+        # for computed_value, desired_value in zip(geometric_variables.computed_values, geometric_variables.desired_values):
+        for i in range(len(geometric_variables.computed_values)):
+            computed_value = geometric_variables.computed_values[i]
+            desired_value = geometric_variables.desired_values[i]
+            penalty_value = geometric_variables.penalty_values[i]
+            self.add_variable(computed_value, desired_value, penalty_value)
+        for parameter, cost in zip(self.parameters, self.parameter_costs):
+            self.add_parameter(parameter, cost)
 
         self.setup()
         self.optimizer.run()
