@@ -91,12 +91,14 @@ class ParameterizationSolver:
         cost : Union[float,np.ndarray,csdl.Variable], optional
             The cost of the parameter. This is the scaling factor for the quadratic cost/objective function.
         '''
-        self.optimization.add_design_variable(parameter)
+        # self.optimization.add_design_variable(parameter)
         self.parameters.append(parameter)
         self.parameter_costs.append(cost)
 
 
     def setup(self):
+        for parameter in self.parameters:
+            self.optimization.add_design_variable(parameter)
         objective = 0
         for parameter, cost in zip(self.parameters, self.parameter_costs):
             objective = objective + csdl.vdot(parameter, cost*parameter)
@@ -127,8 +129,8 @@ class ParameterizationSolver:
             desired_value = geometric_variables.desired_values[i]
             penalty_value = geometric_variables.penalty_values[i]
             self.add_variable(computed_value, desired_value, penalty_value)
-        for parameter, cost in zip(self.parameters, self.parameter_costs):
-            self.add_parameter(parameter, cost)
+        # for parameter, cost in zip(self.parameters, self.parameter_costs):
+        #     self.add_parameter(parameter, cost)
 
         self.setup()
         self.optimizer.run()
