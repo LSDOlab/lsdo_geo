@@ -85,13 +85,13 @@ space_of_linear_3_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, 
 space_of_linear_2_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
 
 chord_stretching_b_spline = lfs.Function(space=space_of_linear_3_dof_b_splines,
-                                         coefficients=csdl.ImplicitVariable(shape=(3,), value=np.array([-0.8, 3., -0.8])), name='chord_stretching_b_spline_coefficients')
+                                         coefficients=csdl.ImplicitVariable(shape=(3,), value=np.array([0., 0., -0.])), name='chord_stretching_b_spline_coefficients')
 
 wingspan_stretching_b_spline = lfs.Function(space=space_of_linear_2_dof_b_splines,
-                                             coefficients=csdl.ImplicitVariable(shape=(2,), value=np.array([-20., 20.])), name='wingspan_stretching_b_spline_coefficients')
+                                             coefficients=csdl.ImplicitVariable(shape=(2,), value=np.array([0., 0.])), name='wingspan_stretching_b_spline_coefficients')
 
 sweep_translation_b_spline = lfs.Function(space=space_of_linear_3_dof_b_splines,
-                                            coefficients=csdl.ImplicitVariable(shape=(3,), value=np.array([14., 0., 14.])), name='sweep_translation_b_spline_coefficients')
+                                            coefficients=csdl.ImplicitVariable(shape=(3,), value=np.array([0., 0., 0.])), name='sweep_translation_b_spline_coefficients')
 # sweep_translation_b_spline.plot()
 
 twist_b_spline = lfs.Function(space=space_of_linear_3_dof_b_splines,
@@ -117,10 +117,13 @@ ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters,
 # Apply shape variables
 original_block_thickness = ffd_block.coefficients.value[0, 0, 1, 2] - ffd_block.coefficients.value[0, 0, 0, 2]
 
-percent_change_in_thickness = csdl.Variable(shape=(num_ffd_coefficients_chordwise,num_ffd_sections),
-                                            value=np.array([[0., 0., 0.], [0., 0., 0.], [0., 0., 0.],
-                                                            [0., 0., 0.], [0., 0., 0.],
-                                                            [0., 0., 0.], [0., 0., 0.], [0., 0., 0.]]))
+percent_change_in_thickness = csdl.Variable(shape=(num_ffd_coefficients_chordwise,num_ffd_sections), value=0.)
+percent_change_in_thickness_dof = csdl.Variable(shape=(num_ffd_coefficients_chordwise, num_ffd_sections//2+1),
+                                                    value=np.array([[0., 0.], [0., 0.], [0., 0.],
+                                                                    [0., 0.], [0., 0.], [0., 0.],
+                                                                    [0., 0.], [0., 0.]]))
+percent_change_in_thickness = percent_change_in_thickness.set(csdl.slice[:,:num_ffd_sections//2+1], percent_change_in_thickness_dof)
+percent_change_in_thickness = percent_change_in_thickness.set(csdl.slice[:,num_ffd_sections//2+1:], percent_change_in_thickness_dof[:,-2::-1])
 delta_block_thickness = (percent_change_in_thickness / 100) * original_block_thickness
 thickness_upper_translation = 1/2 * delta_block_thickness
 thickness_lower_translation = -thickness_upper_translation
@@ -130,11 +133,14 @@ ffd_coefficients = ffd_coefficients.set(csdl.slice[:,:,0,2], ffd_coefficients[:,
 # Parameterize camber change as normalized by the original block (kind of like chord) length
 normalized_percent_camber_change = csdl.Variable(shape=(num_ffd_coefficients_chordwise,num_ffd_sections),
                                             value=0.)
-normalized_percent_camber_change_dof = csdl.Variable(shape=(num_ffd_coefficients_chordwise-2, num_ffd_sections),
-                                                       value=np.array([[0., 0., 0.], [0., 0., 0.],
-                                                                       [0., 0., 0.], [0., 0., 0.],
-                                                                       [0., 0., 0.], [0., 0., 0.]]))
-normalized_percent_camber_change = normalized_percent_camber_change.set(csdl.slice[1:-1,:], normalized_percent_camber_change_dof)
+normalized_percent_camber_change_dof = csdl.Variable(shape=(num_ffd_coefficients_chordwise-2, num_ffd_sections//2+1),
+                                                       value=np.array([[0., 0.], [0., 0.],
+                                                                       [0., 0.], [0., 0.],
+                                                                       [0., 0.], [0., 0.]]))
+normalized_percent_camber_change = normalized_percent_camber_change.set(csdl.slice[1:-1,:num_ffd_sections//2+1],
+                                                                         normalized_percent_camber_change_dof)
+normalized_percent_camber_change = normalized_percent_camber_change.set(csdl.slice[1:-1,num_ffd_sections//2+1:], 
+                                                                        normalized_percent_camber_change_dof[:,-2::-1])
 block_length = ffd_block.coefficients.value[1, 0, 0, 0] - ffd_block.coefficients.value[0, 0, 0, 0]
 camber_change = (normalized_percent_camber_change / 100) * block_length
 ffd_coefficients = ffd_coefficients.set(csdl.slice[:,:,:,2], 
