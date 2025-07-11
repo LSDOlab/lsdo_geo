@@ -1,12 +1,12 @@
 import csdl_alpha as csdl
 import numpy as np
 
-from typing import Union
+from typing import Union, Optional
 from dataclasses import dataclass
 
 @dataclass
 class Optimization:
-    objective:csdl.Variable=None
+    objective:Optional[csdl.Variable]=None
     design_variables:list[csdl.Variable]=None
     constraints:list[csdl.Variable]=None
     constraint_penalties:list[Union[float,np.ndarray]]=None

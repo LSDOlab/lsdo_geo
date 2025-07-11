@@ -1,6 +1,8 @@
 import lsdo_geo
 import csdl_alpha as csdl
 import numpy as np
+import numpy.typing as npt
+from typing import Union, Optional
 import lsdo_function_spaces as lfs
 
 
@@ -22,7 +24,9 @@ def import_geometry(file_name:str, name:str='geometry', parallelize:bool=False, 
     return geometry
 
 
-def rotate(points:csdl.Variable, axis_origin:csdl.Variable, axis_vector:csdl.Variable, angles:csdl.Variable, units:str='radians') -> csdl.Variable:
+def rotate(points:Union[csdl.Variable,npt.NDArray[np.float64]], axis_origin:Union[csdl.Variable,npt.NDArray[np.float64]], 
+           axis_vector:Union[csdl.Variable,npt.NDArray[np.float64]], angles:Union[csdl.Variable,npt.NDArray[np.float64],float],
+           units:str='radians') -> csdl.Variable:
     points_out_shape = None
     if len(points.shape) == 1:
         # print("Rotating points is in vector format, so rotation is assuming 3d and reshaping into (-1,3)")
@@ -109,14 +113,14 @@ def rotate(points:csdl.Variable, axis_origin:csdl.Variable, axis_vector:csdl.Var
     if units == 'degrees':
         angles = angles * np.pi / 180
 
-    points_wrt_axis = points - csdl.expand(axis_origin, points.shape, 'i->ji')
+    points_wrt_rotation_origin = points - csdl.expand(axis_origin, points.shape, 'i->ji')
 
     output_shape = (points.shape[0], 4)
 
-    points_wrt_axis_quaternion = csdl.Variable(shape=output_shape, name='points_wrt_axis_quaternion',
+    points_wrt_rotation_origin_quaternion = csdl.Variable(shape=output_shape, name='points_wrt_rotation_origin_quaternion',
                                                value=0.)
-    points_wrt_axis_quaternion = points_wrt_axis_quaternion.set(csdl.slice[:,1:], points_wrt_axis)
-    points_wrt_axis_quaternion = points_wrt_axis_quaternion.set(csdl.slice[:,0], 0)
+    points_wrt_rotation_origin_quaternion = points_wrt_rotation_origin_quaternion.set(csdl.slice[:,1:], points_wrt_rotation_origin)
+    points_wrt_rotation_origin_quaternion = points_wrt_rotation_origin_quaternion.set(csdl.slice[:,0], 0)
 
     if angles.shape[0] > 1:
         output_shape = (angles.shape[0],) + output_shape
@@ -139,39 +143,97 @@ def rotate(points:csdl.Variable, axis_origin:csdl.Variable, axis_vector:csdl.Var
         quaternion_conjugate = quaternion
         quaternion_conjugate = quaternion_conjugate.set(csdl.slice[1:], -quaternion_conjugate[1:])
 
-        # for j in csdl.frange(points_wrt_axis.shape[0]):
-        # for j in range(points_wrt_axis.shape[0]):
+        # for j in csdl.frange(points_wrt_rotation_origin.shape[0]):
+        # for j in range(points_wrt_rotation_origin.shape[0]):
             # rotated_points_quaternion = rotated_points_quaternion.set(csdl.slice[i,j,:], 
             #                     hamiltonion_product(quaternion, 
-            #                     hamiltonion_product(points_wrt_axis_quaternion[j],
+            #                     hamiltonion_product(points_wrt_rotation_origin_quaternion[j],
             #                                         quaternion_conjugate)))
         
         # # baseline
         # rotated_points =  vectorized_hamiltonion_product_2(quaternion, 
-        #                     vectorized_hamiltonion_product_1(points_wrt_axis_quaternion,
+        #                     vectorized_hamiltonion_product_1(points_wrt_rotation_origin_quaternion,
         #                                         quaternion_conjugate))
         
         # # csdl function
         # self.vectorized_hamiltonion_product_2 = csdl.Function(vectorized_hamiltonion_product_2)
-        # rotated_points =  self.vectorized_hamiltonion_product_2(quaternion, points_wrt_axis_quaternion,quaternion_conjugate)
+        # rotated_points =  self.vectorized_hamiltonion_product_2(quaternion, points_wrt_rotation_origin_quaternion,quaternion_conjugate)
 
         # old
-        rotated_points_quaternion = rotated_points_quaternion.set(csdl.slice[i,:,:], 
-                            vectorized_hamiltonion_product_2(quaternion, 
-                            vectorized_hamiltonion_product_1(points_wrt_axis_quaternion,
-                                                quaternion_conjugate)))
+        # rotated_points_quaternion = rotated_points_quaternion.set(csdl.slice[i,:,:], 
+        #                     vectorized_hamiltonion_product_2(quaternion, 
+        #                     vectorized_hamiltonion_product_1(points_wrt_rotation_origin_quaternion,
+        #                                         quaternion_conjugate)))
+        rotated_points_quaternion = rotated_points_quaternion.set(csdl.slice[i,:,:],
+                                                                  apply_quaternion_rotation(points_wrt_rotation_origin, quaternion))
 
     if angles.shape[0] == 1:
-        rotated_points_wrt_axis = rotated_points_quaternion[0,:,1:]
-        rotated_points = rotated_points_wrt_axis + csdl.expand(axis_origin, points.shape, 'i->ji')
+        rotated_points_wrt_rotation_origin = rotated_points_quaternion[0,:,1:]
+        rotated_points = rotated_points_wrt_rotation_origin + csdl.expand(axis_origin, points.shape, 'i->ji')
     else:
-        rotated_points_wrt_axis = rotated_points_quaternion[:,:,1:]
+        rotated_points_wrt_rotation_origin = rotated_points_quaternion[:,:,1:]
         output_shape = (angles.shape[0], points.shape[0], points.shape[1])
-        rotated_points = rotated_points_wrt_axis + csdl.expand(axis_origin, output_shape, 'i->kij')
+        rotated_points = rotated_points_wrt_rotation_origin + csdl.expand(axis_origin, output_shape, 'i->kij')
 
     if points_out_shape is not None:
         rotated_points = rotated_points.reshape(points_out_shape)
     return rotated_points
+
+
+def apply_quaternion_rotation(points:Union[csdl.Variable,npt.NDArray[np.float64]],
+                                quaternion:Union[csdl.Variable,npt.NDArray[np.float64]],
+                                rotation_origin:Optional[Union[csdl.Variable,npt.NDArray[np.float64]]]=None) -> csdl.Variable:
+        '''
+        Applies a quaternion rotation to a set of points.
+    
+        Parameters
+        ----------
+        points : Union[csdl.Variable, npt.NDArray[np.float64]]
+            The points to be rotated.
+        quaternion : Union[csdl.Variable, npt.NDArray[np.float64]]
+            The quaternion representing the rotation.
+    
+        Returns
+        -------
+        csdl.Variable
+            The rotated points.
+        '''
+        
+        # if type(points) is np.ndarray:
+        #     points = csdl.Variable(shape=points.shape, value=points)
+        
+        # if type(quaternion) is np.ndarray:
+        #     quaternion = csdl.Variable(shape=quaternion.shape, value=quaternion)
+
+        if len(points.shape) == 1:
+            # print("Rotating points is in vector format, so rotation is assuming 3d and reshaping into (-1,3)")
+            points = points.reshape((points.size//3,3))
+        if len(points.shape) > 2:
+            points_out_shape = points.shape
+            points = points.reshape((points.size//points.shape[-1], points.shape[-1]))
+        else:
+            points_out_shape = None
+
+        if rotation_origin is not None:
+            if type(rotation_origin) is np.ndarray:
+                rotation_origin = csdl.Variable(shape=rotation_origin.shape, value=rotation_origin)
+            points = points - csdl.expand(rotation_origin, points.shape, 'i->ji')
+    
+        points_quaternion = csdl.Variable(shape=(points.shape[0], 4), name='points_quaternion', value=0.)
+        points_quaternion = points_quaternion.set(csdl.slice[:,1:], points)
+        points_quaternion = points_quaternion.set(csdl.slice[:,0], 0)
+        quaternion_conjugate = quaternion
+        quaternion_conjugate = quaternion_conjugate.set(csdl.slice[1:], -quaternion_conjugate[1:])
+
+        rotated_points_quaternion = vectorized_hamiltonion_product_2(quaternion, 
+                                    vectorized_hamiltonion_product_1(points_quaternion, quaternion_conjugate))
+            
+        if rotation_origin is not None:
+            rotated_points_quaternion = rotated_points_quaternion + csdl.expand(rotation_origin, points.shape, 'i->ji')
+
+        if points_out_shape is not None:
+            rotated_points_quaternion = rotated_points_quaternion.reshape(points_out_shape)
+        return rotated_points_quaternion
 
 
 def vectorized_hamiltonion_product_1(q1:csdl.Variable, q2:csdl.Variable) -> csdl.Variable:

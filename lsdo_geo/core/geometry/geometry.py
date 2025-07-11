@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import numpy.typing as npt
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,8 @@ import csdl_alpha as csdl
 # from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
 import lsdo_function_spaces as lfs
 import lsdo_geo as lg
+import vedo
+from typing import Optional, Union, Sequence
 
 @dataclass
 class Geometry(lfs.FunctionSet):
@@ -75,7 +78,10 @@ class Geometry(lfs.FunctionSet):
         return evaluated_representations
     
 
-    def declare_component(self, function_indices:list[int]=None, function_search_names:list[str]=None, ignore_names:list[str]=[], name:str=None) -> lg.Geometry:
+    def declare_component(self, function_indices:Optional[Sequence[int]]=None, 
+                          function_search_names:Optional[Sequence[str]]=None, 
+                          ignore_names:Optional[Sequence[str]]=None, 
+                          name:Optional[str]=None) -> lg.Geometry:
         '''
         Declares a component. This component will point to a sub-set of the entire geometry.
 
@@ -144,8 +150,9 @@ class Geometry(lfs.FunctionSet):
     #     self.connections = b_spline_set.connections
 
 
-    def rotate(self, axis_origin:csdl.Variable, axis_vector:csdl.Variable, angles:csdl.Variable, function_indices:list[int]=None,
-                units:str='radians'):
+    def rotate(self, axis_origin:Union[csdl.Variable, npt.NDArray[np.float64]], axis_vector:Union[csdl.Variable, npt.NDArray[np.float64]],
+               angles:Union[csdl.Variable, npt.NDArray[np.float64], float], function_indices:Optional[list[int]]=None, 
+               units:Optional[str]='radians') -> None:
         '''
         Rotates the B-spline set about an axis.
 
@@ -223,10 +230,10 @@ class Geometry(lfs.FunctionSet):
 
 
     def plot_meshes(self, meshes:list[csdl.Variable], mesh_plot_types:list[str]=['wireframe'], mesh_opacity:float=1., mesh_color:str='#F5F0E6',
-                mesh_color_map='jet', mesh_line_width:float=3.,
-                function_indices:list[str]=None, function_plot_types:list[str]=['function'], function_opacity:float=0.25, function_color:str='#00629B',
+                mesh_color_map:str='jet', mesh_line_width:float=3.,
+                function_indices:Optional[list[str]]=None, function_plot_types:list[str]=['function'], function_opacity:float=0.25, function_color:str='#00629B',
                 function_color_map:str='jet', function_surface_texture:str="",
-                additional_plotting_elements:list=[], camera:dict=None, show:bool=True):
+                additional_plotting_elements:list[vedo.PointsVisual]=[], camera:Optional[dict[str,tuple[int]]]=None, show:bool=True) -> list[vedo.PointsVisual]:
         '''
         Plots a mesh over the geometry.
 

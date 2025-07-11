@@ -1,4 +1,6 @@
 import numpy as np
+import numpy.typing as npt
+from typing import Union, Optional, Sequence
 import scipy.sparse as sps
 import lsdo_function_spaces as lfs
 import csdl_alpha as csdl
@@ -27,9 +29,9 @@ class VolumeSectionalParameterizationInputs:
         The value is the CSDL variable that contains the rotation values.
     """
 
-    stretches: dict[int, csdl.Variable] = None
-    translations: dict[int, csdl.Variable] = None
-    rotations: dict[int, csdl.Variable] = None
+    stretches: Optional[dict[int, Union[csdl.Variable, npt.NDArray[np.float64]]]] = None
+    translations: Optional[dict[int, Union[csdl.Variable, npt.NDArray[np.float64]]]] = None
+    rotations: Optional[dict[int, Union[csdl.Variable, npt.NDArray[np.float64]]]] = None
 
     def __post_init__(self):
         if self.stretches is None:
@@ -39,7 +41,7 @@ class VolumeSectionalParameterizationInputs:
         if self.rotations is None:
             self.rotations = {}
 
-    def add_sectional_stretch(self, axis: int, stretch: csdl.Variable):
+    def add_sectional_stretch(self, axis: int, stretch: Union[csdl.Variable, npt.NDArray[np.float64]]):
         """
         Adds a stretch to the stretches dictionary.
 
@@ -47,12 +49,14 @@ class VolumeSectionalParameterizationInputs:
         ----------
         axis : int
             The axis of the stretch.
-        stretch : csdl.Variable
+        stretch : Union[csdl.Variable, npt.NDArray[np.float64]]
             The stretch values.
         """
+        if self.stretches is None:
+            self.stretches = {}
         self.stretches[axis] = stretch
 
-    def add_sectional_translation(self, axis: int, translation: csdl.Variable):
+    def add_sectional_translation(self, axis: int, translation: Union[csdl.Variable, npt.NDArray[np.float64]]):
         """
         Adds a translation to the translations dictionary.
 
@@ -60,12 +64,14 @@ class VolumeSectionalParameterizationInputs:
         ----------
         axis : int
             The axis of the translation.
-        translation : csdl.Variable
+        translation : Union[csdl.Variable, npt.NDArray[np.float64]]
             The translation values.
         """
+        if self.translations is None:
+            self.translations = {}
         self.translations[axis] = translation
 
-    def add_sectional_rotation(self, axis: int, rotation: csdl.Variable):
+    def add_sectional_rotation(self, axis: int, rotation: Union[csdl.Variable, npt.NDArray[np.float64]]):
         """
         Adds a rotation to the rotations dictionary.
 
@@ -73,9 +79,11 @@ class VolumeSectionalParameterizationInputs:
         ----------
         axis : int
             The axis of the rotation.
-        rotation : csdl.Variable
+        rotation : Union[csdl.Variable, npt.NDArray[np.float64]]
             The rotation values.
         """
+        if self.rotations is None:
+            self.rotations = {}
         self.rotations[axis] = rotation
 
 
@@ -100,9 +108,9 @@ class VolumeSectionalParameterization:
 
     parameterized_points: csdl.Variable
     principal_parametric_dimension: int = 0
-    parameterized_points_shape: tuple[int] = None
-    linear_parameter_maps: dict[str, sps.csc_matrix] = None
-    rotational_axes: dict[str, int] = None
+    parameterized_points_shape: Optional[tuple[int,...]] = None
+    linear_parameter_maps: Optional[dict[str, sps.csc_matrix]] = None
+    rotational_axes: Optional[dict[str, int]] = None
     name : str = 'volume_sectional_parameterization'
 
     def __post_init__(self):

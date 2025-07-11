@@ -23,6 +23,11 @@ geometry = lsdo_geo.import_geometry(
     parallelize=False,
 )
 # geometry.plot()
+
+new_function_space = lfs.BSplineSpace(num_parametric_dimensions=2, degree=(3,3), coefficients_shape=(10,30))
+geometry = geometry.refit(new_function_space)
+geometry = lsdo_geo.Geometry(functions=geometry.functions, function_names=geometry.function_names, name=geometry.name, space=geometry.space)
+# geometry.plot()
 # endregion Imports
 
 # region Key locations
@@ -108,6 +113,33 @@ sectional_parameters.add_sectional_translation(axis=0, translation=sweep_transla
 sectional_parameters.add_sectional_rotation(axis=1, rotation=twist_sectional_parameters)
 
 ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=False)
+
+# Apply shape variables
+original_block_thickness = ffd_block.coefficients.value[0, 0, 1, 2] - ffd_block.coefficients.value[0, 0, 0, 2]
+
+percent_change_in_thickness = csdl.Variable(shape=(num_ffd_coefficients_chordwise,num_ffd_sections),
+                                            value=np.array([[0., 0., 0.], [0., 0., 0.], [0., 0., 0.],
+                                                            [0., 0., 0.], [0., 0., 0.],
+                                                            [0., 0., 0.], [0., 0., 0.], [0., 0., 0.]]))
+delta_block_thickness = (percent_change_in_thickness / 100) * original_block_thickness
+thickness_upper_translation = 1/2 * delta_block_thickness
+thickness_lower_translation = -thickness_upper_translation
+ffd_coefficients = ffd_coefficients.set(csdl.slice[:,:,1,2], ffd_coefficients[:,:,1,2] + thickness_upper_translation)
+ffd_coefficients = ffd_coefficients.set(csdl.slice[:,:,0,2], ffd_coefficients[:,:,0,2] + thickness_lower_translation)
+
+# Parameterize camber change as normalized by the original block (kind of like chord) length
+normalized_percent_camber_change = csdl.Variable(shape=(num_ffd_coefficients_chordwise,num_ffd_sections),
+                                            value=0.)
+normalized_percent_camber_change_dof = csdl.Variable(shape=(num_ffd_coefficients_chordwise-2, num_ffd_sections),
+                                                       value=np.array([[0., 0., 0.], [0., 0., 0.],
+                                                                       [0., 0., 0.], [0., 0., 0.],
+                                                                       [0., 0., 0.], [0., 0., 0.]]))
+normalized_percent_camber_change = normalized_percent_camber_change.set(csdl.slice[1:-1,:], normalized_percent_camber_change_dof)
+block_length = ffd_block.coefficients.value[1, 0, 0, 0] - ffd_block.coefficients.value[0, 0, 0, 0]
+camber_change = (normalized_percent_camber_change / 100) * block_length
+ffd_coefficients = ffd_coefficients.set(csdl.slice[:,:,:,2], 
+                                        ffd_coefficients[:,:,:,2] + 
+                                        csdl.expand(camber_change, (num_ffd_coefficients_chordwise, num_ffd_sections, 2), 'ij->ijk'))
 
 geometry_coefficients = ffd_block.evaluate_ffd(coefficients=ffd_coefficients, plot=False)
 geometry.set_coefficients(geometry_coefficients) # type: ignore

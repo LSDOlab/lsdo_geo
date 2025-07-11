@@ -1,13 +1,16 @@
 from lsdo_geo.core.parameterization.ffd_block import FFDBlock
 
-from typing import Union
+from typing import Union, Optional, Sequence
 import numpy as np
+import numpy.typing as npt
 import lsdo_function_spaces as lfs
 import csdl_alpha as csdl
 from lsdo_geo.core.geometry.geometry import Geometry
 
-def construct_ffd_block_around_entities(entities:list[Union[np.ndarray, csdl.Variable, lfs.Function, lfs.FunctionSet]],
-                                        num_coefficients:tuple[int]=2, degree:tuple[int]=1, name:str='ffd_block') -> FFDBlock:
+EntityType = Union[Geometry, csdl.Variable, lfs.Function, lfs.FunctionSet, npt.NDArray[np.float64]]
+
+def construct_ffd_block_around_entities(entities:Union[Sequence[EntityType], EntityType],
+                                        num_coefficients:Union[int, tuple[int,...]]=2, degree:Union[int, tuple[int,...]]=1, name:str='ffd_block') -> FFDBlock:
     '''
     Constructs an FFD block around the given entities and embeds them within.
 
@@ -63,9 +66,9 @@ def construct_ffd_block_around_entities(entities:list[Union[np.ndarray, csdl.Var
     return ffd_block
 
 
-def construct_ffd_block_from_corners(entities:list[Union[np.ndarray, csdl.Variable, lfs.Function, lfs.FunctionSet, Geometry]],
-                                     corners:np.ndarray,
-                                        num_coefficients:tuple[int]=2, degree:tuple[int]=1, name:str='ffd_block') -> FFDBlock:
+def construct_ffd_block_from_corners(entities:Union[Sequence[EntityType], EntityType],
+                                     corners:npt.NDArray[np.float64],
+                                     num_coefficients:Union[int, tuple[int,...]]=2, degree:Union[int, tuple[int,...]]=1, name:str='ffd_block') -> FFDBlock:
     '''
     Constructs an FFD block around the given entities and embeds them within.
     '''
@@ -81,17 +84,16 @@ def construct_ffd_block_from_corners(entities:list[Union[np.ndarray, csdl.Variab
     return ffd_block
 
 
-def construct_tight_fit_ffd_block(entities:list[Union[np.ndarray, csdl.Variable, lfs.Function, lfs.FunctionSet, Geometry]],
-                                        num_coefficients:tuple[int]=5, degree:tuple[int]=2, name:str='ffd_block') -> FFDBlock:
+def construct_tight_fit_ffd_block(entities:Union[Sequence[EntityType], EntityType],
+                                    num_coefficients:Union[tuple[int,...], int]=5, degree:Union[tuple[int,...], int]=2, name:str='ffd_block') -> FFDBlock:
     '''
     Constructs an FFD block around the given entities and embeds them within.
     '''
-    if not isinstance(entities, list):
+    if not isinstance(entities, Sequence):
         entities = [entities]
 
     # loop over entities and get points to create enclosure block
 
-    
     # Steps for currently non-standard FFD blocks
     # 0) Cartesian enclosure volume (line 39) 
     enclosure_ffd_block = construct_ffd_block_around_entities(entities=entities, num_coefficients=num_coefficients,
