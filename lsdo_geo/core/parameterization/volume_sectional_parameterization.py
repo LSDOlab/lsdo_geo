@@ -30,8 +30,8 @@ class VolumeSectionalParameterizationInputs:
     """
 
     stretches: Optional[dict[int, Union[csdl.Variable, npt.NDArray[np.float64]]]] = None
-    translations: Optional[dict[int, Union[csdl.Variable, npt.NDArray[np.float64]]]] = None
-    rotations: Optional[dict[int, Union[csdl.Variable, npt.NDArray[np.float64]]]] = None
+    translations: Optional[dict[Union[int, csdl.Variable], Union[csdl.Variable, npt.NDArray[np.float64]]]] = None
+    rotations: Optional[dict[Union[int, csdl.Variable], Union[csdl.Variable, npt.NDArray[np.float64]]]] = None
 
     def __post_init__(self):
         if self.stretches is None:
@@ -56,14 +56,15 @@ class VolumeSectionalParameterizationInputs:
             self.stretches = {}
         self.stretches[axis] = stretch
 
-    def add_sectional_translation(self, axis: int, translation: Union[csdl.Variable, npt.NDArray[np.float64]]):
+    def add_sectional_translation(self, axis: Union[int, csdl.Variable], translation: Union[csdl.Variable, npt.NDArray[np.float64]]):
         """
         Adds a translation to the translations dictionary.
 
         Parameters
         ----------
-        axis : int
-            The axis of the translation.
+        axis : Union[int, csdl.Variable]
+            The axis of the translation. integer axes of 0,1,2,... correspond to the parametric axes, u,v,w,...
+            Alternatively, a csdl variable can be passed in to specify the axis.
         translation : Union[csdl.Variable, npt.NDArray[np.float64]]
             The translation values.
         """
@@ -71,14 +72,15 @@ class VolumeSectionalParameterizationInputs:
             self.translations = {}
         self.translations[axis] = translation
 
-    def add_sectional_rotation(self, axis: int, rotation: Union[csdl.Variable, npt.NDArray[np.float64]]):
+    def add_sectional_rotation(self, axis: Union[int, csdl.Variable], rotation: Union[csdl.Variable, npt.NDArray[np.float64]]):
         """
         Adds a rotation to the rotations dictionary.
 
         Parameters
         ----------
-        axis : int
-            The axis of the rotation.
+        axis : Union[int, csdl.Variable]
+            The axis of the rotation. integer axes of 0,1,2,... correspond to the parametric axes, u,v,w,...
+            Alternatively, a csdl variable can be passed in to specify the axis.
         rotation : Union[csdl.Variable, npt.NDArray[np.float64]]
             The rotation values.
         """
@@ -109,8 +111,8 @@ class VolumeSectionalParameterization:
     parameterized_points: csdl.Variable
     principal_parametric_dimension: int = 0
     parameterized_points_shape: Optional[tuple[int,...]] = None
-    linear_parameter_maps: Optional[dict[str, sps.csc_matrix]] = None
-    rotational_axes: Optional[dict[str, int]] = None
+    linear_parameter_maps: Optional[dict[tuple[str, Union[int, csdl.Variable]], sps.csc_matrix]] = None
+    rotational_axes: Optional[dict[Union[str, csdl.Variable], Union[int, csdl.Variable]]] = None
     name : str = 'volume_sectional_parameterization'
 
     def __post_init__(self):
@@ -173,7 +175,7 @@ class VolumeSectionalParameterization:
 
         self.updated_points = self.parameterized_points # NOTE: Removing .copy() here because csdl doesn't have one.
 
-    def add_parameter(self, name: str, map: sps.csc_matrix):
+    def add_parameter(self, parameter_type: str, axis: Union[int, csdl.Variable], map: sps.csc_matrix):
         """
         Adds a sectional parameter to the parameterization. The map should map from the parameter vector to deltas in the parameterized points.
 
@@ -184,22 +186,25 @@ class VolumeSectionalParameterization:
         map : sps.csc_matrix
             The map from the parameter vector to deltas in the parameterized points.
         """
-        self.linear_parameter_maps[name] = map
+        self.linear_parameter_maps[(parameter_type, axis)] = map
 
-    def add_sectional_translation(self, name: str, axis: int):
+    def add_sectional_translation(self, axis: Union[int, csdl.Variable]):
         """
         Adds a sectional translation parameter to the parameterization.
 
         Parameters
         ----------
-        name : str
-            The name of the sectional translation parameter.
         axis : int
             The axis to translate along.
         """
-        valid_axes = np.arange(len(self.parameterized_points_shape) - 1)
-        if axis not in valid_axes:
-            raise Exception(f"Please pass in a valid axis. valid axes:{valid_axes}")
+        if isinstance(axis, int):
+            valid_axes = np.arange(len(self.parameterized_points_shape) - 1)
+            if axis not in valid_axes:
+                raise Exception(f"Please pass in a valid axis. valid axes:{valid_axes}")
+        elif isinstance(axis, csdl.Variable):
+            # Check to make sure the axis is valid
+            if axis.shape != (self.parameterized_points_shape[-1],):
+                raise Exception(f"Invalid axis shape. Expected: {(self.parameterized_points_shape[-1],)}, Got: {axis.shape}")
 
         num_outputs = np.prod(self.parameterized_points_shape)
 
@@ -213,17 +218,21 @@ class VolumeSectionalParameterization:
             parametric_coordinate[self.principal_parametric_dimension] = (
                 self.sectional_principal_parametric_coordinate[i].reshape((1, -1))
             )
-            parametric_derivative_order = np.zeros(
-                (len(self.parameterized_points_shape[:-1]))
-            )
-            parametric_derivative_order[axis] = 1
-            parametric_derivative_order = tuple(parametric_derivative_order)
-            translation_axis = self.helpful_b_spline.evaluate(
-                parametric_coordinates=parametric_coordinate,
-                parametric_derivative_orders=parametric_derivative_order,
-                non_csdl=True
-            )
-            translation_axis /= np.linalg.norm(translation_axis)
+
+            if isinstance(axis, int):
+                parametric_derivative_order = np.zeros(
+                    (len(self.parameterized_points_shape[:-1]))
+                )
+                parametric_derivative_order[axis] = 1
+                parametric_derivative_order = tuple(parametric_derivative_order)
+                translation_axis = self.helpful_b_spline.evaluate(
+                    parametric_coordinates=parametric_coordinate,
+                    parametric_derivative_orders=parametric_derivative_order,
+                    non_csdl=True
+                )
+                translation_axis /= np.linalg.norm(translation_axis)
+            else:
+                translation_axis = axis.value
 
             indices = np.arange(np.prod(self.parameterized_points_shape, dtype=int))
             indices = indices.reshape(self.parameterized_points_shape)
@@ -238,9 +247,9 @@ class VolumeSectionalParameterization:
 
         parameter_map = sps.hstack(parameter_map_list).tocsc()
 
-        self.add_parameter(name=name, map=parameter_map)
+        self.add_parameter(parameter_type='sectional_translation', axis=axis, map=parameter_map)
 
-    def add_sectional_stretch(self, name: str, axis: int):
+    def add_sectional_stretch(self, axis: int):
         """
         Adds a sectional stretch parameter to the parameterization.
 
@@ -350,9 +359,9 @@ class VolumeSectionalParameterization:
 
         parameter_map = sps.hstack(parameter_map_list).tocsc()
 
-        self.add_parameter(name=name, map=parameter_map)
+        self.add_parameter(parameter_type='sectional_stretch', axis=axis, map=parameter_map)
 
-    def add_sectional_rotation(self, name: str, axis: int):
+    def add_sectional_rotation(self, axis: Union[int, csdl.Variable]):
         """
         Adds a sectional rotation parameter to the parameterization.
 
@@ -363,11 +372,12 @@ class VolumeSectionalParameterization:
         axis : int
             The axis to rotate about.
         """
-        valid_axes = np.arange(len(self.parameterized_points_shape) - 1)
-        if axis not in valid_axes:
-            raise Exception(f"Please pass in a valid axis. valid axes:{valid_axes}")
+        if isinstance(axis, int):
+            valid_axes = np.arange(len(self.parameterized_points_shape) - 1)
+            if axis not in valid_axes:
+                raise Exception(f"Please pass in a valid axis. valid axes:{valid_axes}")
 
-        self.rotational_axes[name] = axis
+        self.rotational_axes[axis] = axis
 
     # def evaluate(self, sectional_parameters:dict[str,csdl.Variable], plot:bool=False) -> csdl.Variable:
     def evaluate(
@@ -395,24 +405,25 @@ class VolumeSectionalParameterization:
 
         # Add parameters that are found.
         for axis, parameter in sectional_parameters.stretches.items():
-            auto_generated_name = f"stretch_{axis}"
-            self.add_sectional_stretch(name=auto_generated_name, axis=axis)
+            self.add_sectional_stretch(axis=axis)
         for axis, parameter in sectional_parameters.translations.items():
-            auto_generated_name = f"translation_{axis}"
-            self.add_sectional_translation(name=auto_generated_name, axis=axis)
+            self.add_sectional_translation(axis=axis)
         for axis, parameter in sectional_parameters.rotations.items():
-            auto_generated_name = f"rotation_{axis}"
-            self.add_sectional_rotation(name=auto_generated_name, axis=axis)
+            self.add_sectional_rotation(axis=axis)
 
         # Perform update
         # updated_points = self.parameterized_points.reshape((-1,))
         updated_points = self.parameterized_points
-        for parameter_name, parameter_map in self.linear_parameter_maps.items():
-            parameter_type = parameter_name[: parameter_name.index("_")]
-            parameter_axis = int(parameter_name[parameter_name.index("_") + 1 :])
-            if parameter_type == "stretch":
+        for parameter_info, parameter_map in self.linear_parameter_maps.items():
+            parameter_type, parameter_axis = parameter_info
+            # parameter_type = parameter_name[: parameter_name.index("_")]
+            # axis_string = parameter_name[parameter_name.index("_") + 1 :]
+            # if axis_string.isdigit():
+            #     parameter_axis = int(axis_string)
+            # parameter_axis = int(parameter_name[parameter_name.index("_") + 1 :])
+            if parameter_type == "sectional_stretch":
                 parameter_variable = sectional_parameters.stretches[parameter_axis]
-            elif parameter_type == "translation":
+            elif parameter_type == "sectional_translation":
                 parameter_variable = sectional_parameters.translations[parameter_axis]
             else:
                 raise Exception(
@@ -447,23 +458,22 @@ class VolumeSectionalParameterization:
 
         # Perform rotations
         updated_points = updated_points.flatten()
-        for parameter_name, axis in self.rotational_axes.items():
-            parameter_type = parameter_name[: parameter_name.index("_")]
-            parameter_axis = int(parameter_name[parameter_name.index("_") + 1 :])
-            if parameter_type == "rotation":
-                parameter_variable = sectional_parameters.rotations[parameter_axis]
-            else:
-                raise Exception(
-                    f"Something went wrong. It's storing a rotational map for a parameter of type: {parameter_type}"
-                )
+        for parameter_axis, axis in self.rotational_axes.items():
+            parameter_variable = sectional_parameters.rotations[parameter_axis]
+            # if parameter_type == "rotation":
+            #     parameter_variable = sectional_parameters.rotations[parameter_axis]
+            # else:
+            #     raise Exception(
+            #         f"Something went wrong. It's storing a rotational map for a parameter of type: {parameter_type}"
+            #     )
 
             # if parameter_name not in sectional_parameters.keys():
             #     raise Exception(f"Please pass in a sectional parameter for {parameter_name}.")
-            if parameter_variable.shape != (self.num_sections,):
-                raise Exception(
-                    f"Sectional parameter {parameter_name} has the wrong shape."
-                    + f"Expected: shape=(num_sections,) ({self.num_sections},), got: {parameter_variable.shape}"
-                )
+            # if parameter_variable.shape != (self.num_sections,):
+            #     raise Exception(
+            #         f"Sectional parameter {parameter_type}:{parameter_axis} has the wrong shape."
+            #         + f"Expected: shape=(num_sections,) ({self.num_sections},), got: {parameter_variable.shape}"
+            #     )
 
             # # Use points to create a B-spline to help with getting axes
             # NOTE: Going to use static axes for now unless if popular demand justifies this.
@@ -479,16 +489,19 @@ class VolumeSectionalParameterization:
                 parametric_coordinate[self.principal_parametric_dimension] = (
                     self.sectional_principal_parametric_coordinate[i]
                 )
-                parametric_derivative_order = np.zeros(
-                    (len(self.parameterized_points_shape[:-1])), dtype=int
-                )
-                parametric_derivative_order[axis] = 1
-                parametric_derivative_order = tuple(parametric_derivative_order)
-                rotation_axis = self.helpful_b_spline.evaluate(
-                    parametric_coordinates=parametric_coordinate,
-                    parametric_derivative_orders=parametric_derivative_order,
-                ).value
-                rotation_axis /= np.linalg.norm(rotation_axis)
+                if isinstance(axis, int):
+                    parametric_derivative_order = np.zeros(
+                        (len(self.parameterized_points_shape[:-1])), dtype=int
+                    )
+                    parametric_derivative_order[axis] = 1
+                    parametric_derivative_order = tuple(parametric_derivative_order)
+                    rotation_axis = self.helpful_b_spline.evaluate(
+                        parametric_coordinates=parametric_coordinate,
+                        parametric_derivative_orders=parametric_derivative_order,
+                    ).value
+                    rotation_axis /= np.linalg.norm(rotation_axis)
+                elif isinstance(axis, csdl.Variable):
+                    rotation_axis = axis.value
 
                 angle = parameter_variable[i]
                 indices = np.arange(np.prod(self.parameterized_points_shape, dtype=int))
