@@ -157,16 +157,20 @@ sweep_angle_right = csdl.arctan(spanwise_direction_right[0] / spanwise_direction
 # endregion Evaluate Parameterization To Define Parameterization Forward Model For Parameterization Solver
 
 # region Set Up and Evaluate Geometry Parameterization Solver
+# Define design variables for the optimizer (for the solver, these are desired values)
 wingspan_outer_dv = csdl.Variable(shape=(1,), value=np.array([1.0]))
 root_chord_outer_dv = csdl.Variable(shape=(1,), value=np.array([2.0]))
 tip_chord_outer_dv = csdl.Variable(shape=(1,), value=np.array([0.5]))
 sweep_angle_outer_dv = csdl.Variable(shape=(1,), value=np.array([30*np.pi/180]))
 
 geometry_solver = ParameterizationSolver()
+
+# Define the states for the parameterization solver (solver will manipulate these to achieve the variables)
 geometry_solver.add_state(chord_stretching_b_spline.coefficients)
 geometry_solver.add_state(wingspan_stretching_b_spline.coefficients)
 geometry_solver.add_state(sweep_translation_b_spline.coefficients)
 
+# Define the geometric variables/constraints that the solver will enforce.
 geometric_variables = GeometricVariables()
 geometric_variables.add_variable(wingspan, wingspan_outer_dv, penalty_value=None)
 geometric_variables.add_variable(root_chord, root_chord_outer_dv, penalty_value=None)
