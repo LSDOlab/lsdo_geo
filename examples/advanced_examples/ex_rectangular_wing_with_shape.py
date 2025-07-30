@@ -131,6 +131,8 @@ ffd_coefficients = ffd_coefficients.set(csdl.slice[:,:,1,2], ffd_coefficients[:,
 ffd_coefficients = ffd_coefficients.set(csdl.slice[:,:,0,2], ffd_coefficients[:,:,0,2] + thickness_lower_translation)
 
 # Parameterize camber change as normalized by the original block (kind of like chord) length
+block_length = ffd_block.coefficients.value[1, 0, 0, 0] - ffd_block.coefficients.value[0, 0, 0, 0]
+
 normalized_percent_camber_change = csdl.Variable(shape=(num_ffd_coefficients_chordwise,num_ffd_sections),
                                             value=0.)
 normalized_percent_camber_change_dof = csdl.Variable(shape=(num_ffd_coefficients_chordwise-2, num_ffd_sections//2+1),
@@ -141,7 +143,6 @@ normalized_percent_camber_change = normalized_percent_camber_change.set(csdl.sli
                                                                          normalized_percent_camber_change_dof)
 normalized_percent_camber_change = normalized_percent_camber_change.set(csdl.slice[1:-1,num_ffd_sections//2+1:], 
                                                                         normalized_percent_camber_change_dof[:,-2::-1])
-block_length = ffd_block.coefficients.value[1, 0, 0, 0] - ffd_block.coefficients.value[0, 0, 0, 0]
 camber_change = (normalized_percent_camber_change / 100) * block_length
 ffd_coefficients = ffd_coefficients.set(csdl.slice[:,:,:,2], 
                                         ffd_coefficients[:,:,:,2] + 
