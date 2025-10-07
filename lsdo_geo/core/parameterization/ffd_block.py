@@ -86,7 +86,7 @@ class FFDBlock(lfs.Function):
                 # self.basis_matrices.append(entity_basis_matrices)
 
 
-    def evaluate_ffd(self, coefficients:csdl.Variable, plot:bool=False, non_csdl:bool=False) -> Union[csdl.Variable, npt.NDArray[np.float64], list[csdl.Variable], list[npt.NDArray[np.float64]]]:
+    def evaluate_ffd(self, coefficients:csdl.Variable, plot:bool=False, non_csdl:bool=False) -> Union[csdl.Variable, npt.NDArray[np.float64], Sequence[csdl.Variable], Sequence[npt.NDArray[np.float64]]]:
         '''
         Evaluates the function.
 
