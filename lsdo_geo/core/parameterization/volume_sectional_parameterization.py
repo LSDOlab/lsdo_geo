@@ -434,7 +434,7 @@ class VolumeSectionalParameterization:
             #     raise Exception(f"Please pass in a sectional parameter for {parameter_name}.")
             if parameter_variable.shape != (self.num_sections,):
                 raise Exception(
-                    f"Sectional parameter {parameter_name} has the wrong shape."
+                    f"Sectional parameter of type {parameter_type} in axis {parameter_axis} has the wrong shape."
                     + f"Expected: {self.num_sections}, got: {parameter_variable.shape}"
                 )
 
@@ -524,7 +524,7 @@ class VolumeSectionalParameterization:
 
                 updated_points = updated_points.set(csdl.slice[[indices]], rotate(
                     points=section_updated_points,
-                    axis_origin=section_average,
+                    rotation_origin=section_average,
                     axis_vector=rotation_axis,
                     angles=angle,
                 ).reshape((updated_points[list(indices)].size,)))
