@@ -9,6 +9,14 @@ from dataclasses import dataclass
 
 from lsdo_geo.core.geometry.geometry_functions import rotate
 
+class NumpyAxis:
+    """
+    Class for representing an axis as a numpy array. This is used for specifying the axis of rotation or translation for sectional parameters.
+    """
+
+    def __init__(self, axis: npt.NDArray[np.float64]):
+        self.axis = axis
+    # axis: npt.NDArray[np.float64]
 
 @dataclass
 class VolumeSectionalParameterizationInputs:
@@ -72,13 +80,13 @@ class VolumeSectionalParameterizationInputs:
             self.translations = {}
         self.translations[axis] = translation
 
-    def add_sectional_rotation(self, axis: Union[int, csdl.Variable], rotation: Union[csdl.Variable, npt.NDArray[np.float64]]):
+    def add_sectional_rotation(self, axis: Union[int, csdl.Variable, npt.NDArray[np.float64]], rotation: Union[csdl.Variable, npt.NDArray[np.float64]]):
         """
         Adds a rotation to the rotations dictionary.
 
         Parameters
         ----------
-        axis : Union[int, csdl.Variable]
+        axis : Union[int, csdl.Variable, npt.NDArray[np.float64]]
             The axis of the rotation. integer axes of 0,1,2,... correspond to the parametric axes, u,v,w,...
             Alternatively, a csdl variable can be passed in to specify the axis.
         rotation : Union[csdl.Variable, npt.NDArray[np.float64]]
@@ -86,7 +94,11 @@ class VolumeSectionalParameterizationInputs:
         """
         if self.rotations is None:
             self.rotations = {}
-        self.rotations[axis] = rotation
+        if isinstance(axis, np.ndarray):
+            axis_label = NumpyAxis(axis)
+        else:
+            axis_label = axis
+        self.rotations[axis_label] = rotation
 
 
 @dataclass
@@ -361,7 +373,7 @@ class VolumeSectionalParameterization:
 
         self.add_parameter(parameter_type='sectional_stretch', axis=axis, map=parameter_map)
 
-    def add_sectional_rotation(self, axis: Union[int, csdl.Variable]):
+    def add_sectional_rotation(self, axis: Union[int, csdl.Variable, npt.NDArray[np.float64]]):
         """
         Adds a sectional rotation parameter to the parameterization.
 
@@ -377,7 +389,11 @@ class VolumeSectionalParameterization:
             if axis not in valid_axes:
                 raise Exception(f"Please pass in a valid axis. valid axes:{valid_axes}")
 
-        self.rotational_axes[axis] = axis
+        if isinstance(axis, np.ndarray):
+            axis_label = NumpyAxis(axis)
+        else:
+            axis_label = axis
+        self.rotational_axes[axis_label] = axis
 
     # def evaluate(self, sectional_parameters:dict[str,csdl.Variable], plot:bool=False) -> csdl.Variable:
     def evaluate(
@@ -459,7 +475,13 @@ class VolumeSectionalParameterization:
         # Perform rotations
         updated_points = updated_points.flatten()
         for parameter_axis, axis in self.rotational_axes.items():
-            parameter_variable = sectional_parameters.rotations[parameter_axis]
+            if isinstance(parameter_axis, NumpyAxis):
+                parameter_axis_label = parameter_axis
+                axis = parameter_axis.axis
+            else:
+                parameter_axis_label = parameter_axis
+            
+            parameter_variable = sectional_parameters.rotations[parameter_axis_label]
             # if parameter_type == "rotation":
             #     parameter_variable = sectional_parameters.rotations[parameter_axis]
             # else:
@@ -502,6 +524,10 @@ class VolumeSectionalParameterization:
                     rotation_axis /= np.linalg.norm(rotation_axis)
                 elif isinstance(axis, csdl.Variable):
                     rotation_axis = axis.value
+                elif isinstance(axis, np.ndarray):
+                    rotation_axis = axis
+                else:
+                    raise Exception(f"Invalid axis type: {type(axis)}. Axis should be either an int, a csdl.Variable, or a numpy array.")
 
                 angle = parameter_variable[i]
                 indices = np.arange(np.prod(self.parameterized_points_shape, dtype=int))

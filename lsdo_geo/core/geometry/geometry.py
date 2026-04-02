@@ -229,6 +229,65 @@ class Geometry(lfs.FunctionSet):
                 counter += num_coefficient_points
 
 
+    def translate(self, translation:Union[csdl.Variable, npt.NDArray[np.float64]], function_indices:Optional[list[int]]=None) -> None:
+        '''
+        Translates the geometry.
+
+        Parameters
+        -----------
+        translation : csdl.Variable
+            The translation vector.
+        function_indices : list[int]
+            The indices of the functions to translate.
+        '''
+        if function_indices is None:
+            function_indices = list(self.functions.keys())
+        if isinstance(function_indices, int):
+            function_indices = [function_indices]
+        if not isinstance(function_indices, list):
+            raise ValueError(f'The function indices must be a list of int, received {type(function_indices)}')
+
+        if isinstance(translation, np.ndarray):
+            translation = csdl.Variable(shape=translation.shape, value=translation)
+
+        # # Unvectorized:
+        # for function_index in function_indices:
+        #     function = self.functions[function_index]
+        #     translated_coefficients = translate_function(
+        #         points=function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])), 
+        #         translation=translation
+        #     )
+        #     function.coefficients = translated_coefficients.reshape(function.coefficients.shape)
+
+        # Vectorized:
+        if len(function_indices) == 1:
+            function = self.functions[function_indices[0]]
+            translated_coefficients = function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])) + translation
+            function.coefficients = translated_coefficients.reshape(function.coefficients.shape)
+        else:
+            stacked_coefficients = []
+            for function_index in function_indices:
+                function = self.functions[function_index]
+                stacked_coefficients.append(function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])))
+            stacked_coefficients = csdl.vstack(stacked_coefficients)
+
+            if len(translation.shape) == 1:
+                expanded_translation = csdl.expand(translation, stacked_coefficients.shape, 'i->ji',)
+                translated_coefficients = stacked_coefficients + expanded_translation
+            elif translation.shape == stacked_coefficients.shape:
+                translated_coefficients = stacked_coefficients + translation
+            else:
+                raise ValueError(f'Translation shape {translation.shape} not compatible with stacked coefficients shape {stacked_coefficients.shape}.')
+                
+
+            counter = 0
+            for i, function_index in enumerate(function_indices):
+                function = self.functions[function_index]
+                num_coefficient_points = function.coefficients.size // function.coefficients.shape[-1]
+                function.coefficients = translated_coefficients[counter:counter+num_coefficient_points,:].reshape(function.coefficients.shape)
+                counter += num_coefficient_points
+
+
     def rotate_using_quaternion(self, rotation_origin:Union[csdl.Variable,npt.NDArray[np.float64]], 
                                 quaternion:Union[csdl.Variable,npt.NDArray[np.float64]],
                                 function_indices:Optional[list[int]]=None):

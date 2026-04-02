@@ -7,6 +7,15 @@ from typing import Union, Optional
 
 
 @dataclass
+class State:
+    '''
+    The State class is a dataclass that contains the state variable, its initial value, and its cost.
+    '''
+    state : csdl.Variable
+    initial_value : Optional[Union[csdl.Variable, npt.NDArray[np.float64]]] = None
+    cost : Union[float, npt.NDArray[np.float64], csdl.Variable] = 1.
+
+@dataclass
 class GeometricVariables:
     '''
     The GeometricVariables class is a dataclass that contains the computed and desired values of the geometric variables.
@@ -65,8 +74,8 @@ class ParameterizationSolver:
     def __init__(self) -> None:
         self.optimization = Optimization()
         self.optimizer = NewtonOptimizer()
-        self.parameters : list[csdl.Variable] = []
-        self.parameter_costs : list[Union[float,npt.NDArray[np.float64],csdl.Variable]] = []
+        self.states : list[State] = []
+        # self.state_costs : list[Union[float,npt.NDArray[np.float64],csdl.Variable]] = []
 
 
     def add_variable(self, computed_value:csdl.Variable, desired_value:Union[csdl.Variable, npt.NDArray[np.float64]], penalty:Optional[Union[float,npt.NDArray[np.float64],csdl.Variable]]=None):
@@ -87,10 +96,11 @@ class ParameterizationSolver:
         '''
         # computed_value, desired_value = csdl.backtrack_operations(computed_value, desired_value)
 
-        self.add_constraint(computed_value, desired_value, penalty)
+        self.add_equality_constraint(computed_value, desired_value, penalty)
 
     
-    def add_constraint(self, constraint:csdl.Variable, desired_value:Union[csdl.Variable, npt.NDArray[np.float64]], penalty:Optional[Union[float,npt.NDArray[np.float64],csdl.Variable]]=None):
+    def add_equality_constraint(self, constraint:csdl.Variable, desired_value:Union[csdl.Variable, npt.NDArray[np.float64]],
+                                penalty:Optional[Union[float,npt.NDArray[np.float64],csdl.Variable]]=None):
         '''
         Add a constraint to the parameterization problem.
 
@@ -105,45 +115,87 @@ class ParameterizationSolver:
             The penalty to be applied to the constraint, by default None. If None, lagrange multipliers are used.
             If not None, the penalty is the scaling factor for a quadratic constraint penalty term.
         '''
-        self.optimization.add_constraint(constraint - desired_value, penalty=penalty)
+        # InversionTransform = csdl.transforms.EqualityInversion()
+        # inverted_variable, inverted_constant, ops = InversionTransform.apply(lhs=constraint, rhs=desired_value, debug = False, aux_info=True)
+        # print(f'Inverted {constraint.name} = {desired_value.name} : {(ops)}')
 
+        equality_constraint = constraint - desired_value
+        if isinstance(desired_value, csdl.Variable):
+            equality_constraint.add_name(f'{desired_value.name}_enforcement_constraint')
+        else:
+            equality_constraint.add_name(f'{constraint.name}_enforcement_constraint')
+        self.optimization.add_equality_constraint(equality_constraint, penalty=penalty)
+        # self.optimization.add_equality_constraint(inverted_variable - inverted_constant, penalty=penalty)
 
-    def add_state(self, parameter:csdl.Variable, cost:Union[float,npt.NDArray[np.float64],csdl.Variable]=1.):
+    
+    def add_inequality_constraint(self, constraint:csdl.Variable,
+                                  linear_penalty_factor:Optional[Union[float,npt.NDArray[np.float64],csdl.Variable]]=None,
+                                  linear_activation_factor:Union[float,npt.NDArray[np.float64],csdl.Variable]=10., 
+                                  quadratic_penalty_factor:Optional[Union[float,npt.NDArray[np.float64],csdl.Variable]]=None,
+                                  quadratic_activation_factor:Union[float,npt.NDArray[np.float64],csdl.Variable]=10.):
         '''
-        Add a parameter/dofs to the parameterization problem.
+        Add an inequality constraint to the parameterization problem.
 
         Parameters
         ----------
-        parameter : csdl.Variable
-            The parameter to be manipulated in order to help drive the geometric variables to their desired values.
+        constraint : csdl.Variable
+            The constraint to be satisfied. This is the quantity that will be driven to be non-positive.
+        linear_penalty_factor : Union[float,npt.NDArray[np.float64],csdl.Variable], optional
+            The linear penalty to be applied to the constraint, by default None. If None, lagrange multipliers are used.
+            If not None, the penalty is the scaling factor for a linear penalty term. The linear penalty term is activated in the infeasible region using mellowmax smoothing.
+        linear_activation_factor : Union[float,npt.NDArray[np.float64],csdl.Variable], optional
+            The activation factor for the linear penalty term, by default 10. The larger this number, the sharper the (mellowmax) activation. This is a positive number and infinity corresponds to ReLU activation.
+        quadratic_penalty_factor : Union[float,npt.NDArray[np.float64],csdl.Variable], optional
+            The quadratic penalty to be applied to the constraint, by default None. If None, no quadratic penalty is used.
+            If not None, the penalty is the scaling factor for a quadratic penalty term. The quadratic penalty term is activated in the infeasible region using softplus smoothing.
+        quadratic_activation_factor : Union[float,npt.NDArray[np.float64],csdl.Variable], optional
+            The activation factor for the quadratic penalty term, by default 10. The larger this number, the sharper the (mellowmax) activation. This is a positive number and infinity corresponds to ReLU activation.
+        '''
+        self.optimization.add_inequality_constraint(constraint, linear_penalty_factor=linear_penalty_factor, quadratic_penalty_factor=quadratic_penalty_factor, linear_activation_factor=linear_activation_factor, quadratic_activation_factor=quadratic_activation_factor)
+
+
+    def add_state(self, state:csdl.Variable, initial_value:Optional[Union[csdl.Variable,npt.NDArray[np.float64]]]=None, 
+                  cost:Union[float,npt.NDArray[np.float64],csdl.Variable]=1.):
+        '''
+        Add a state to the parameterization problem.
+
+        Parameters
+        ----------
+        state : csdl.Variable
+            The state to be manipulated in order to help drive the geometric variables to their desired values.
+        initial_value : Union[csdl.Variable,npt.NDArray[np.float64]], optional
+            The initial value of the state, by default None. If None, the state is initialized to value assigned within the state variable.
         cost : Union[float,np.ndarray,csdl.Variable], optional
-            The cost of the parameter. This is the scaling factor for the quadratic cost/objective function.
+            The cost of the state. This is the scaling factor for the quadratic cost/objective function.
         '''
         # self.optimization.add_design_variable(parameter)
-        self.parameters.append(parameter)
-        self.parameter_costs.append(cost)
+        state_object = State(state=state, initial_value=initial_value, cost=cost)
+        self.states.append(state_object)
+        # self.state_costs.append(cost)
 
 
     def setup(self):
-        for parameter in self.parameters:
-            self.optimization.add_design_variable(parameter)
+        for state_object in self.states:
+            self.optimization.add_design_variable(design_variable=state_object.state, initial_value=state_object.initial_value)
         objective = 0
-        for parameter, cost in zip(self.parameters, self.parameter_costs):
+        for state_object in self.states:
+            state = state_object.state
+            cost = state_object.cost
             if isinstance(cost, (float,int)) or (cost.size==1):
                 # Cost is a scalar
-                objective = objective + csdl.vdot(parameter, cost*parameter)
+                objective = objective + csdl.vdot(state, cost*state)
             elif len(cost.shape) == 1:
                 # Cost is a vector
-                if cost.shape[0] != parameter.shape[0]:
-                    raise ValueError('The cost vector must be the same size as the parameter. The cost provided, {}, is of shape {}, but the parameter is of shape {}'.format(cost.name, cost.shape, parameter.shape))
-                objective = objective + csdl.vdot(parameter, cost*parameter)
+                if cost.shape[0] != state.shape[0]:
+                    raise ValueError('The cost vector must be the same size as the state. The cost provided, {}, is of shape {}, but the state is of shape {}'.format(cost.name, cost.shape, state.shape))
+                objective = objective + csdl.vdot(state, cost*state)
             elif len(cost.shape) == 2:
                 # Cost is a matrix
                 if cost.shape[0] != cost.shape[1]:
                     raise ValueError('The cost matrix must be square. The cost provided, {}, is of shape {}'.format(cost.name, cost.shape))
-                if cost.shape[0] != parameter.shape[0]:
-                    raise ValueError('The cost matrix must be the same size as the parameter. The cost provided, {}, is of shape {}, but the parameter is of shape {}'.format(cost.name, cost.shape, parameter.shape))
-                objective = objective + csdl.vdot(parameter, csdl.matvec(cost, parameter))
+                if cost.shape[0] != state.shape[0]:
+                    raise ValueError('The cost matrix must be the same size as the state. The cost provided, {}, is of shape {}, but the state is of shape {}'.format(cost.name, cost.shape, state.shape))
+                objective = objective + csdl.vdot(state, csdl.matvec(cost, state))
             else:
                 raise ValueError('The cost must be a scalar, vector, or matrix. The cost provided, {}, is of shape {}'.format(cost.name, cost.shape))
         self.optimization.add_objective(objective)
