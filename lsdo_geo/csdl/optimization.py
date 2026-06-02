@@ -352,7 +352,7 @@ class NewtonOptimizer:
     '''
     def __init__(self) -> None:
         # self.solver = csdl.nonlinear_solvers.Newton()
-        self.solver = csdl.nonlinear_solvers.Newton(residual_jac_kwargs={"loop": True, "concatenate_ofs": True}, tolerance=1.e-8)
+        self.solver = csdl.nonlinear_solvers.Newton(residual_jac_kwargs={"loop": True, "concatenate_ofs": True}, tolerance=1.e-12, print_status=True)
         # self.solver = csdl.nonlinear_solvers.Newton(residual_jac_kwargs={"loop": True, "concatenate_ofs": True})
         self.has_been_setup = False
 

@@ -17,10 +17,11 @@ recorder = csdl.Recorder(inline=True)
 recorder.start()
 
 # Import initiail geometry that will be deformed
-geometry = lsdo_geo.import_geometry(
+geometry = lfs.import_file_patched(
     "examples/example_geometries/rectangular_wing.stp",
     parallelize=False,
 )
+geometry = lsdo_geo.Geometry(functions=geometry.functions, space=geometry.space)
 # geometry.plot()
 # endregion Imports
 
@@ -99,8 +100,8 @@ ffd_sectional_parameterization = VolumeSectionalParameterization(
 # The coefficients will be used as the states of the parameterization solver, which will be manipulated to solve
 # for the desired geometry (satisfies the design parameters and constraints). The initial values are mainly for
 # debugging to see what the deformation modes do to the geometry since the solver will solve for the actual values.
-space_of_linear_3_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(3,))
-space_of_linear_2_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
+space_of_linear_3_dof_b_splines = lfs.BSplineSpaceNew(num_parametric_dimensions=1, degree=(1,), coefficients_shape=(3,))
+space_of_linear_2_dof_b_splines = lfs.BSplineSpaceNew(num_parametric_dimensions=1, degree=(1,), coefficients_shape=(2,))
 
 chord_stretching_b_spline = lfs.Function(space=space_of_linear_3_dof_b_splines,
                                          coefficients=csdl.Variable(shape=(3,), value=np.array([-0.8, 3., -0.8])), name='chord_stretching_b_spline_coefficients')
@@ -163,6 +164,11 @@ root_chord_outer_dv = csdl.Variable(shape=(1,), value=np.array([2.0]))
 tip_chord_outer_dv = csdl.Variable(shape=(1,), value=np.array([0.5]))
 sweep_angle_outer_dv = csdl.Variable(shape=(1,), value=np.array([30*np.pi/180]))
 
+wingspan_outer_dv.set_as_design_variable()
+root_chord_outer_dv.set_as_design_variable()
+tip_chord_outer_dv.set_as_design_variable()
+sweep_angle_outer_dv.set_as_design_variable()
+
 geometry_solver = ParameterizationSolver()
 
 # Define the states for the parameterization solver (solver will manipulate these to achieve the variables)
@@ -188,6 +194,23 @@ print("Sweep Angle Right: ", sweep_angle_right.value*180/np.pi) # type: ignore
 
 # geometry.plot()
 geometry_solver.evaluate(geometric_variables)
+
+coeffs = []
+
+for _, fun in geometry.functions.items():
+    coeffs.append(fun.coefficients.reshape((-1, 3)))
+
+total_coeffs = csdl.vstack(coeffs)
+objective = csdl.average(total_coeffs**2)
+objective.set_as_objective()
+
+sim = csdl.experimental.JaxSimulator(
+    recorder=recorder,
+    gpu=False,
+)   
+    
+sim.check_optimization_derivatives()
+
 geometry.plot()
 
 print()
