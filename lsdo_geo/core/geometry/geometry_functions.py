@@ -62,6 +62,8 @@ def rotate(points:Union[csdl.Variable,npt.NDArray[np.float64]], rotation_origin:
             # rotated_points = csdl.tensordot(points, rotation_matrix, axes=([-1], [0]))
             rotated_points = csdl.matmat(points - origin_expanded, rotation_matrix)
             rotated_points = rotated_points + origin_expanded
+            if points_out_shape is not None:
+                rotated_points = rotated_points.reshape(points_out_shape)
             return rotated_points
         elif np.allclose(axis_vector, np.array([0,1,0])) or np.allclose(axis_vector, np.array([0,-1,0])):
             if np.allclose(axis_vector, np.array([0,-1,0])):
@@ -81,6 +83,8 @@ def rotate(points:Union[csdl.Variable,npt.NDArray[np.float64]], rotation_origin:
             # rotated_points = csdl.tensordot(points, rotation_matrix, axes=([-1], [0]))
             rotated_points = csdl.matmat(points - origin_expanded, rotation_matrix)
             rotated_points = rotated_points + origin_expanded
+            if points_out_shape is not None:
+                rotated_points = rotated_points.reshape(points_out_shape)
             return rotated_points
         elif np.allclose(axis_vector, np.array([0,0,1])) or np.allclose(axis_vector, np.array([0,0,-1])):
             if np.allclose(axis_vector, np.array([0,-1,0])):
@@ -100,6 +104,8 @@ def rotate(points:Union[csdl.Variable,npt.NDArray[np.float64]], rotation_origin:
             # rotated_points = csdl.tensordot(points, rotation_matrix, axes=([-1], [0]))
             rotated_points = csdl.matmat(points - origin_expanded, rotation_matrix)
             rotated_points = rotated_points + origin_expanded
+            if points_out_shape is not None:
+                rotated_points = rotated_points.reshape(points_out_shape)
             return rotated_points
 
 

@@ -85,7 +85,7 @@ def construct_ffd_block_from_corners(entities:Union[Sequence[EntityType], Entity
 
 
 def construct_tight_fit_ffd_block(entities:Union[Sequence[EntityType], EntityType],
-                                    num_coefficients:Union[tuple[int,...], int]=5, degree:Union[tuple[int,...], int]=2, name:str='ffd_block') -> FFDBlock:
+                                    num_coefficients:Union[tuple[int,...], int]=2, degree:Union[tuple[int,...], int]=1, name:str='ffd_block') -> FFDBlock:
     '''
     Constructs an FFD block around the given entities and embeds them within.
     '''

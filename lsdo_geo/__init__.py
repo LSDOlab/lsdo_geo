@@ -4,6 +4,7 @@ from .core.geometry.mesh import Mesh
 from .core.parameterization.free_form_deformation_functions import *
 from .core.parameterization.ffd_block import FFDBlock
 from .core.parameterization.volume_sectional_parameterization import VolumeSectionalParameterization, VolumeSectionalParameterizationInputs
+from .core.parameterization.sectional_parameterization import SectionalParameterization, SectionalParameters
 from .core.parameterization.parameterization_solver import ParameterizationSolver, GeometricVariables
 
 from pathlib import Path
