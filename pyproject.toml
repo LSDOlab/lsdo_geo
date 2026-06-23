@@ -13,11 +13,12 @@ authors = [{name = "Andrew Fletcher", email = "afletcher168@gmail.com"}]
 dependencies = [
     'numpy',
     'vedo',
+    'pyvista',
     'joblib',
     'pandas',
     'scipy',
-    'csdl_alpha @ git+https://github.com/LSDOlab/CSDL_alpha.git',
-    'lsdo_function_spaces @ git+https://github.com/LSDOlab/lsdo_function_spaces.git'
+    #'csdl_alpha @ git+https://github.com/LSDOlab/CSDL_alpha.git',
+    #'lsdo_function_spaces @ git+https://github.com/LSDOlab/lsdo_function_spaces.git'
 ]
 version = "0.1.0"
 
