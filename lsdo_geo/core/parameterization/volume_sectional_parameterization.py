@@ -167,7 +167,7 @@ class VolumeSectionalParameterization:
 
         # Use points to create a B-spline to help with getting axes
         
-        helpful_b_spline_space = lfs.BSplineSpace(num_parametric_dimensions=len(self.parameterized_points_shape[:-1]),
+        helpful_b_spline_space = lfs.BSplineSpaceNew(num_parametric_dimensions=len(self.parameterized_points_shape[:-1]),
                                                   degree=1, coefficients_shape=self.parameterized_points_shape[:-1])
         fitting_parametric_values = helpful_b_spline_space.generate_parametric_grid(grid_resolution=self.parameterized_points_shape[:-1])
         self.helpful_b_spline = helpful_b_spline_space.fit_function(values=fitting_points, parametric_coordinates=fitting_parametric_values)
@@ -233,7 +233,8 @@ class VolumeSectionalParameterization:
 
             if isinstance(axis, int):
                 parametric_derivative_order = np.zeros(
-                    (len(self.parameterized_points_shape[:-1]))
+                    (len(self.parameterized_points_shape[:-1])),
+                    dtype=int
                 )
                 parametric_derivative_order[axis] = 1
                 parametric_derivative_order = tuple(parametric_derivative_order)
@@ -299,7 +300,8 @@ class VolumeSectionalParameterization:
                 self.sectional_principal_parametric_coordinate[i].reshape((1, -1))
             )
             parametric_derivative_order = np.zeros(
-                (len(self.parameterized_points_shape[:-1]))
+                (len(self.parameterized_points_shape[:-1])),
+                dtype=int
             )
             parametric_derivative_order[axis] = 1
             parametric_derivative_order = tuple(parametric_derivative_order)

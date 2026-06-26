@@ -22,6 +22,7 @@ geometry = lsdo_geo.import_geometry(
     parallelize=False,
 )
 # geometry.plot()
+
 # endregion Imports
 
 # region Key locations
@@ -99,8 +100,8 @@ ffd_sectional_parameterization = VolumeSectionalParameterization(
 # The coefficients will be used as the states of the parameterization solver, which will be manipulated to solve
 # for the desired geometry (satisfies the design parameters and constraints). The initial values are mainly for
 # debugging to see what the deformation modes do to the geometry since the solver will solve for the actual values.
-space_of_linear_3_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(3,))
-space_of_linear_2_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
+space_of_linear_3_dof_b_splines = lfs.BSplineSpaceNew(num_parametric_dimensions=1, degree=1, coefficients_shape=(3,))
+space_of_linear_2_dof_b_splines = lfs.BSplineSpaceNew(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
 
 chord_stretching_b_spline = lfs.Function(space=space_of_linear_3_dof_b_splines,
                                          coefficients=csdl.Variable(shape=(3,), value=np.array([-0.8, 3., -0.8])), name='chord_stretching_b_spline_coefficients')
@@ -143,6 +144,7 @@ rotation_axis = np.array([0., 1., 0.])
 rotation_origin = geometry.evaluate(geometry.project(np.array([0.0, 0.0, 0.0])))
 rotation_angle = 15
 geometry.rotate(rotation_origin, rotation_axis, rotation_angle, units='degrees')
+# geometry.plot()
 
 # Define the design parameters as a function of the geometry (which is now a function of the parameterization states)
 wingspan = csdl.norm(geometry.evaluate(leading_edge_right) - geometry.evaluate(leading_edge_left)) # type: ignore
@@ -201,3 +203,24 @@ print("Chord Stretching: ", chord_stretching_b_spline.coefficients.value) # type
 print("Wingspan Stretching: ", wingspan_stretching_b_spline.coefficients.value) # type: ignore
 print("Sweep Translation: ", sweep_translation_b_spline.coefficients.value) # type: ignore
 # endregion Setup and Evaluate Geometry Parameterization Solver
+
+upper_surface_wireframe = geometry.evaluate(upper_surface_wireframe_parametric, plot=False)
+lower_surface_wireframe = geometry.evaluate(lower_surface_wireframe_parametric, plot=False)
+camber_surface = csdl.linear_combination(upper_surface_wireframe, lower_surface_wireframe, 1).reshape((num_chordwise, num_spanwise, 3))
+
+jax_sim = csdl.experimental.JaxSimulator(
+    recorder=recorder,
+    additional_inputs=[wingspan_outer_dv, root_chord_outer_dv, tip_chord_outer_dv, sweep_angle_outer_dv],
+    additional_outputs=[camber_surface],
+    gpu=False
+)
+
+import time
+start_time = time.time()
+jax_sim.run()
+end_time = time.time()
+print("Simulation Time: ", end_time - start_time)
+start_time = time.time()
+jax_sim.run()
+end_time = time.time()
+print("Simulation Time: ", end_time - start_time)
