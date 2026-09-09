@@ -1,4 +1,4 @@
-# 3. Mathematical Formulation of Shape Optimization
+# Mathematical Formulation of Shape Optimization
 
 To establish a rigorous theoretical foundation for geometry parameterization, this section formulates the progression from the continuous, infinite-dimensional shape optimization problem to the discretized and parameterized formulations {cite:p}`fletcher2026implicit`.
 

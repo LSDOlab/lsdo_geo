@@ -1,4 +1,4 @@
-# 1. Geometry-Centric MDO & Parameterization
+# Geometry-Centric MDO & Parameterization
 
 Modern engineering design frequently tackles complex, high-dimensional systems involving tightly coupled physical phenomena—such as electric vertical take-off and landing (eVTOL) aircraft, soft swimming robots, hypersonic and laser-powered vehicles, and legged robotic platforms. 
 

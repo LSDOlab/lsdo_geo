@@ -1,4 +1,4 @@
-# 2. Survey of Geometry Parameterization Methods
+# Survey of Geometry Parameterization Methods
 
 Existing techniques for geometric parameterization in design optimization generally fall into three major paradigms: **constructive**, **deformational**, and **constraint-based** methods {cite:p}`fletcher2026implicit`. Each offers distinct trade-offs between flexibility, interpretability, and differentiability.
 

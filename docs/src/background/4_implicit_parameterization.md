@@ -1,4 +1,4 @@
-# 4. Implicit Nonlinear Parameterization Framework
+# Implicit Nonlinear Parameterization Framework
 
 The defining innovation of `lsdo_geo` is formulating the parameterization mapping $P$ itself as an **inner nonlinear optimization problem** {cite:p}`fletcher2026implicit`. Rather than attempting to derive closed-form explicit functions for complex multi-component interactions, an optimization solver dynamically enforces application-tailored engineering variables and geometric feasibility constraints.
 

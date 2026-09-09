@@ -1,4 +1,4 @@
-# 5. Solvers, Adjoints & Computational Graph Synergy
+# Solvers, Adjoints & Computational Graph Synergy
 
 Executing an inner optimization problem at every geometry evaluation introduces two critical mathematical requirements:
 1. Solving the nested nonlinear system rapidly and robustly.

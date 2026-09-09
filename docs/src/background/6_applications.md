@@ -1,4 +1,4 @@
-# 6. Multidisciplinary Applications & Case Studies
+# Multidisciplinary Applications & Case Studies
 
 The implicit nonlinear geometry parameterization framework implemented in `lsdo_geo` has been benchmarked and deployed across a diverse spectrum of large-scale multidisciplinary design optimization problems {cite:p}`fletcher2026implicit`.
 
