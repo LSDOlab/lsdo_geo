@@ -23,11 +23,10 @@ sphinx:
    # builder: html
    # fail_on_warning: true
 
-# If using Sphinx, optionally build your docs in additional formats such as PDF
-formats:
-   - pdf
-   - epub
-   - htmlzip
+# formats:
+#    - pdf
+#    - epub
+#    - htmlzip
 
 # Optionally declare the Python requirements required to build your docs
 python:

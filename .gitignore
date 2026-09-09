@@ -141,3 +141,21 @@ _conf_master.py
 
 # IGNORE THE pickle FILES
 *.pickle
+*.pkl
+
+# Conda environment in root
+.conda/
+
+# IDE settings
+.vscode/
+.vsptime
+
+# Output directories & scratch scripts
+*_outputs/
+debug_*.py
+temp_*.py
+
+# Generated media / figures (preserving documentation assets)
+*.mp4
+*.png
+!docs/src/images/*.png
