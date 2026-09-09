@@ -12,8 +12,7 @@ This section provides the complete reference for the `lsdo_geo` application prog
 |:---|:---|:---|
 | **[`lsdo_geo.core.geometry`](autoapi/lsdo_geo/core/geometry/index)** | [`Geometry`](autoapi/lsdo_geo/core/geometry/geometry/index), [`Mesh`](autoapi/lsdo_geo/core/geometry/mesh/index), `geometry_functions` | Geometry representations, surface and volume meshes, CAD imports, and spatial transformations. |
 | **[`lsdo_geo.core.parameterization`](autoapi/lsdo_geo/core/parameterization/index)** | [`ParameterizationSolver`](autoapi/lsdo_geo/core/parameterization/parameterization_solver/index), [`GeometricVariables`](autoapi/lsdo_geo/core/parameterization/parameterization_solver/index), [`FFDBlock`](autoapi/lsdo_geo/core/parameterization/ffd_block/index), [`SectionalParameterization`](autoapi/lsdo_geo/core/parameterization/sectional_parameterization/index) | Implicit nonlinear solver, Free-Form Deformation lattices, and sectional deformation modes. |
-| **[`lsdo_geo.csdl`](autoapi/lsdo_geo/csdl/index)** | [`Optimization`](autoapi/lsdo_geo/csdl/optimization/index) | Interface connecting geometric states and constraints into CSDL graph models for analytic adjoint sensitivity analysis. |
-| **[`lsdo_geo.splines`](autoapi/lsdo_geo/splines/index)** | `B-Splines` | Underlying B-spline curves, surfaces, and volumes supporting geometric definitions. |
+| **[`lsdo_geo.optimization`](autoapi/lsdo_geo/optimization/index)** | [`Optimization`](autoapi/lsdo_geo/optimization/optimization/index) | Interface connecting geometric states and constraints into CSDL graph models for analytic adjoint sensitivity analysis. |
 | **[`lsdo_geo.utils`](autoapi/lsdo_geo/utils/index)** | `geometry_functions` | Helper mathematical and geometric utilities. |
 
 ---

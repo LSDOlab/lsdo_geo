@@ -1,4 +1,4 @@
-from lsdo_geo.csdl.optimization import Optimization, NewtonOptimizer
+from lsdo_geo.optimization.optimization import Optimization, NewtonOptimizer
 import csdl_alpha as csdl
 import numpy as np
 import numpy.typing as npt

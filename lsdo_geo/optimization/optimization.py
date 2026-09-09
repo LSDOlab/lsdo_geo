@@ -352,7 +352,8 @@ class NewtonOptimizer:
     '''
     def __init__(self) -> None:
         # self.solver = csdl.nonlinear_solvers.Newton()
-        self.solver = csdl.nonlinear_solvers.Newton(residual_jac_kwargs={"loop": True, "concatenate_ofs": True}, tolerance=1.e-8)
+        self.solver = csdl.nonlinear_solvers.Newton(residual_jac_kwargs={"loop": False, "concatenate_ofs": False})
+        # self.solver = csdl.nonlinear_solvers.Newton(residual_jac_kwargs={"loop": True, "concatenate_ofs": False})
         # self.solver = csdl.nonlinear_solvers.Newton(residual_jac_kwargs={"loop": True, "concatenate_ofs": True})
         self.has_been_setup = False
 
@@ -378,6 +379,50 @@ class NewtonOptimizer:
     def run(self):
         '''
         Runs the Newton Optimization.
+
+        NOTE: CSDL state/design variables are already updated and therefore are not needed to be returned.
+        '''
+        if not self.has_been_setup:
+            self.setup()
+        self.solver.run()
+
+
+class OneNewtonStep:
+    ''' 
+    This is really for when the optimization problem has quadratic objective and linear equality constraints (and no inequalities)
+    so the problem can be solved with a single linear solve.
+    '''
+    def __init__(self) -> None:
+        self.has_been_setup = False
+
+    def add_optimization(self, optimization:Optimization):
+        '''
+        Add an optimization problem to the optimizer.
+        '''
+        self.optimization = optimization
+
+    def setup(self):
+        '''
+        Computes the Hessian more efficiently assuming the quadratic/linear structure
+        '''
+        num_design_variables = sum([dv.variable.size for dv in self.optimization.design_variables])
+        num_equality_constraints = sum([constraint_object.constraint.size for constraint_object in self.optimization.equality_constraints])
+        df_dx = csdl.derivative(self.optimization.objective, [dv.variable for dv in self.optimization.design_variables]).flatten()
+        d2f_dx2 = csdl.derivative(df_dx, [dv.variable for dv in self.optimization.design_variables])
+
+        dc_dx = csdl.derivative([constraint_object.constraint for constraint_object in self.optimization.equality_constraints], [dv.variable for dv in self.optimization.design_variables])
+        
+        # Construct the KKT matrix
+        KKT_matrix = csdl.zeros((num_design_variables + num_equality_constraints, num_design_variables + num_equality_constraints))
+        KKT_matrix[:num_design_variables, :num_design_variables] = d2f_dx2  # no lambda @ d^2c/dx^2 since constraints are linear
+        KKT_matrix[:num_design_variables, num_design_variables:] = dc_dx
+        KKT_matrix[num_design_variables:, :num_design_variables] = dc_dx.T
+
+        self.has_been_setup = True
+
+    def run(self):
+        '''
+        Runs the linear solve.
 
         NOTE: CSDL state/design variables are already updated and therefore are not needed to be returned.
         '''
