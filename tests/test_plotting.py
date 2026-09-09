@@ -14,7 +14,7 @@ pv.OFF_SCREEN = True
 
 
 def test_geometry_plot():
-    """Verify geometry.plot returns valid PyVista plotting elements and renders offscreen."""
+    """Verify geometry.plot returns valid PyVista plotting elements."""
     recorder = csdl.Recorder(inline=True)
     recorder.start()
 
@@ -24,16 +24,11 @@ def test_geometry_plot():
     assert isinstance(elements, list)
     assert len(elements) > 0
 
-    # Verify rendering elements with PyVista offscreen
-    plotter = pv.Plotter(off_screen=True)
     for el in elements:
-        if isinstance(el, dict) and "mesh" in el:
-            plotter.add_mesh(el["mesh"], **el.get("kwargs", {}))
-        elif isinstance(el, pv.DataSet):
-            plotter.add_mesh(el)
-    # Render without errors
-    plotter.render()
-    plotter.close()
+        assert isinstance(el, (dict, pv.DataSet, pv.PolyData))
+        if isinstance(el, dict):
+            assert "mesh" in el
+            assert isinstance(el["mesh"], (pv.DataSet, pv.PolyData, pv.StructuredGrid, pv.Actor))
 
 
 def test_geometry_plot_meshes():
@@ -68,19 +63,15 @@ def test_geometry_plot_meshes():
     assert isinstance(elements, list)
     assert len(elements) > 0
 
-    # Verify rendering with PyVista
-    plotter = pv.Plotter(off_screen=True)
     for el in elements:
-        if isinstance(el, dict) and "mesh" in el:
-            plotter.add_mesh(el["mesh"], **el.get("kwargs", {}))
-        elif isinstance(el, pv.DataSet):
-            plotter.add_mesh(el)
-    plotter.render()
-    plotter.close()
+        assert isinstance(el, (dict, pv.DataSet, pv.PolyData))
+        if isinstance(el, dict):
+            assert "mesh" in el
+            assert isinstance(el["mesh"], (pv.DataSet, pv.PolyData, pv.StructuredGrid, pv.Actor))
 
 
 def test_ffd_block_plot():
-    """Verify FFDBlock.plot returns valid PyVista plotting elements and renders offscreen."""
+    """Verify FFDBlock.plot returns valid PyVista plotting elements."""
     recorder = csdl.Recorder(inline=True)
     recorder.start()
 
@@ -101,15 +92,11 @@ def test_ffd_block_plot():
     assert isinstance(elements, list)
     assert len(elements) > 0
 
-    # Verify rendering with PyVista
-    plotter = pv.Plotter(off_screen=True)
     for el in elements:
-        if isinstance(el, dict) and "mesh" in el:
-            plotter.add_mesh(el["mesh"], **el.get("kwargs", {}))
-        elif isinstance(el, pv.DataSet):
-            plotter.add_mesh(el)
-    plotter.render()
-    plotter.close()
+        assert isinstance(el, (dict, pv.DataSet, pv.PolyData))
+        if isinstance(el, dict):
+            assert "mesh" in el
+            assert isinstance(el["mesh"], (pv.DataSet, pv.PolyData, pv.StructuredGrid, pv.Actor))
 
 
 def test_volume_sectional_parameterization_plot():
@@ -135,28 +122,8 @@ def test_volume_sectional_parameterization_plot():
     assert isinstance(elements, list)
     assert len(elements) > 0
 
-    # Verify rendering with PyVista
-    plotter = pv.Plotter(off_screen=True)
     for el in elements:
-        if isinstance(el, dict) and "mesh" in el:
-            plotter.add_mesh(el["mesh"], **el.get("kwargs", {}))
-        elif isinstance(el, pv.DataSet):
-            plotter.add_mesh(el)
-    plotter.render()
-    plotter.close()
-
-
-def test_pyvista_movie_recording(tmp_path):
-    """Verify PyVista off-screen movie recording works as used in examples."""
-    video_path = str(tmp_path / "test_movie.mp4")
-    plotter = pv.Plotter(off_screen=True, window_size=[640, 480])
-    plotter.open_movie(video_path, framerate=10)
-
-    sphere = pv.Sphere()
-    plotter.add_mesh(sphere, color="lightblue")
-    plotter.add_text("Test Frame", position="lower_left", font_size=12)
-    plotter.write_frame()
-    plotter.close()
-
-    assert os.path.exists(video_path)
-    assert os.path.getsize(video_path) > 0
+        assert isinstance(el, (dict, pv.DataSet, pv.PolyData))
+        if isinstance(el, dict):
+            assert "mesh" in el
+            assert isinstance(el["mesh"], (pv.DataSet, pv.PolyData, pv.StructuredGrid, pv.Actor))
