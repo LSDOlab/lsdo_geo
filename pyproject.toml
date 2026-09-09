@@ -12,7 +12,7 @@ keywords = ["geoemtry", "parameterization", "meshing", "representation", "modeli
 authors = [{name = "Andrew Fletcher", email = "afletcher168@gmail.com"}]
 dependencies = [
     'numpy',
-    'vedo',
+    #'vedo',
     'pyvista',
     'joblib',
     'pandas',
@@ -23,17 +23,18 @@ dependencies = [
 version = "0.1.0"
 
 [project.optional-dependencies]
-test = ['pytest']
+test = [
+    'pytest',
+    'pytest-cov',
+]
 docs = [
     'myst-nb',
-    'sphinx==5.3.0',
+    'sphinx>=7.0',
     'sphinx_rtd_theme',
     'sphinx-copybutton',
-    'sphinx-autoapi==2.1.0',
-    'astroid==2.15.5',
+    'sphinx-autoapi>=3.0',
     'numpydoc',
     'gitpython',
-    'sphinxcontrib-collections @ git+https://github.com/anugrahjo/sphinx-collections.git',
     'sphinxcontrib-bibtex',
 ]
 
@@ -41,4 +42,12 @@ docs = [
 package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
-exclude = ["tutorials"]
+exclude = ["tutorials", "examples", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = [".conda", ".git", "build", "dist", "examples", "tutorials"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "optimization: marks long-running optimization test cases",
+]

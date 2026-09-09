@@ -1,17 +1,8 @@
-# Basic examples
+# Basic Examples
 
-These pages for each category of examples are optional 
-and are required only if you plan to classify your examples
-into different classes such as basic, intermediate, advanced, etc.
-or any other classification suitable for your package.
-If no classification is required, just remove these pages
-and add the example files directly into the toctree of the main
-examples page.
+The `examples/basic_examples` directory contains scripts demonstrating fundamental geometry parameterizations and optimizations:
 
-```{toctree}
-:maxdepth: 1
-
-../_temp/examples/basic_examples/ex_1quartic_opt_csdl
-../_temp/examples/basic_examples/ex_2quartic_opt_modopt
-../_temp/examples/basic_examples/ex_4simple_example
-```
+* **`ex_rectangular_wing.py`**: Baseline rectangular wing geometry representation and mesh generation.
+* **`ex_rectangular_wing_to_bwb.py`**: Continuous morphing and parameterization from a rectangular wing to a blended wing-body (BWB) layout.
+* **`ex_rectangular_wing_aero_shape_optimization.py`**: Coupled aerodynamic shape optimization using CSDL and VLM.
+* **`ex_rectangular_wing_aerostructural_optimization.py`**: Aerostructural coupling and MDO of a lifting surface with geometric variables.

@@ -1,15 +1,6 @@
-# Basic tutorials
+# Basic Tutorials
 
-These pages for each category of tutorials are optional 
-and are required only if you plan to classify your tutorials
-into different classes such as basic, intermediate, advanced, etc.
-or any other classification suitable for your package.
-If no classification is required, just remove these pages
-and add the tutorial files directly into the toctree of the main
-tutorials page.
+Interactive Jupyter notebooks covering the fundamentals of `lsdo_geo`:
 
-```{toctree}
-:maxdepth: 1
-
-../_temp/tutorials/basic_tutorials/jupyter_tutorial
-```
+* **Geometry Representation**: Introduction to `lsdo_geo.Geometry`, defining surfaces, and evaluating spatial representations.
+* **Basic Meshing**: Generating and projecting surface meshes with CSDL variables.

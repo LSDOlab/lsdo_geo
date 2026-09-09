@@ -1,26 +1,19 @@
-# Welcome to lsdo_project_template
+# Welcome to lsdo_geo
 
-![alt text](/src/images/lsdolab.png "Title displayed")
+![LSDO Lab](/src/images/lsdolab.png "LSDO Lab")
 
-This page describes conceptually the purpose of your package at a high-level.
-Start with a one sentence description of your package.
-For example, "This repository serves as a template for all LSDOlab projects with regard to documentation, testing and hosting of open-source code."
-Include figures from the relevant paper and citation.
+**lsdo_geo** is a Python library for geometry and state modeling/representation, parameterization, and mesh generation tailored for Multidisciplinary Design Optimization (MDO).
+
+It integrates with [CSDL](https://github.com/LSDOlab/csdl) / CSDL Alpha and provides analytic derivative-compatible parameterizations (such as Free-Form Deformation (FFD) and B-spline sectional parameterization) and automated mesh projection.
 
 # Cite us
 ```none
-@article{lsdo2023,
-        Author = { Author 1, Author 2, and Author 3},
-        Journal = {Name of the Journal},
-        Title = {Title of your paper},
-        pages = {203},
-        year = {2023},
-        issn = {0123-4567},
-        doi = {https://doi.org/}
-        }
+@article{lsdo_geo,
+    author = {Andrew Fletcher},
+    title = {lsdo_geo: Geometry Representation and Parameterization for MDO},
+    year = {2024}
+}
 ```
-
-<!-- Remove/add custom pages from/to toc as per your package's requirement -->
 
 ```{toctree}
 :maxdepth: 1
@@ -29,8 +22,6 @@ Include figures from the relevant paper and citation.
 src/getting_started
 src/background
 src/tutorials
-src/custom_1
-src/custom_2
 src/examples
 src/api
 ```
