@@ -24,6 +24,7 @@ jobs:
     - name: Install dependencies
       run: | 
         python -m pip install --upgrade pip
+        pip install jax networkx
         pip install git+https://github.com/LSDOlab/CSDL_alpha.git@dev_andrew
         pip install git+https://github.com/LSDOlab/lsdo_function_spaces.git
         pip install -e ".[test,docs]"

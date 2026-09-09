@@ -526,9 +526,7 @@ beam_heights = csdl.norm(beam_tops - beam_bottoms, axes=(1,))
 # # Figure plotting the meshes
 # plotting_elements = geometry.plot_meshes([wing_camber_surface, h_tail_camber_surface], function_opacity=0.5, mesh_color='#FFCD00', show=False)
 # plotting_elements = geometry.plot_meshes([wing_beam_mesh], mesh_line_width=10, function_opacity=0., additional_plotting_elements=plotting_elements, show=False)
-# import vedo
-# plotter = vedo.Plotter()
-# plotter.show(plotting_elements, axes=0, viewup='z')
+# lfs.show_plot(plotting_elements, 'Meshes', axes=False, view_up='z')
 # endregion
 
 # region Parameterization
@@ -568,10 +566,10 @@ wing_translation_z_coefficients = csdl.Variable(name='wing_translation_z_coeffic
 wing_translation_z_b_spline = lfs.Function(name='wing_translation_z_b_spline', space=constant_b_spline_curve_1_dof_space,
                                           coefficients=wing_translation_z_coefficients)
 
-parameterization_solver.add_state(parameter=wing_chord_stretch_coefficients)
-parameterization_solver.add_state(parameter=wing_wingspan_stretch_coefficients, cost=1.e3)
-parameterization_solver.add_state(parameter=wing_translation_x_coefficients)
-parameterization_solver.add_state(parameter=wing_translation_z_coefficients)
+parameterization_solver.add_state(state=wing_chord_stretch_coefficients)
+parameterization_solver.add_state(state=wing_wingspan_stretch_coefficients, cost=1.e3)
+parameterization_solver.add_state(state=wing_translation_x_coefficients)
+parameterization_solver.add_state(state=wing_translation_z_coefficients)
 # endregion Wing Parameterization setup
 
 # region Horizontal Stabilizer setup
@@ -599,10 +597,10 @@ h_tail_translation_z_coefficients = csdl.Variable(name='h_tail_translation_z_coe
 h_tail_translation_z_b_spline = lfs.Function(name='h_tail_translation_z_b_spline', space=constant_b_spline_curve_1_dof_space,
                                           coefficients=h_tail_translation_z_coefficients)
 
-parameterization_solver.add_state(parameter=h_tail_chord_stretch_coefficients)
-parameterization_solver.add_state(parameter=h_tail_span_stretch_coefficients)
-parameterization_solver.add_state(parameter=h_tail_translation_x_coefficients)
-parameterization_solver.add_state(parameter=h_tail_translation_z_coefficients)
+parameterization_solver.add_state(state=h_tail_chord_stretch_coefficients)
+parameterization_solver.add_state(state=h_tail_span_stretch_coefficients)
+parameterization_solver.add_state(state=h_tail_translation_x_coefficients)
+parameterization_solver.add_state(state=h_tail_translation_z_coefficients)
 # endregion Horizontal Stabilizer setup
 
 # region Fuselage setup
@@ -616,7 +614,7 @@ fuselage_stretch_coefficients = csdl.Variable(name='fuselage_stretch_coefficient
 fuselage_stretch_b_spline = lfs.Function(name='fuselage_stretch_b_spline', space=linear_b_spline_curve_2_dof_space, 
                                           coefficients=fuselage_stretch_coefficients)
 
-parameterization_solver.add_state(parameter=fuselage_stretch_coefficients)
+parameterization_solver.add_state(state=fuselage_stretch_coefficients)
 # endregion
 
 # region Lift Rotors setup
@@ -637,7 +635,7 @@ for i, component_set in enumerate(lift_rotor_related_components):
     lift_rotor_sectional_parameterizations.append(rotor_ffd_block_sectional_parameterization)
     lift_rotor_parameterization_b_splines.append(lift_rotor_sectional_stretch_b_spline)                 
 
-    parameterization_solver.add_state(parameter=rotor_stretch_coefficient)
+    parameterization_solver.add_state(state=rotor_stretch_coefficient)
 # endregion Lift Rotors setup
 
 # # region Plot parameterization
@@ -654,9 +652,7 @@ for i, component_set in enumerate(lift_rotor_related_components):
 # for rotor_ffd_block_sectional_parameterization in lift_rotor_sectional_parameterizations:
 #     plotting_elements = rotor_ffd_block_sectional_parameterization.plot(opacity=0.5, color='#182B49', additional_plotting_elements=plotting_elements, show=False)
 
-# import vedo
-# plotter = vedo.Plotter()
-# plotter.show(plotting_elements, axes=0, viewup='z')
+# lfs.show_plot(plotting_elements, 'Parameterization', axes=False, view_up='z')
 # exit()
 
 # # endregion Plot parameterization
@@ -771,7 +767,7 @@ for i, component_set in enumerate(lift_rotor_related_components):
     for function in boom.functions.values():
         function.coefficients = function.coefficients + csdl.expand(rigid_body_translation, function.coefficients.shape, action='k->ijk')
 
-    parameterization_solver.add_state(parameter=rigid_body_translation)
+    parameterization_solver.add_state(state=rigid_body_translation)
 # endregion Lift Rotors rigid body translation
 
 # region pusher rigid body translation
@@ -780,7 +776,7 @@ for component in pp_components:
     for function in component.functions.values():
         function.coefficients = function.coefficients + csdl.expand(rigid_body_translation, function.coefficients.shape, action='k->ijk')
 
-parameterization_solver.add_state(parameter=rigid_body_translation)
+parameterization_solver.add_state(state=rigid_body_translation)
 # endregion pusher rigid body translation
 
 # region Vertical Stabilizer rigid body translation
@@ -788,7 +784,7 @@ rigid_body_translation = csdl.Variable(shape=(3,), value=0., name='pp_rotor_rigi
 for function in v_tail.functions.values():
     function.coefficients = function.coefficients + csdl.expand(rigid_body_translation, function.coefficients.shape, action='k->ijk')
 
-parameterization_solver.add_state(parameter=rigid_body_translation)
+parameterization_solver.add_state(state=rigid_body_translation)
 # endregion Vertical Stabilizer rigid body translation
 
 # endregion Parameterization Solver Setup Evaluations
@@ -879,7 +875,7 @@ list_of_constraint_arrays = parameterization_design_parameters.computed_value
 num_constraints = np.sum([list_of_constraint_arrays[i].shape[0] for i in range(len(list_of_constraint_arrays))])
 print('Number of constraints: ', num_constraints)
 
-list_of_states_arrays = parameterization_solver.parameters
+list_of_states_arrays = parameterization_solver.states
 num_states = np.sum([list_of_states_arrays[i].shape[0] for i in range(len(list_of_states_arrays))])
 print('Number of states: ', num_states)
 

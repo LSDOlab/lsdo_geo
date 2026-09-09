@@ -609,18 +609,14 @@ class VolumeSectionalParameterization:
                                                 additional_plotting_elements=plotting_elements, show=False)
 
         if show:
-            import vedo
-            plotter = vedo.Plotter()
-            plotter.show(
+            lfs.show_plot(
                 plotting_elements,
                 f"Parameterized Sections: {self.name}",
-                axes=1,
-                viewup="z",
+                axes=True,
+                view_up="z",
                 interactive=True,
             )
-            return plotting_elements
-        else:
-            return plotting_elements
+        return plotting_elements
 
 
 def _get_parametric_coordinate(

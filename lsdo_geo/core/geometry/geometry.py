@@ -11,7 +11,7 @@ import csdl_alpha as csdl
 # from lsdo_geo.splines.b_splines.b_spline_sub_set import BSplineSubSet
 import lsdo_function_spaces as lfs
 import lsdo_geo as lg
-import vedo
+import pyvista as pv
 from typing import Optional, Union, Sequence
 
 @dataclass
@@ -343,7 +343,7 @@ class Geometry(lfs.FunctionSet):
                 mesh_color_map:str='jet', mesh_line_width:float=3.,
                 function_indices:Optional[list[str]]=None, function_plot_types:list[str]=['function'], function_opacity:float=0.25, function_color:str='#00629B',
                 function_color_map:str='jet', function_surface_texture:str="",
-                additional_plotting_elements:list[vedo.PointsVisual]=[], camera:Optional[dict[str,tuple[int]]]=None, show:bool=True) -> list[vedo.PointsVisual]:
+                additional_plotting_elements:list=[], camera:Optional[dict]=None, show:bool=True) -> list:
         '''
         Plots a mesh over the geometry.
 
@@ -371,23 +371,22 @@ class Geometry(lfs.FunctionSet):
             The color of the function.
         function_color_map : str, optional = 'jet'
             The color map for the function.
-        function_surface_texture : str {"", "metallic", "glossy", "ambient",... see Vedo for more options}
-            The surface texture for the primitive surfaces. (determines how light bounces off)
-            More options: https://github.com/marcomusy/vedo/blob/master/examples/basic/lightings.py
+        function_surface_texture : str, optional
+            The surface texture for the primitive surfaces.
         additional_plotting_elements : list, optional
             A list of additional plotting elements to plot.
         camera : dict, optional
-            A dictionary of camera parameters. see Vedo documentation for more information.
+            A dictionary of camera parameters for PyVista.
         show : bool, optional
             Whether or not to show the plot.
 
         Returns
         -------
         plotting_elements : list
-            A list of the vedo plotting elements.
+            A list of the PyVista plotting elements.
         '''
-        import vedo
         import lsdo_function_spaces.utils.plotting_functions as pf
+        import pyvista as pv
         plotting_elements = additional_plotting_elements.copy()
 
         if not isinstance(meshes, list) and not isinstance(meshes, tuple):
@@ -395,7 +394,7 @@ class Geometry(lfs.FunctionSet):
 
         # Create plotting meshes for the functions/geometry
         plotting_elements = self.plot(point_types=['evaluated_points'], plot_types=function_plot_types, opacity=function_opacity,
-                                      color=function_color, color_map=function_color_map, surface_texture=function_surface_texture,
+                                      color=function_color, color_map=function_color_map,
                                       additional_plotting_elements=plotting_elements, show=False)
 
         for mesh in meshes:
@@ -412,9 +411,12 @@ class Geometry(lfs.FunctionSet):
                         processed_points = processed_points + (point.value,)
                     else:
                         processed_points = processed_points + (point,)
-                arrow = vedo.Arrow(tuple(processed_points[0].reshape((-1,))), 
-                                   tuple((processed_points[0] + processed_points[1]).reshape((-1,))), s=0.05)
-                plotting_elements.append(arrow)
+                start = np.asarray(processed_points[0]).reshape((3,))
+                direction = np.asarray(processed_points[1]).reshape((3,))
+                norm = np.linalg.norm(direction)
+                if norm > 0:
+                    arrow = pv.Arrow(start=start, direction=direction, scale=norm)
+                    plotting_elements.append({"mesh": arrow, "kwargs": dict(color=mesh_color)})
                 continue
 
             if 'point_cloud' in mesh_plot_types:
@@ -425,44 +427,25 @@ class Geometry(lfs.FunctionSet):
                 points = points.reshape((points.shape[1:]))
 
             if len(points.shape) == 2:  # If it's a curve
-                from vedo import Line
-                plotting_elements.append(Line(points).color(mesh_color).linewidth(mesh_line_width))
-                
+                plotting_elements = pf.plot_curve(points, opacity=mesh_opacity, color=mesh_color, 
+                                                 color_map=mesh_color_map, line_width=mesh_line_width, 
+                                                 additional_plotting_elements=plotting_elements, show=False)
                 if 'wireframe' in mesh_plot_types:
-                    num_points = np.cumprod(points.shape[:-1])[-1]
-                    plotting_elements.append(vedo.Points(points.reshape((num_points,-1)), r=20).color(mesh_color))
+                    plotting_elements = pf.plot_points(points, opacity=mesh_opacity, color=mesh_color,
+                                                       size=6., additional_plotting_elements=plotting_elements, show=False)
                 continue
 
-            if ('surface' in mesh_plot_types or 'wireframe' in mesh_plot_types) and len(points.shape) == 3: # If it's a surface
-                num_points_u = points.shape[0]
-                num_points_v = points.shape[1]
-                num_points = num_points_u*num_points_v
-                vertices = []
-                faces = []
-                for u_index in range(num_points_u):
-                    for v_index in range(num_points_v):
-                        vertex = tuple(points[u_index,v_index,:])
-                        vertices.append(vertex)
-                        if u_index != 0 and v_index != 0:
-                            face = tuple((
-                                (u_index-1)*num_points_v+(v_index-1),
-                                (u_index-1)*num_points_v+(v_index),
-                                (u_index)*num_points_v+(v_index),
-                                (u_index)*num_points_v+(v_index-1),
-                            ))
-                            faces.append(face)
+            if ('surface' in mesh_plot_types or 'wireframe' in mesh_plot_types) and len(points.shape) == 3:  # If it's a surface
+                surface_types = [t for t in mesh_plot_types if t in ['surface', 'wireframe']]
+                # Map 'surface' to 'function' for lfs.plot_surface
+                mapped_types = ['function' if t == 'surface' else t for t in surface_types]
+                plotting_elements = pf.plot_surface(points, plot_types=mapped_types, opacity=mesh_opacity,
+                                                    color=mesh_color, color_map=mesh_color_map,
+                                                    line_width=mesh_line_width,
+                                                    additional_plotting_elements=plotting_elements, show=False)
 
-                plotting_mesh = vedo.Mesh([vertices, faces]).opacity(mesh_opacity).color('lightblue')
-            if 'surface' in mesh_plot_types:
-                plotting_elements.append(plotting_mesh)
-            if 'wireframe' in mesh_plot_types:
-                # plotting_mesh = vedo.Mesh([vertices, faces]).opacity(mesh_opacity).color('blue')
-                plotting_mesh = vedo.Mesh([vertices, faces]).opacity(mesh_opacity).color(mesh_color) # Default is UCSD Sand
-                plotting_elements.append(plotting_mesh.wireframe().linewidth(mesh_line_width))
-            
         if show:
-            plotter = vedo.Plotter()
-            plotter.show(plotting_elements, 'Meshes', axes=1, viewup="z", interactive=True, camera=camera)
+            pf.show_plot(plotting_elements, 'Meshes', axes=True, view_up="z", interactive=True, camera=camera if camera else {})
 
         return plotting_elements
     

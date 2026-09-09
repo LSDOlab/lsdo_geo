@@ -286,8 +286,6 @@ class FFDBlock(lfs.Function):
                                                     additional_plotting_elements=plotting_elements, show=False)
 
         if show:
-            # plotter = vedo.Plotter()
-            # plotter.show(plotting_elements, f'Free Form Deformation Block: {self.name}', axes=1, viewup="z", interactive=True)
             if self.name is not None:
                 lfs.show_plot(plotting_elements, f'Free Form Deformation Block: {self.name}', axes=1, interactive=True)
             else:

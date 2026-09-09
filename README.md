@@ -68,10 +68,11 @@ rotated_points = lg.rotate(
 ## Installation
 
 ### Prerequisites & Installation
-`lsdo_geo` relies on `CSDL_alpha` and `lsdo_function_spaces`. Install them alongside `lsdo_geo`:
+`lsdo_geo` relies on `CSDL_alpha` and `lsdo_function_spaces`:
 
 ```sh
 # 1. Install dependencies
+pip install jax networkx
 pip install git+https://github.com/LSDOlab/CSDL_alpha.git@dev_andrew
 pip install git+https://github.com/LSDOlab/lsdo_function_spaces.git
 
@@ -84,6 +85,7 @@ Clone the repository and install in editable mode with testing and documentation
 ```sh
 git clone https://github.com/afletche/lsdo_geo.git
 cd lsdo_geo
+pip install jax networkx
 pip install git+https://github.com/LSDOlab/CSDL_alpha.git@dev_andrew
 pip install git+https://github.com/LSDOlab/lsdo_function_spaces.git
 pip install -e ".[test,docs]"

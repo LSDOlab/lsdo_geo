@@ -392,9 +392,11 @@ jax_sim = csdl.experimental.JaxSimulator(
 jax_sim.run()
 
 # Geometry Variables Video
-import vedo
+import pyvista as pv
 
-video = vedo.Video(name="examples/advanced_examples/blended_wing_body/bwb_no_solver_geometric_variables.mp4", fps=11, backend='opencv')
+video_path = "examples/advanced_examples/blended_wing_body/bwb_no_solver_geometric_variables.mp4"
+plotter = pv.Plotter(off_screen=True, window_size=[1920, 1200])
+plotter.open_movie(video_path, framerate=11)
 
 parameters_with_offsets = [
     (centerbody_chord_stretches, 10.),
@@ -411,14 +413,20 @@ parameters_with_offsets = [
     # (normalized_percent_camber_change_dof, 100.)    # 48 of these
 ]
 
-camera = {
-    # 'pos': (4*num_bodies + 1, 0, -1*num_bodies/2),
-    'pos': (-50, -50, 50),
-    # 'pos': (5*num_bodies + 1, 0, 0),
-    'focalPoint': (10, -10, 0),
-    # 'focalPoint': (0, 0, 0),
-    'viewup': (0, 0, 1),
-}
+camera_pos = [(-50, -50, 50), (10, -10, 0), (0, 0, 1)]
+
+def _write_bwb_frame(text_str):
+    plotter.clear()
+    frame = geometry.plot(show=False)
+    ffd_block_frame = BWB_ffd_block.plot(show=False, plot_embedded_points=False)
+    for element in (frame + ffd_block_frame):
+        if isinstance(element, dict) and 'mesh' in element:
+            plotter.add_mesh(element['mesh'], **element.get('kwargs', {}))
+        elif isinstance(element, pv.DataSet):
+            plotter.add_mesh(element)
+    plotter.add_text(text_str, position='lower_left', font_size=16, color='black')
+    plotter.camera_position = camera_pos
+    plotter.write_frame()
 
 for parameter, offset in parameters_with_offsets:
     if len(parameter.value.shape) == 1:
@@ -430,18 +438,11 @@ for parameter, offset in parameters_with_offsets:
                 parameter_value[i] = value
                 jax_sim[parameter] = parameter_value
                 jax_sim.run()
-                frame = geometry.plot(show=False)
-                ffd_block_frame = BWB_ffd_block.plot(show=False, plot_embedded_points=False)
                 if len(parameter.value) == 1:
                     text = f"Parameter: {parameter.name}, Value: {value:.2f}"
                 else:
                     text = f"Parameter: {parameter.name}[{i}], Value: {value:.2f}"
-                vedo_text = vedo.Text2D(text, pos="bottom-left", s=2, c='black')
-                video_plotter = vedo.Plotter(offscreen=True, title="BWB Geometry Variables",
-                                                size=(1920, 1200))
-                # video_plotter.show(frame, viewup='z')
-                video_plotter.show(frame + ffd_block_frame + [vedo_text], camera=camera)
-                video.add_frame()
+                _write_bwb_frame(text)
     elif len(parameter.value.shape) == 2:
         for i in range(parameter.value.shape[0]):
             for j in range(parameter.value.shape[1]):
@@ -452,15 +453,8 @@ for parameter, offset in parameters_with_offsets:
                     parameter_value[i, j] = value
                     jax_sim[parameter] = parameter_value
                     jax_sim.run()
-                    frame = geometry.plot(show=False)
-                    ffd_block_frame = BWB_ffd_block.plot(show=False, plot_embedded_points=False)
                     text = f"Parameter: {parameter.name}[{i,j}], Value: {value:.2f}"
-                    vedo_text = vedo.Text2D(text, pos="bottom-left", s=2, c='black')
-                    video_plotter = vedo.Plotter(offscreen=True, title="BWB Geometry Variables",
-                                                    size=(1920, 1200))
-                    # video_plotter.show(frame, viewup='z')
-                    video_plotter.show(frame + ffd_block_frame + [vedo_text], camera=camera)
-                    video.add_frame()
+                    _write_bwb_frame(text)
 
-video.close()
+plotter.close()
 # endregion Generate Parameterization Video

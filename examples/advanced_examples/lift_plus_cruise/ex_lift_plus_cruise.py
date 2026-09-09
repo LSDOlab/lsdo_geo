@@ -523,9 +523,7 @@ beam_heights = csdl.norm(beam_tops - beam_bottoms, axes=(1,))
 # # Figure plotting the meshes
 # plotting_elements = geometry.plot_meshes([wing_camber_surface, h_tail_camber_surface], function_opacity=0.5, mesh_color='#FFCD00', show=False)
 # plotting_elements = geometry.plot_meshes([wing_beam_mesh], mesh_line_width=10, function_opacity=0., additional_plotting_elements=plotting_elements, show=False)
-# import vedo
-# plotter = vedo.Plotter()
-# plotter.show(plotting_elements, axes=0, viewup='z')
+# lfs.show_plot(plotting_elements, 'Meshes', axes=False, view_up='z')
 # endregion
 
 # region Parameterization
@@ -651,9 +649,7 @@ for i, component_set in enumerate(lift_rotor_related_components):
 # for rotor_ffd_block_sectional_parameterization in lift_rotor_sectional_parameterizations:
 #     plotting_elements = rotor_ffd_block_sectional_parameterization.plot(opacity=0.5, color='#182B49', additional_plotting_elements=plotting_elements, show=False)
 
-# import vedo
-# plotter = vedo.Plotter()
-# plotter.show(plotting_elements, axes=0, viewup='z')
+# lfs.show_plot(plotting_elements, 'Parameterization', axes=False, view_up='z')
 # exit()
 
 # # endregion Plot parameterization
