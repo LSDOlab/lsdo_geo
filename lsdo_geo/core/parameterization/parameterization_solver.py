@@ -43,6 +43,7 @@ class GeometricVariables:
     def add_variable(self, computed_value:csdl.Variable, desired_value:Union[csdl.Variable, float, npt.NDArray[np.float64]], penalty_value:Optional[Union[csdl.Variable,float, npt.NDArray[np.float64]]]=None):
         '''
         Add a geometric variable to the parameterization problem.
+
         Parameters
         ----------
         computed_value : csdl.Variable
@@ -71,9 +72,9 @@ class ParameterizationSolver:
     '''
     The ParameterizationSolver class is used to solve geometric parameterization problems.
     '''
-    def __init__(self) -> None:
+    def __init__(self, optimizer=None) -> None:
         self.optimization = Optimization()
-        self.optimizer = NewtonOptimizer()
+        self.optimizer = optimizer if optimizer is not None else NewtonOptimizer()
         self.states : list[State] = []
         # self.state_costs : list[Union[float,npt.NDArray[np.float64],csdl.Variable]] = []
 

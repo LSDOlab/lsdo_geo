@@ -157,7 +157,7 @@ class Geometry(lfs.FunctionSet):
         Rotates the geometry about an axis.
 
         Parameters
-        -----------
+        ----------
         rotation_origin : csdl.Variable
             The origin of the axis of rotation.
         axis_vector : csdl.Variable
@@ -234,7 +234,7 @@ class Geometry(lfs.FunctionSet):
         Translates the geometry.
 
         Parameters
-        -----------
+        ----------
         translation : csdl.Variable
             The translation vector.
         function_indices : list[int]

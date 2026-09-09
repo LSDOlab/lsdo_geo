@@ -49,8 +49,13 @@ autoapi_root = 'src/autoapi'
 autoapi_type = 'python'
 autoapi_file_patterns = ['*.py', '*.pyi']
 autoapi_ignore = ['*test_*.py', '*/tests/*', '*debug_*.py', '*temp_*.py']
-autoapi_options = [ 'members', 'undoc-members', 'private-members', 'show-inheritance', 
-                   'show-module-summary', 'special-members', 'imported-members', ]
+autoapi_options = [
+    'members',
+    'undoc-members',
+    'show-inheritance',
+    'show-module-summary',
+    'special-members',
+]
 autoapi_add_toctree_entry = False
 autoapi_member_order = 'groupwise'
 autoapi_python_class_content = 'class' # 'both' or '__init'
