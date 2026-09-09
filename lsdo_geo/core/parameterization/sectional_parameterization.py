@@ -510,6 +510,7 @@ class SectionalParameterization:
         parameter_vectorization_target_axes = axis_symbols[:len(points_principal_first.shape)]
         # stretch_expand_action = f"{expand_source_axis}->{stretch_expand_target_axes}"
         parameter_vectorization_action = f"{expand_source_axis}->{parameter_vectorization_target_axes}"
+        vectorize_across_section_points_action = f"{expand_source_axis}{parameter_vectorization_target_axes[-1]}->{parameter_vectorization_target_axes}"
 
         # Apply stretches
         for axis_input, parameter, parametric_coordinate in sectional_parameters.stretches:
@@ -555,7 +556,7 @@ class SectionalParameterization:
                 # normalization_distance = csdl.maximum(distance_along_axis) - csdl.minimum(distance_along_axis)
                 # distance_along_axis_normalized = distance_along_axis / normalization_distance
                 # stretch_basis_vectors = csdl.outer(distance_along_axis_normalized, axis)
-                section_origin = self._compute_section_origin(section_points=points_principal_first[i], parametric_dimension=axis, parametric_coordinate=section_parametric_coordinate, non_csdl=True)
+                section_origin = self._compute_section_origin(section_points=points_principal_first.value[i], parametric_dimension=axis, parametric_coordinate=section_parametric_coordinate, non_csdl=True)
                 displacement_from_section_origin = points_principal_first.value[i] - section_origin
                 structured_shape = points_principal_first.shape[1:-1]
                 displacement_from_section_origin_flattened = displacement_from_section_origin.reshape((-1, self.num_physical_dimensions))
@@ -568,6 +569,12 @@ class SectionalParameterization:
 
             stretch_basis_vectors = np.stack(stretch_basis_vectors, axis=0)
             points_principal_first = points_principal_first + stretch_basis_vectors * csdl.expand(parameter, out_shape=points_principal_first.shape, action=f"{parameter_vectorization_action}")
+
+            # stretch_basis_vectors = np.stack(stretch_basis_vectors, axis=0)
+            # stretch_basis_vectors = csdl.Variable(value=stretch_basis_vectors)
+            # for i in csdl.frange(self.num_sections):
+            #     points_principal_first = points_principal_first.set(csdl.slice[i], points_principal_first[i] + stretch_basis_vectors[i] * parameter[i])
+            
 
             # stretch = parameter[i]
             # points_principal_first = points_principal_first.set(csdl.slice[i], points_principal_first[i] + stretch * stretch_basis_vectors)
@@ -641,6 +648,10 @@ class SectionalParameterization:
             axes = np.broadcast_to(axes, points_principal_first.shape)
 
             points_principal_first = points_principal_first + axes * csdl.expand(parameter, out_shape=points_principal_first.shape, action=f"{parameter_vectorization_action}")
+            
+            # axes = np.stack(axes, axis=0)
+            # translations = csdl.einsum(axes, parameter, action='ij,i->ij')
+            # points_principal_first = points_principal_first + csdl.expand(translations, out_shape=points_principal_first.shape, action=f"{vectorize_across_section_points_action}")
 
         # Swap axes back to original order.
         updated_points = csdl.reorder_axes(

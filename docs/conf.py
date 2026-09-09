@@ -92,7 +92,6 @@ html_theme = 'sphinx_rtd_theme' # other theme options: 'sphinx_book_theme', 'sph
 # html_theme_options for sphinx_rtd_theme
 html_theme_options = {
     'logo_only': False,
-    'display_version': True,
     'prev_next_buttons_location': 'bottom',
     'style_external_links': False,
     'vcs_pageview_mode': '',
