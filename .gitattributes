@@ -1,0 +1,9 @@
+# Treat large mesh, CAD, and data files as binary to avoid expensive diffing
+*.msh binary
+*.stp binary
+*.step binary
+*.iges binary
+*.igs binary
+*.h5 binary
+*.xdmf binary
+*.stl binary
