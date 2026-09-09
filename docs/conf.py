@@ -48,7 +48,7 @@ autoapi_dirs = ["../lsdo_geo"]
 autoapi_root = 'src/autoapi'
 autoapi_type = 'python'
 autoapi_file_patterns = ['*.py', '*.pyi']
-autoapi_ignore = ['*test*', '*/debug_*', '*/temp_*']
+autoapi_ignore = ['*test_*.py', '*/tests/*', '*debug_*.py', '*temp_*.py']
 autoapi_options = [ 'members', 'undoc-members', 'private-members', 'show-inheritance', 
                    'show-module-summary', 'special-members', 'imported-members', ]
 autoapi_add_toctree_entry = False
