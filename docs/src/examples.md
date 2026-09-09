@@ -1,13 +1,8 @@
 # Examples
 
-Unlike tutorials, examples can also be generated from Python files (.py) in addition
-to Jupyter notebooks (.ipynb),
-and is more of a collection of run scripts for reference/benchmarking.
-Examples may contain documentation in the form of comments.
-However, outputs/visualization from running the script is excluded if you are using Python files.
+`lsdo_geo` includes practical demonstration scripts illustrating geometry definition, Free-Form Deformation (FFD) lattices, and multidisciplinary design optimization workflows.
 
-If no classification of examples is required, just remove the subpages for examples
-and add the example files directly into the toctree of this main examples page.
+The examples are organized into **Basic Examples** (fundamental geometries and single-component wing optimizations) and **Advanced Examples** (complex multi-component aircraft configurations including BWB and eVTOL architectures).
 
 ```{toctree}
 :maxdepth: 2

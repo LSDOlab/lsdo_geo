@@ -40,6 +40,13 @@ def rotate(points:Union[csdl.Variable,npt.NDArray[np.float64]], rotation_origin:
 
     if type(rotation_origin) is np.ndarray:
         rotation_origin = csdl.Variable(shape=rotation_origin.shape, value=rotation_origin)
+
+    if isinstance(angles, (float, int)):
+        angles = csdl.Variable(shape=(1,), value=angles)
+    elif isinstance(angles, np.ndarray):
+        angles = csdl.Variable(shape=angles.shape, value=angles)
+    if units == 'degrees':
+        angles = angles * np.pi / 180
     
     # If axis vector is aligned with x, y, or z axis, then instead using rotation matrix (more efficient)
     if isinstance(axis_vector, np.ndarray):
@@ -87,7 +94,7 @@ def rotate(points:Union[csdl.Variable,npt.NDArray[np.float64]], rotation_origin:
                 rotated_points = rotated_points.reshape(points_out_shape)
             return rotated_points
         elif np.allclose(axis_vector, np.array([0,0,1])) or np.allclose(axis_vector, np.array([0,0,-1])):
-            if np.allclose(axis_vector, np.array([0,-1,0])):
+            if np.allclose(axis_vector, np.array([0,0,-1])):
                 angles = -angles
             # rotation_matrix = np.array([[np.cos(angles), -np.sin(angles), 0],
             #                             [np.sin(angles), np.cos(angles), 0],
@@ -112,12 +119,6 @@ def rotate(points:Union[csdl.Variable,npt.NDArray[np.float64]], rotation_origin:
     if isinstance(axis_vector, np.ndarray):
         axis_vector = csdl.Variable(shape=axis_vector.shape, value=axis_vector)
 
-    if isinstance(angles, (float, int)):
-        angles = csdl.Variable(shape=(1,), value=angles)
-    elif isinstance(angles, np.ndarray):
-        angles = csdl.Variable(shape=angles.shape, value=angles)
-    if units == 'degrees':
-        angles = angles * np.pi / 180
 
     points_wrt_rotation_origin = points - csdl.expand(rotation_origin, points.shape, 'i->ji')
 

@@ -47,5 +47,21 @@ When reviewing a pull request, approve when:
 When rejecting a pull request, write a precise description of what needs to improved/fixed in the comment section.
 
 ## Tests
-For test driven development, create tests before code implementation.
-Templates from `tests/template.py` can be used. Create tests in `tests` directory and write test functions with `test_` prefix in test files.
+Tests are located in the `tests/` directory and run via `pytest`.
+
+### Running Tests
+```sh
+# Run all unit tests
+pytest
+
+# Run fast unit tests only (excluding long-running optimization solvers)
+pytest -m "not slow"
+
+# Run tests with test coverage reporting
+pytest --cov=lsdo_geo tests/
+
+# Run with stdout displayed
+pytest -rP
+```
+
+When contributing new features to `lsdo_geo`, add unit tests under `tests/` named `test_<feature>.py`. For long-running tests or solvers, decorate test functions with `@pytest.mark.slow`.

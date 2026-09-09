@@ -154,6 +154,10 @@ _conf_master.py
 *_outputs/
 debug_*.py
 temp_*.py
+scratch/
+stored_files/
+*.bak
+**/inequality_research/
 
 # Generated media / figures (preserving documentation assets)
 *.mp4

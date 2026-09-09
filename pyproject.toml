@@ -8,8 +8,19 @@ description = "A package for geometry and state modeling/representation, paramet
 readme = "README.md"
 requires-python = ">=3.9"
 license = {file = "LICENSE.txt"}
-keywords = ["geoemtry", "parameterization", "meshing", "representation", "modeling", "states"]
 authors = [{name = "Andrew Fletcher", email = "afletcher168@gmail.com"}]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+]
 dependencies = [
     'numpy',
     #'vedo',
@@ -20,7 +31,12 @@ dependencies = [
     #'csdl_alpha @ git+https://github.com/LSDOlab/CSDL_alpha.git',
     #'lsdo_function_spaces @ git+https://github.com/LSDOlab/lsdo_function_spaces.git'
 ]
-version = "0.1.0"
+version = "1.0.0"
+
+[project.urls]
+Documentation = "https://lsdo-geo.readthedocs.io/en/latest/"
+Repository = "https://github.com/afletche/lsdo_geo"
+"Issue Tracker" = "https://github.com/afletche/lsdo_geo/issues"
 
 [project.optional-dependencies]
 test = [

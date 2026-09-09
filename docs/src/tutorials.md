@@ -1,17 +1,8 @@
 # Tutorials
 
-These tutorials are generated from Jupyter notebooks (.ipynb) and
-walks the reader through Python scripts providing detailed
-step-by-step instructions.
-Each tutorial contains mix of code and text that shows the
-functionality of your package.
-Tutorials are intended for explaining the fundamental capabilities of the package
-and they get progressively more complicated.
-It is recommeded that the tutorials also include mathematical equations and outputs/visualization 
-from running the script for better understanding for the users.
+`lsdo_geo` tutorials provide step-by-step educational walkthroughs combining mathematical theory, implementation details, and visualizations.
 
-If no classification of tutorials is required, just remove the subpages for tutorials
-and add the tutorial files directly into the toctree of this main tutorials page.
+Interactive Jupyter notebooks (`.ipynb`) are located in the `tutorials/` directory at the root of the repository so users can clone and execute them interactively.
 
 ```{toctree}
 :maxdepth: 2
