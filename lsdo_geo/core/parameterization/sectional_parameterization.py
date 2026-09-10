@@ -54,15 +54,15 @@ class SectionalParameters:
         if self.rotations is None:
             self.rotations = []
 
-    def add_translation(self, axis: Union[int, csdl.Variable], translation: Union[csdl.Variable, npt.NDArray[np.float64]]):
+    def add_translation(self, axis: Union[int, csdl.Variable, npt.NDArray[np.float64]], translation: Union[csdl.Variable, npt.NDArray[np.float64]]):
         """
         Adds a translation to the translations dictionary.
 
         Parameters
         ----------
-        axis : Union[int, csdl.Variable]
+        axis : Union[int, csdl.Variable, npt.NDArray[np.float64]]
             The axis of the translation. integer axes of 0,1,2,... correspond to the parametric axes, u,v,w,...
-            Alternatively, a csdl variable can be passed in to specify the axis.
+            Alternatively, a csdl variable or numpy array can be passed in to specify the axis.
         translation : Union[csdl.Variable, npt.NDArray[np.float64]]
             The translation values.
         """
@@ -70,14 +70,15 @@ class SectionalParameters:
             self.translations = []
         self.translations.append((axis, translation))
 
-    def add_stretch(self, axis: int, stretch: Union[csdl.Variable, npt.NDArray[np.float64]], parametric_coordinate:Optional[npt.NDArray[np.float64]]=None):
+    def add_stretch(self, axis: Union[int, csdl.Variable, npt.NDArray[np.float64]], stretch: Union[csdl.Variable, npt.NDArray[np.float64]], parametric_coordinate:Optional[npt.NDArray[np.float64]]=None):
         """
         Adds a stretch to the stretches dictionary.
 
         Parameters
         ----------
-        axis : int
-            The axis of the stretch.
+        axis : Union[int, csdl.Variable, npt.NDArray[np.float64]]
+            The axis of the stretch. integer axes of 0,1,2,... correspond to the parametric axes, u,v,w,...
+            Alternatively, a csdl variable or numpy array can be passed in to specify the axis.
         stretch : Union[csdl.Variable, npt.NDArray[np.float64]]
             The stretch values.
         parametric_coordinate : Optional[npt.NDArray[np.float64]]
