@@ -2,7 +2,7 @@
 
 `lsdo_geo` includes practical demonstration scripts illustrating geometry definition, Free-Form Deformation (FFD) lattices, and multidisciplinary design optimization workflows.
 
-The examples are organized into **Basic Examples** (fundamental geometries and single-component wing optimizations) and **Advanced Examples** (complex multi-component aircraft configurations including BWB and eVTOL architectures).
+The examples are organized into **Showcase Examples** (curated reference examples covering rectangular wings and eVTOL architectures) and **Additional Examples** (specialized studies, aero benchmarks, and parameter sweeps).
 
 ```{toctree}
 :maxdepth: 2
@@ -11,6 +11,6 @@ The examples are organized into **Basic Examples** (fundamental geometries and s
 :numbered:
 :includehidden:
 
-examples/basic
-examples/advanced
+examples/showcase
+examples/additional
 ```

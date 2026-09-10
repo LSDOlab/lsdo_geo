@@ -721,7 +721,7 @@ corners[:,:,0,2] = 7.5
 corners[:,:,1,2] = 9.133
 wing_ffd_block = lsdo_geo.construct_ffd_block_from_corners(entities=wing, corners=corners)
 # wing_ffd_block = lsdo_geo.construct_ffd_block_around_entities(name='wing_ffd_block', entities=wing, num_coefficients=(2,11,2), degree=(1,3,1))
-wing_ffd_block_sectional_parameterization = lsdo_geo.VolumeSectionalParameterization(name='wing_sectional_parameterization',
+wing_ffd_block_sectional_parameterization = lsdo_geo.SectionalParameterization(name='wing_sectional_parameterization',
                                                                             parameterized_points=wing_ffd_block.coefficients,
                                                                             principal_parametric_dimension=1)
 
@@ -774,7 +774,7 @@ parameterization_solver.add_state(state=wing_rigid_body_translation)
 
 # region Horizontal Stabilizer setup
 h_tail_ffd_block = lsdo_geo.construct_ffd_block_around_entities(name='h_tail_ffd_block', entities=h_tail, num_coefficients=(2,3,2), degree=(1,1,1))
-h_tail_ffd_block_sectional_parameterization = lsdo_geo.VolumeSectionalParameterization(name='h_tail_sectional_parameterization',
+h_tail_ffd_block_sectional_parameterization = lsdo_geo.SectionalParameterization(name='h_tail_sectional_parameterization',
                                                                             parameterized_points=h_tail_ffd_block.coefficients,
                                                                             principal_parametric_dimension=1)
 
@@ -831,10 +831,10 @@ parameterization_solver.add_state(state=h_tail_rigid_body_translation)
 
 # region Fuselage setup
 fuselage_ffd_block = lsdo_geo.construct_ffd_block_around_entities(name='fuselage_ffd_block', entities=[fuselage, nose_hub], num_coefficients=(2,2,2), degree=(1,1,1))
-fuselage_ffd_block_sectional_parameterization = lsdo_geo.VolumeSectionalParameterization(name='fuselage_sectional_parameterization',
+fuselage_ffd_block_sectional_parameterization = lsdo_geo.SectionalParameterization(name='fuselage_sectional_parameterization',
                                                                             parameterized_points=fuselage_ffd_block.coefficients,
                                                                             principal_parametric_dimension=0)
-# fuselage_ffd_block_sectional_parameterization.add_sectional_translation(name='sectional_fuselage_stretch', axis=0)
+# fuselage_ffd_block_sectional_parameterization.add_translation(name='sectional_fuselage_stretch', axis=0)
 
 fuselage_stretch_coefficients = csdl.Variable(name='fuselage_stretch_coefficients', shape=(2,), value=np.array([0., -0.]))
 fuselage_stretch_b_spline = lfs.Function(name='fuselage_stretch_b_spline', space=linear_b_spline_curve_2_dof_space, 
@@ -850,7 +850,7 @@ lift_rotor_parameterization_b_splines = []
 lift_rotor_stretch_coefficients = []
 for i, component_set in enumerate(lift_rotor_related_components):
     rotor_ffd_block = lsdo_geo.construct_ffd_block_around_entities(name=f'{component_set[0].name[:3]}_rotor_ffd_block', entities=component_set, num_coefficients=(2,2,2), degree=(1,1,1))
-    rotor_ffd_block_sectional_parameterization = lsdo_geo.VolumeSectionalParameterization(name=f'{component_set[0].name[:3]}_rotor_sectional_parameterization',
+    rotor_ffd_block_sectional_parameterization = lsdo_geo.SectionalParameterization(name=f'{component_set[0].name[:3]}_rotor_sectional_parameterization',
                                                                                 parameterized_points=rotor_ffd_block.coefficients,
                                                                                 principal_parametric_dimension=2)
     
@@ -909,7 +909,7 @@ sectional_wing_twist = wing_twist_b_spline.evaluate(section_parametric_coordinat
 # sectional_wing_translation_x = wing_translation_x_b_spline.evaluate(section_parametric_coordinates)
 # sectional_wing_translation_z = wing_translation_z_b_spline.evaluate(section_parametric_coordinates)
 
-sectional_parameters = lsdo_geo.VolumeSectionalParameterizationInputs(
+sectional_parameters = lsdo_geo.SectionalParameters(
     stretches={0: sectional_wing_chord_stretch},
     translations={1: sectional_wing_wingspan_stretch, 0 : sectional_sweep_translation},
     rotations={1: sectional_wing_twist}
@@ -944,7 +944,7 @@ wing.set_coefficients(wing_coefficients)
 #     'sectional_h_tail_translation_x':sectional_h_tail_translation_x,
 #     'sectional_h_tail_translation_z':sectional_h_tail_translation_z
 #                         }
-sectional_parameters = lsdo_geo.VolumeSectionalParameterizationInputs(
+sectional_parameters = lsdo_geo.SectionalParameters(
     stretches={0: h_tail_sectional_chord_stretch},
     translations={1: h_tail_sectional_span_stretch, 0: h_tail_sectional_sweep_shear},
     rotations={1: h_tail_sectional_twist}
@@ -962,7 +962,7 @@ section_parametric_coordinates = np.linspace(0., 1., fuselage_ffd_block_sectiona
 sectional_fuselage_stretch = fuselage_stretch_b_spline.evaluate(section_parametric_coordinates)
 
 # sectional_parameters = {'sectional_fuselage_stretch':sectional_fuselage_stretch}
-sectional_parameters = lsdo_geo.VolumeSectionalParameterizationInputs(
+sectional_parameters = lsdo_geo.SectionalParameters(
     translations={0: sectional_fuselage_stretch}
 )
 
@@ -986,7 +986,7 @@ for i, component_set in enumerate(lift_rotor_related_components):
     section_parametric_coordinates = np.linspace(0., 1., rotor_ffd_block_sectional_parameterization.num_sections).reshape((-1,1))
     sectional_stretch = rotor_stretch_b_spline.evaluate(section_parametric_coordinates)
 
-    sectional_parameters = lsdo_geo.VolumeSectionalParameterizationInputs(
+    sectional_parameters = lsdo_geo.SectionalParameters(
         stretches={0: sectional_stretch, 1:sectional_stretch}
     )
     rotor_ffd_block_coefficients = rotor_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=False)
@@ -1470,7 +1470,7 @@ jax_sim = csdl.experimental.JaxSimulator(
 import pyvista as pv
 camera_pos = [(-50, -50, 40), (15, 0, 5), (0, 0, 1)]
 
-file_path = 'examples/advanced_examples/lift_plus_cruise/videos/'
+file_path = 'examples/showcase_examples/lift_plus_cruise/videos/'
 file_name = 'wingspan_sweep.mp4'
 plotter = pv.Plotter(off_screen=True, window_size=[1920, 1200])
 plotter.open_movie(file_path + file_name, framerate=11)
@@ -1628,7 +1628,7 @@ timing_data = {
 }
 
 # Save to file (optional)
-save_file_path = 'examples/advanced_examples/lift_plus_cruise/'
+save_file_path = 'examples/showcase_examples/lift_plus_cruise/'
 with open(save_file_path + 'lift_plus_cruise_lhs_timing_results.pkl', 'wb') as f:
     pickle.dump(timing_data, f)
 
@@ -1649,7 +1649,7 @@ plt.semilogy(sample_input_difference_norms, p(sample_input_difference_norms), "r
 plt.legend()
 
 plt.tight_layout()
-plt.savefig('examples/advanced_examples/lift_plus_cruise/lift_plus_cruise_time_vs_input_norm.png', dpi=300, bbox_inches='tight')
+plt.savefig('examples/showcase_examples/lift_plus_cruise/lift_plus_cruise_time_vs_input_norm.png', dpi=300, bbox_inches='tight')
 plt.show()
 
 

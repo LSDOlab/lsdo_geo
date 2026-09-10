@@ -1,4 +1,4 @@
-# Welcome to lsdo_geo (v0.1.0)
+# Welcome to lsdo_geo (v1.0.0)
 
 ![LSDO Lab](/src/images/lsdolab.png "LSDO Lab")
 

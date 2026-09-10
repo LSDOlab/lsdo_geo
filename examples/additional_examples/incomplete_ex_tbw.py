@@ -5,9 +5,9 @@ import lsdo_function_spaces as lfs
 from lsdo_geo.core.parameterization.free_form_deformation_functions import (
     construct_tight_fit_ffd_block,construct_ffd_block_around_entities,construct_ffd_block_from_corners
 )
-from lsdo_geo.core.parameterization.volume_sectional_parameterization import (
-    VolumeSectionalParameterization,
-    VolumeSectionalParameterizationInputs
+from lsdo_geo.core.parameterization.sectional_parameterization import (
+    SectionalParameterization,
+    SectionalParameters
 )
 
 
@@ -156,7 +156,7 @@ wing_ffd_block = construct_tight_fit_ffd_block(entities=wing, num_coefficients=(
 # ffd_block = construct_tight_fit_ffd_block(entities=geometry, num_coefficients=(2, 3, 2), degree=(1,1,1))
 # ffd_block.plot()
 
-ffd_sectional_parameterization = VolumeSectionalParameterization(
+ffd_sectional_parameterization = SectionalParameterization(
     name="ffd_sectional_parameterization",
     parameterized_points=wing_ffd_block.coefficients,
     principal_parametric_dimension=1,
@@ -198,11 +198,11 @@ twist_sectional_parameters = twist_b_spline.evaluate(
 )
 
 
-sectional_parameters = VolumeSectionalParameterizationInputs()
-sectional_parameters.add_sectional_stretch(axis=0, stretch=chord_stretch_sectional_parameters)
-sectional_parameters.add_sectional_translation(axis=1, translation=wingspan_stretch_sectional_parameters)
-sectional_parameters.add_sectional_translation(axis=0, translation=sweep_translation_sectional_parameters)
-sectional_parameters.add_sectional_rotation(axis=1, rotation=twist_sectional_parameters)
+sectional_parameters = SectionalParameters()
+sectional_parameters.add_stretch(axis=0, stretch=chord_stretch_sectional_parameters)
+sectional_parameters.add_translation(axis=1, translation=wingspan_stretch_sectional_parameters)
+sectional_parameters.add_translation(axis=0, translation=sweep_translation_sectional_parameters)
+sectional_parameters.add_rotation(axis=1, rotation=twist_sectional_parameters)
 
 ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=False)
 

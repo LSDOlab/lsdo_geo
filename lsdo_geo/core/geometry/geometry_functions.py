@@ -171,7 +171,7 @@ def rotate(points:Union[csdl.Variable,npt.NDArray[np.float64]], rotation_origin:
         #                     vectorized_hamilton_product_2(quaternion, 
         #                     vectorized_hamilton_product_1(points_wrt_rotation_origin_quaternion,
         #                                         quaternion_conjugate)))
-        rotated_points_quaternion = rotated_points_quaternion.set(csdl.slice[i,:,:],
+        rotated_points_quaternion = rotated_points_quaternion.set(csdl.slice[i,:,1:],
                                                                   apply_quaternion_rotation(points_wrt_rotation_origin, quaternion))
 
     if angles.shape[0] == 1:

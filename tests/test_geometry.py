@@ -69,3 +69,53 @@ def test_geometry_rotate_using_quaternion():
     geo.rotate_using_quaternion(rotation_origin=origin, quaternion=quat)
     for func in geo.functions.values():
         assert not np.isnan(func.coefficients.value).any()
+
+
+def test_geometry_declare_component():
+    """Test declaring a sub-component of a geometry."""
+    recorder = csdl.Recorder(inline=True)
+    recorder.start()
+
+    geo = lg.import_geometry(SAMPLE_STP, parallelize=False)
+    comp = geo.declare_component(function_indices=[0], name="wing_tip")
+    assert comp.name == "wing_tip"
+    assert len(comp.functions) == 1
+    assert 0 in comp.functions
+
+
+def test_geometry_create_component_copy():
+    """Test creating an independent copy of a geometry sub-component."""
+    recorder = csdl.Recorder(inline=True)
+    recorder.start()
+
+    geo = lg.import_geometry(SAMPLE_STP, parallelize=False)
+    comp_copy = geo.create_component_copy(function_indices=[0, 1], name="wing_root_copy")
+    assert comp_copy.name == "wing_root_copy"
+    assert len(comp_copy.functions) == 2
+
+
+def test_geometry_get_function_space():
+    """Test retrieving function space from geometry."""
+    recorder = csdl.Recorder(inline=True)
+    recorder.start()
+
+    geo = lg.import_geometry(SAMPLE_STP, parallelize=False)
+    space = geo.get_function_space()
+    assert space is not None
+
+
+def test_geometry_export_iges_and_obj(tmp_path):
+    """Test exporting geometry to IGES and OBJ formats."""
+    recorder = csdl.Recorder(inline=True)
+    recorder.start()
+
+    geo = lg.import_geometry(SAMPLE_STP, parallelize=False)
+
+    iges_file = tmp_path / "wing.igs"
+    geo.export_iges(str(iges_file))
+    assert iges_file.exists()
+    assert iges_file.stat().st_size > 1000
+
+    obj_file = tmp_path / "wing.obj"
+    geo.export_obj(str(obj_file))
+

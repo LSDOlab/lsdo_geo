@@ -10,8 +10,21 @@ This page provides instructions for installing **lsdo_geo**, running the test su
 
 ## Installation
 
+### Prerequisites
+`lsdo_geo` relies on `CSDL_alpha` and `lsdo_function_spaces`:
+
+```sh
+pip install jax networkx
+pip install git+https://github.com/LSDOlab/CSDL_alpha.git
+pip install git+https://github.com/LSDOlab/lsdo_function_spaces.git
+```
+
 ### For Users
-To install `lsdo_geo` directly from GitHub:
+Install `lsdo_geo` via pip:
+```sh
+pip install lsdo_geo
+```
+Or install the latest development version directly from GitHub:
 ```sh
 pip install git+https://github.com/afletche/lsdo_geo.git
 ```
