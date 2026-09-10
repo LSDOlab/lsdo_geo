@@ -158,6 +158,7 @@ scratch/
 stored_files/
 *.bak
 **/inequality_research/
+**/blended_wing_body/
 
 # Generated media / figures (preserving documentation assets)
 *.mp4

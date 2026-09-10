@@ -1,7 +1,7 @@
 # lsdo_geo
 
 [![Documentation Status](https://readthedocs.org/projects/lsdo-geo/badge/?version=latest)](https://lsdo-geo.readthedocs.io/en/latest/?badge=latest)
-[![Tests](https://github.com/afletche/lsdo_geo/actions/workflows/actions.yml/badge.svg)](https://github.com/afletche/lsdo_geo/actions)
+[![Tests](https://github.com/LSDOlab/lsdo_geo/actions/workflows/actions.yml/badge.svg)](https://github.com/LSDOlab/lsdo_geo/actions)
 ![Python Version](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE.txt)
 
@@ -77,13 +77,15 @@ pip install git+https://github.com/LSDOlab/CSDL_alpha.git@dev_andrew
 pip install git+https://github.com/LSDOlab/lsdo_function_spaces.git
 
 # 2. Install lsdo_geo (User)
-pip install git+https://github.com/afletche/lsdo_geo.git
+pip install lsdo_geo
+# Or install development version directly from GitHub:
+pip install git+https://github.com/LSDOlab/lsdo_geo.git
 ```
 
 ### For Developers
 Clone the repository and install in editable mode with testing and documentation extras:
 ```sh
-git clone https://github.com/afletche/lsdo_geo.git
+git clone https://github.com/LSDOlab/lsdo_geo.git
 cd lsdo_geo
 pip install jax networkx
 pip install git+https://github.com/LSDOlab/CSDL_alpha.git@dev_andrew

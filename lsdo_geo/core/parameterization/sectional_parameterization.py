@@ -1,3 +1,4 @@
+import warnings
 import numpy as np
 import numpy.typing as npt
 from typing import Union, Optional, Sequence
@@ -21,7 +22,7 @@ from lsdo_geo.core.geometry.geometry_functions import rotate
 @dataclass
 class SectionalParameters:
     """
-    Dataclass of inputs for the VolumeSectionalParameterization class. This is passed into the evaluate method.
+    Dataclass of inputs for the SectionalParameterization class. This is passed into the evaluate method.
     The desired parameters should be appended to the appropiate dictionary.
 
     Parameters
@@ -104,6 +105,36 @@ class SectionalParameters:
             self.rotations = []
         self.rotations.append((axis, rotation, parametric_coordinate))
 
+    def add_sectional_stretch(self, *args, **kwargs):
+        """Deprecated alias for add_stretch."""
+        warnings.warn(
+            "add_sectional_stretch is deprecated and will be removed in a future release. "
+            "Use add_stretch instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.add_stretch(*args, **kwargs)
+
+    def add_sectional_translation(self, *args, **kwargs):
+        """Deprecated alias for add_translation."""
+        warnings.warn(
+            "add_sectional_translation is deprecated and will be removed in a future release. "
+            "Use add_translation instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.add_translation(*args, **kwargs)
+
+    def add_sectional_rotation(self, *args, **kwargs):
+        """Deprecated alias for add_rotation."""
+        warnings.warn(
+            "add_sectional_rotation is deprecated and will be removed in a future release. "
+            "Use add_rotation instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.add_rotation(*args, **kwargs)
+
 
 @dataclass
 class SectionalParameterization:
@@ -121,7 +152,7 @@ class SectionalParameterization:
         The linear maps from the sectional parameters to the parameterized points.
     rotational_axes : dict[str,int] = None
         The axes to rotate about.
-    name : str = 'volume_sectional_parameterization'
+    name : str = 'sectional_parameterization'
     """
 
     parameterized_points: csdl.Variable
@@ -132,7 +163,7 @@ class SectionalParameterization:
     translations : Optional[list[tuple[Union[int, csdl.Variable, npt.NDArray[np.float64]], Union[csdl.Variable, npt.NDArray[np.float64]]]]] = None
     stretches : Optional[list[tuple[Union[int, csdl.Variable, npt.NDArray[np.float64]], Union[csdl.Variable, npt.NDArray[np.float64]]]]] = None
     rotations : Optional[list[tuple[Union[int, csdl.Variable, npt.NDArray[np.float64]], Union[csdl.Variable, npt.NDArray[np.float64]]]]] = None
-    name : str = 'volume_sectional_parameterization'
+    name : str = 'sectional_parameterization'
 
     def __post_init__(self):
         if self.parameterized_points_shape is None:
@@ -200,7 +231,7 @@ class SectionalParameterization:
         # self.linear_parameter_maps = {}
         # self.rotational_axes = {}
 
-        # self.updated_points = self.parameterized_points # NOTE: Removing .copy() here because csdl doesn't have one.
+        self.updated_points = self.parameterized_points
 
     # def add_parameter(self, parameter_type: str, axis: Union[int, csdl.Variable], map: sps.csc_matrix):
     #     """
@@ -427,17 +458,22 @@ class SectionalParameterization:
     def _compute_section_axis(self, section_points: csdl.Variable, parametric_dimension: int, parametric_coordinate: npt.NDArray[np.float64]) -> csdl.Variable:
         section_b_spline = lfs.Function(space=self.helpful_section_b_spline_space, coefficients=section_points)
         if parametric_dimension == self.principal_parametric_dimension:
-            # Compute normal vector by taking the cross product of the two non-principal parametric derivative directions.
-            non_principal_parametric_dimensions = [i for i in range(len(self.parameterized_points_shape[:-1])) if i != self.principal_parametric_dimension]
-            parametric_derivative_orders_1 = np.zeros((len(non_principal_parametric_dimensions)), dtype=int)
-            parametric_derivative_orders_1[non_principal_parametric_dimensions[0]] = 1
-            parametric_derivative_orders_2 = np.zeros((len(non_principal_parametric_dimensions)), dtype=int)
-            parametric_derivative_orders_2[non_principal_parametric_dimensions[1]] = 1
-            parametric_derivative_orders_1 = tuple(parametric_derivative_orders_1)
-            parametric_derivative_orders_2 = tuple(parametric_derivative_orders_2)
-            derivative_1 = section_b_spline.evaluate(parametric_coordinates=parametric_coordinate, parametric_derivative_orders=parametric_derivative_orders_1)
-            derivative_2 = section_b_spline.evaluate(parametric_coordinates=parametric_coordinate, parametric_derivative_orders=parametric_derivative_orders_2)
-            axis = csdl.cross(derivative_1, derivative_2).flatten()
+            # Compute normal vector by taking the cross product of the two non-principal parametric derivative directions (in ascending order).
+            non_principal_parametric_dimensions = [
+                i for i in range(len(self.parameterized_points_shape[:-1]))
+                if i != self.principal_parametric_dimension
+            ]
+            derivative_1 = self._compute_section_axis(
+                section_points=section_points,
+                parametric_dimension=non_principal_parametric_dimensions[0],
+                parametric_coordinate=parametric_coordinate,
+            )
+            derivative_2 = self._compute_section_axis(
+                section_points=section_points,
+                parametric_dimension=non_principal_parametric_dimensions[1],
+                parametric_coordinate=parametric_coordinate,
+            )
+            axis = csdl.cross(derivative_1.flatten(), derivative_2.flatten(), axis=0).flatten()
         else:
             parametric_derivative_orders = np.zeros((len(self.parameterized_points_shape_without_principal_dimension[:-1]),), dtype=int)
             if parametric_dimension < self.principal_parametric_dimension:
@@ -539,100 +575,94 @@ class SectionalParameterization:
                 elif isinstance(axis_input, np.ndarray):
                     axis = axis_input/np.linalg.norm(axis_input)
                 else:
-                    raise Exception(f"Invalid axis type: {type(axis)}. Axis should be either an int, a csdl.Variable, or a numpy array.")
+                    raise Exception(f"Invalid axis type: {type(axis_input)}. Axis should be either an int, a csdl.Variable, or a numpy array.")
             
-                
-                # section_origin = self._compute_section_origin(section_points=points_principal_first[i], parametric_dimension=axis, parametric_coordinate=parametric_coordinate, non_csdl=False)
-                # section_origin_expanded = csdl.expand(
-                #     section_origin,
-                #     out_shape=points_principal_first[i].shape,
-                #     action=translation_expand_action,
-                # )
-                # displacement_from_section_origin = points_principal_first[i] - section_origin_expanded
-                # structured_shape = points_principal_first.shape[1:-1]
-                # displacement_from_section_origin_flattened = displacement_from_section_origin.reshape((-1, self.num_physical_dimensions))
-                # distance_along_axis = csdl.matvec(displacement_from_section_origin_flattened, axis)
-                # distance_along_axis = distance_along_axis.reshape(structured_shape)
-                # normalization_distance = csdl.maximum(distance_along_axis) - csdl.minimum(distance_along_axis)
-                # distance_along_axis_normalized = distance_along_axis / normalization_distance
-                # stretch_basis_vectors = csdl.outer(distance_along_axis_normalized, axis)
-                section_origin = self._compute_section_origin(section_points=points_principal_first.value[i], parametric_dimension=axis, parametric_coordinate=section_parametric_coordinate, non_csdl=True)
+                axis_np = axis.value if isinstance(axis, csdl.Variable) else axis
+                section_origin = self._compute_section_origin(section_points=points_principal_first.value[i], parametric_dimension=axis_input, parametric_coordinate=section_parametric_coordinate, non_csdl=True)
                 displacement_from_section_origin = points_principal_first.value[i] - section_origin
                 structured_shape = points_principal_first.shape[1:-1]
                 displacement_from_section_origin_flattened = displacement_from_section_origin.reshape((-1, self.num_physical_dimensions))
-                distance_along_axis = np.dot(displacement_from_section_origin_flattened, axis)
+                distance_along_axis = np.dot(displacement_from_section_origin_flattened, axis_np)
                 distance_along_axis = distance_along_axis.reshape(structured_shape)
                 normalization_distance = np.max(distance_along_axis) - np.min(distance_along_axis)
                 distance_along_axis_normalized = distance_along_axis / normalization_distance
-                stretch_basis_vector = np.outer(distance_along_axis_normalized, axis).reshape(structured_shape + (self.num_physical_dimensions,))
+                stretch_basis_vector = np.outer(distance_along_axis_normalized, axis_np).reshape(structured_shape + (self.num_physical_dimensions,))
                 stretch_basis_vectors.append(stretch_basis_vector)
 
             stretch_basis_vectors = np.stack(stretch_basis_vectors, axis=0)
             points_principal_first = points_principal_first + stretch_basis_vectors * csdl.expand(parameter, out_shape=points_principal_first.shape, action=f"{parameter_vectorization_action}")
-
-            # stretch_basis_vectors = np.stack(stretch_basis_vectors, axis=0)
-            # stretch_basis_vectors = csdl.Variable(value=stretch_basis_vectors)
-            # for i in csdl.frange(self.num_sections):
-            #     points_principal_first = points_principal_first.set(csdl.slice[i], points_principal_first[i] + stretch_basis_vectors[i] * parameter[i])
-            
-
-            # stretch = parameter[i]
-            # points_principal_first = points_principal_first.set(csdl.slice[i], points_principal_first[i] + stretch * stretch_basis_vectors)
-
 
         # Apply rotations
         for axis_input, parameter, parametric_coordinate in sectional_parameters.rotations:
             if parametric_coordinate is None:
                 parametric_coordinate = np.ones((len(self.parameterized_points_shape_without_principal_dimension[:-1]),)) * 0.5
 
-            for i in csdl.frange(self.num_sections):
-                if isinstance(parametric_coordinate, list):
-                    section_parametric_coordinate = parametric_coordinate[i]
-                elif isinstance(parametric_coordinate, np.ndarray) and parametric_coordinate.ndim == 2:
-                    if parametric_coordinate.shape[0] == self.num_sections:
-                        section_parametric_coordinate = parametric_coordinate[i]
-                    else:
-                        raise Exception(f"Invalid parametric_coordinate shape: {parametric_coordinate.shape}. Expected shape: ({self.num_sections}, ...)")
-                elif isinstance(parametric_coordinate, np.ndarray) and parametric_coordinate.ndim == 1:
-                    section_parametric_coordinate = parametric_coordinate
-                else:
-                    raise Exception(f"Invalid parametric_coordinate type: {type(parametric_coordinate)}. " +
-                                    f"Expected a single parametric coordinate or a list / numpy array with a shape of ({self.num_sections}, ...).")
+            is_per_section_coord = isinstance(parametric_coordinate, list) or (
+                isinstance(parametric_coordinate, np.ndarray) and parametric_coordinate.ndim == 2
+            )
+
+            if is_per_section_coord:
+                if len(parametric_coordinate) != self.num_sections:
+                    raise Exception(
+                        f"Invalid parametric_coordinate shape: {parametric_coordinate.shape if hasattr(parametric_coordinate, 'shape') else len(parametric_coordinate)}. "
+                        f"Expected shape: ({self.num_sections}, ...)"
+                    )
+                # Fall back to range when per-section coordinates are supplied because
+                # csdl.frange loop variables cannot index NumPy arrays or Python lists.
+                sections_loop = range(self.num_sections)
+            else:
+                # Use csdl.frange for graph efficiency when coordinates are uniform
+                sections_loop = csdl.frange(self.num_sections)
+
+            for i in sections_loop:
+                section_parametric_coordinate = parametric_coordinate[i] if is_per_section_coord else parametric_coordinate
 
                 if isinstance(axis_input, int):
-                    axis = self._compute_section_axis(section_points=points_principal_first[i], parametric_dimension=axis_input, parametric_coordinate=section_parametric_coordinate)
+                    axis = self._compute_section_axis(
+                        section_points=points_principal_first[i],
+                        parametric_dimension=axis_input,
+                        parametric_coordinate=section_parametric_coordinate,
+                    )
                 elif isinstance(axis_input, csdl.Variable):
                     axis = axis_input/csdl.norm(axis_input)
                 elif isinstance(axis_input, np.ndarray):
                     axis = axis_input/np.linalg.norm(axis_input)
                 else:
-                    raise Exception(f"Invalid axis type: {type(axis)}. Axis should be either an int, a csdl.Variable, or a numpy array.")
+                    raise Exception(f"Invalid axis type: {type(axis_input)}. Axis should be either an int, a csdl.Variable, or a numpy array.")
             
-                
-                section_origin = self._compute_section_origin(section_points=points_principal_first[i], parametric_dimension=axis, parametric_coordinate=section_parametric_coordinate, non_csdl=False)
+                section_origin = self._compute_section_origin(
+                    section_points=points_principal_first[i],
+                    parametric_dimension=axis_input,
+                    parametric_coordinate=section_parametric_coordinate,
+                    non_csdl=False,
+                )
 
                 angle = parameter[i]
-                rotated_section = rotate(points=points_principal_first[i], rotation_origin=section_origin, axis_vector=axis, angles=angle)
+                rotated_section = rotate(
+                    points=points_principal_first[i],
+                    rotation_origin=section_origin,
+                    axis_vector=axis,
+                    angles=angle,
+                )
                 points_principal_first = points_principal_first.set(csdl.slice[i], rotated_section)
 
 
         # Apply translations
         for axis_input, parameter in sectional_parameters.translations:
-            # for i in csdl.frange(self.num_sections):
             axes = []
             for i in range(self.num_sections):
                 if isinstance(axis_input, int):
-                    if parametric_coordinate is None:
-                        parametric_coordinate = np.ones((len(self.parameterized_points_shape_without_principal_dimension[:-1]),)) * 0.5
+                    parametric_coordinate = np.ones((len(self.parameterized_points_shape_without_principal_dimension[:-1]),)) * 0.5
                     axis = self._compute_section_axis(section_points=points_principal_first[i], parametric_dimension=axis_input, parametric_coordinate=parametric_coordinate)
                 elif isinstance(axis_input, csdl.Variable):
                     axis = axis_input/csdl.norm(axis_input)
                 elif isinstance(axis_input, np.ndarray):
                     axis = axis_input/np.linalg.norm(axis_input)
                 else:
-                    raise Exception(f"Invalid axis type: {type(axis)}. Axis should be either an int, a csdl.Variable, or a numpy array.")
+                    raise Exception(f"Invalid axis type: {type(axis_input)}. Axis should be either an int, a csdl.Variable, or a numpy array.")
             
-                axes.append(axis)
+                axis_np = axis.value if isinstance(axis, csdl.Variable) else axis
+                axes.append(axis_np)
                 # translation = parameter[i]
                 # expanded_translation = csdl.expand(
                 #     translation * axis,
@@ -913,5 +943,34 @@ def _get_indices_in_shape(
     return tuple(indices)
 
 
+class VolumeSectionalParameterization(SectionalParameterization):
+    """
+    Deprecated alias for SectionalParameterization.
+    """
+    def __init__(self, *args, **kwargs):
+        warnings.warn(
+            "VolumeSectionalParameterization is deprecated and will be removed in a future release. "
+            "Use SectionalParameterization instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
+
+
+class VolumeSectionalParameterizationInputs(SectionalParameters):
+    """
+    Deprecated alias for SectionalParameters.
+    """
+    def __init__(self, *args, **kwargs):
+        warnings.warn(
+            "VolumeSectionalParameterizationInputs is deprecated and will be removed in a future release. "
+            "Use SectionalParameters instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
+
+
 if __name__ == "__main__":
     pass
+

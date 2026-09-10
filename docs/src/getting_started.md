@@ -2,7 +2,7 @@
 
 This page provides instructions for installing **lsdo_geo**, running the test suite, and building the documentation.
 
-* **GitHub Repository**: [github.com/afletche/lsdo_geo](https://github.com/afletche/lsdo_geo)
+* **GitHub Repository**: [github.com/LSDOlab/lsdo_geo](https://github.com/LSDOlab/lsdo_geo)
 * **LSDO Lab**: [lsdo.eng.ucsd.edu](https://lsdo.eng.ucsd.edu/)
 * **CSDL Framework**: [github.com/LSDOlab/csdl](https://github.com/LSDOlab/csdl)
 
@@ -10,16 +10,29 @@ This page provides instructions for installing **lsdo_geo**, running the test su
 
 ## Installation
 
-### For Users
-To install `lsdo_geo` directly from GitHub:
+### Prerequisites
+`lsdo_geo` relies on `CSDL_alpha` and `lsdo_function_spaces`:
+
 ```sh
-pip install git+https://github.com/afletche/lsdo_geo.git
+pip install jax networkx
+pip install git+https://github.com/LSDOlab/CSDL_alpha.git
+pip install git+https://github.com/LSDOlab/lsdo_function_spaces.git
+```
+
+### For Users
+Install `lsdo_geo` via pip:
+```sh
+pip install lsdo_geo
+```
+Or install the latest development version directly from GitHub:
+```sh
+pip install git+https://github.com/LSDOlab/lsdo_geo.git
 ```
 
 ### For Developers
 Clone the repository and install it in editable mode with development dependencies:
 ```sh
-git clone https://github.com/afletche/lsdo_geo.git
+git clone https://github.com/LSDOlab/lsdo_geo.git
 cd lsdo_geo
 pip install -e ".[test,docs]"
 ```

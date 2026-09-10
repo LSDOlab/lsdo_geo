@@ -22,8 +22,6 @@ from .core.parameterization.free_form_deformation_functions import (
 from .core.parameterization.sectional_parameterization import (
     SectionalParameterization,
     SectionalParameters,
-)
-from .core.parameterization.volume_sectional_parameterization import (
     VolumeSectionalParameterization,
     VolumeSectionalParameterizationInputs,
 )

@@ -182,23 +182,24 @@ class ParameterizationSolver:
         for state_object in self.states:
             state = state_object.state
             cost = state_object.cost
+            cost_name = getattr(cost, 'name', 'cost')
             if isinstance(cost, (float,int)) or (cost.size==1):
                 # Cost is a scalar
                 objective = objective + csdl.vdot(state, cost*state)
             elif len(cost.shape) == 1:
                 # Cost is a vector
                 if cost.shape[0] != state.shape[0]:
-                    raise ValueError('The cost vector must be the same size as the state. The cost provided, {}, is of shape {}, but the state is of shape {}'.format(cost.name, cost.shape, state.shape))
+                    raise ValueError('The cost vector must be the same size as the state. The cost provided, {}, is of shape {}, but the state is of shape {}'.format(cost_name, cost.shape, state.shape))
                 objective = objective + csdl.vdot(state, cost*state)
             elif len(cost.shape) == 2:
                 # Cost is a matrix
                 if cost.shape[0] != cost.shape[1]:
-                    raise ValueError('The cost matrix must be square. The cost provided, {}, is of shape {}'.format(cost.name, cost.shape))
+                    raise ValueError('The cost matrix must be square. The cost provided, {}, is of shape {}'.format(cost_name, cost.shape))
                 if cost.shape[0] != state.shape[0]:
-                    raise ValueError('The cost matrix must be the same size as the state. The cost provided, {}, is of shape {}, but the state is of shape {}'.format(cost.name, cost.shape, state.shape))
+                    raise ValueError('The cost matrix must be the same size as the state. The cost provided, {}, is of shape {}, but the state is of shape {}'.format(cost_name, cost.shape, state.shape))
                 objective = objective + csdl.vdot(state, csdl.matvec(cost, state))
             else:
-                raise ValueError('The cost must be a scalar, vector, or matrix. The cost provided, {}, is of shape {}'.format(cost.name, cost.shape))
+                raise ValueError('The cost must be a scalar, vector, or matrix. The cost provided, {}, is of shape {}'.format(cost_name, cost.shape))
         self.optimization.add_objective(objective)
         self.optimizer.add_optimization(self.optimization)
 

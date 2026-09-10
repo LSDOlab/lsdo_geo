@@ -504,8 +504,12 @@ class Geometry(lfs.FunctionSet):
 
             counter += 1
             pos_counter = 0
-            knots_u = space.knots[space.knot_indices[0]]
-            knots_v = space.knots[space.knot_indices[1]]
+            if isinstance(space.knots, (tuple, list)):
+                knots_u = space.knots[0]
+                knots_v = space.knots[1]
+            else:
+                knots_u = space.knots[space.knot_indices[0]]
+                knots_v = space.knots[space.knot_indices[1]]
             for i in range(len(knots_u)):
                 pos_counter += 1
                 f.write("%20.12g," % (np.real(knots_u[i])))
@@ -550,11 +554,11 @@ class Geometry(lfs.FunctionSet):
                 if i == 0:
                     f.write("%20.12g," % (np.real(knots_u[0])))
                 if i == 1:
-                    f.write("%20.12g," % (np.real(knots_u[1])))
+                    f.write("%20.12g," % (np.real(knots_u[-1])))
                 if i == 2:
                     f.write("%20.12g," % (np.real(knots_v[0])))
                 if i == 3:
-                    f.write("%20.12g;" % (np.real(knots_v[1])))
+                    f.write("%20.12g;" % (np.real(knots_v[-1])))
                 if np.mod(pos_counter, 3) == 0:
                     f.write("  %7dP%7d\n" % (Pcount, counter))
                     counter += 1

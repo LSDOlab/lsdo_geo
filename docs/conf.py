@@ -15,10 +15,10 @@
 # -- Project information -----------------------------------------------------
 
 project = 'lsdo_geo'
-copyright = '2023, Andrew Fletcher'
+copyright = '2023-2026, Andrew Fletcher'
 author = 'Andrew Fletcher'
-version = '0.1'
-# release = 0.1.0rtc
+version = '1.0'
+release = '1.0.0'
 
 
 # -- General configuration ---------------------------------------------------

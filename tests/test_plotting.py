@@ -99,8 +99,8 @@ def test_ffd_block_plot():
             assert isinstance(el["mesh"], (pv.DataSet, pv.PolyData, pv.StructuredGrid, pv.Actor))
 
 
-def test_volume_sectional_parameterization_plot():
-    """Verify VolumeSectionalParameterization.plot returns valid PyVista plotting elements."""
+def test_sectional_parameterization_plot():
+    """Verify SectionalParameterization.plot returns valid PyVista plotting elements."""
     recorder = csdl.Recorder(inline=True)
     recorder.start()
 
@@ -112,13 +112,13 @@ def test_volume_sectional_parameterization_plot():
         degree=(1, 1, 1),
     )
 
-    vsp = lg.VolumeSectionalParameterization(
-        name="test_vsp",
+    sp = lg.SectionalParameterization(
+        name="test_sp",
         parameterized_points=ffd.coefficients,
         principal_parametric_dimension=1,
     )
 
-    elements = vsp.plot(show=False)
+    elements = sp.plot(show=False)
     assert isinstance(elements, list)
     assert len(elements) > 0
 

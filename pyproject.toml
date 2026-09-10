@@ -34,8 +34,8 @@ version = "1.0.0"
 
 [project.urls]
 Documentation = "https://lsdo-geo.readthedocs.io/en/latest/"
-Repository = "https://github.com/afletche/lsdo_geo"
-"Issue Tracker" = "https://github.com/afletche/lsdo_geo/issues"
+Repository = "https://github.com/LSDOlab/lsdo_geo"
+"Issue Tracker" = "https://github.com/LSDOlab/lsdo_geo/issues"
 
 [project.optional-dependencies]
 test = [
