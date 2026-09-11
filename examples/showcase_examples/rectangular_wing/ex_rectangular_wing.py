@@ -100,8 +100,8 @@ ffd_sectional_parameterization = SectionalParameterization(
 # The coefficients will be used as the states of the parameterization solver, which will be manipulated to solve
 # for the desired geometry (satisfies the design parameters and constraints). The initial values are mainly for
 # debugging to see what the deformation modes do to the geometry since the solver will solve for the actual values.
-space_of_linear_3_dof_b_splines = lfs.BSplineSpaceNew(num_parametric_dimensions=1, degree=1, coefficients_shape=(3,))
-space_of_linear_2_dof_b_splines = lfs.BSplineSpaceNew(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
+space_of_linear_3_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(3,))
+space_of_linear_2_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
 
 chord_stretching_b_spline = lfs.Function(space=space_of_linear_3_dof_b_splines,
                                          coefficients=csdl.Variable(shape=(3,), value=np.array([-0.8, 3., -0.8])), name='chord_stretching_b_spline_coefficients')
@@ -178,8 +178,10 @@ geometric_variables.add_variable(wingspan, wingspan_outer_dv, penalty_value=None
 geometric_variables.add_variable(root_chord, root_chord_outer_dv, penalty_value=None)
 geometric_variables.add_variable(tip_chord_left, tip_chord_outer_dv, penalty_value=None)
 geometric_variables.add_variable(tip_chord_right, tip_chord_outer_dv, penalty_value=None)
-geometric_variables.add_variable(sweep_angle_left, sweep_angle_outer_dv, penalty_value=None)
-geometric_variables.add_variable(sweep_angle_right, sweep_angle_outer_dv, penalty_value=None)
+# geometric_variables.add_variable(sweep_angle_left, sweep_angle_outer_dv, penalty_value=None)
+# geometric_variables.add_variable(sweep_angle_right, sweep_angle_outer_dv, penalty_value=None)
+geometric_variables.add_variable(-spanwise_direction_left[0], csdl.tan(sweep_angle_outer_dv)*spanwise_direction_left[1], penalty_value=None)
+geometric_variables.add_variable(spanwise_direction_right[0], csdl.tan(sweep_angle_outer_dv)*spanwise_direction_right[1], penalty_value=None)
 
 print("Wingspan: ", wingspan.value) # type: ignore
 print("Root Chord: ", root_chord.value) # type: ignore
