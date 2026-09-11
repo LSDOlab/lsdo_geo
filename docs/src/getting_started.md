@@ -14,7 +14,7 @@ This page provides instructions for installing **lsdo_geo**, running the test su
 `lsdo_geo` relies on `CSDL_alpha` and `lsdo_function_spaces`:
 
 ```sh
-pip install jax networkx
+pip install jax
 pip install git+https://github.com/LSDOlab/CSDL_alpha.git
 pip install git+https://github.com/LSDOlab/lsdo_function_spaces.git
 ```

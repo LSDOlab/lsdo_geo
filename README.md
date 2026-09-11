@@ -72,7 +72,7 @@ rotated_points = lg.rotate(
 
 ```sh
 # 1. Install dependencies
-pip install jax networkx
+pip install jax
 pip install git+https://github.com/LSDOlab/CSDL_alpha.git@dev_andrew
 pip install git+https://github.com/LSDOlab/lsdo_function_spaces.git
 
@@ -87,7 +87,7 @@ Clone the repository and install in editable mode with testing and documentation
 ```sh
 git clone https://github.com/LSDOlab/lsdo_geo.git
 cd lsdo_geo
-pip install jax networkx
+pip install jax
 pip install git+https://github.com/LSDOlab/CSDL_alpha.git@dev_andrew
 pip install git+https://github.com/LSDOlab/lsdo_function_spaces.git
 pip install -e ".[test,docs]"
