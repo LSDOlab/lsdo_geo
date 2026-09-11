@@ -1,11 +1,9 @@
 import time
-import lsdo_geo
-import lsdo_function_spaces as lfs
-# t01 = time.time()
 import csdl_alpha as csdl
 import numpy as np
-# from python_csdl_backend import Simulator
+import lsdo_function_spaces as lfs
 import lsdo_geo as lg
+from lsdo_geo import import_geometry
 
 
 # t02 = time.time()

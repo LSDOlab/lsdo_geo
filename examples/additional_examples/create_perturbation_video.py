@@ -15,11 +15,13 @@ import numpy as np
 import pyvista as pv
 import csdl_alpha as csdl
 import lsdo_function_spaces as lfs
-import lsdo_geo
-from lsdo_geo.core.parameterization.free_form_deformation_functions import construct_ffd_block_around_entities
-from lsdo_geo.core.parameterization.sectional_parameterization import (
+import lsdo_geo as lg
+from lsdo_geo import (
+    Geometry,
+    construct_ffd_block_around_entities,
     SectionalParameterization,
-    SectionalParameters
+    SectionalParameters,
+    import_geometry,
 )
 
 def create_perturbation_video():
@@ -32,13 +34,7 @@ def create_perturbation_video():
     file_name = "rectangular_wing_naca0012_10ar"
     stp_path = geometry_directory + file_name + ".stp"
 
-    imported_function_set = lfs.import_file_patched(file_name=stp_path, parallelize=False)
-    geometry = lsdo_geo.Geometry(
-        functions=imported_function_set.functions,
-        function_names=imported_function_set.function_names,
-        name='imported_geometry',
-        space=imported_function_set.space
-    )
+    geometry = import_geometry(file_name=stp_path, parallelize=False)
 
     # Linearly interpolate spanwise control points to 15
     num_spanwise_cp_target = 15
@@ -71,7 +67,7 @@ def create_perturbation_video():
             new_shape = (n_chord, num_spanwise_cp_target)
             new_degree = (orig_degree[0], min(2, num_spanwise_cp_target - 1))
 
-        new_space = lfs.BSplineSpaceNew(
+        new_space = lfs.BSplineSpace(
             num_parametric_dimensions=2,
             degree=new_degree,
             coefficients_shape=new_shape,
@@ -113,8 +109,8 @@ def create_perturbation_video():
     elevator_angle = csdl.Variable(value=0.0, name='elevator_angle')
     pitch = csdl.Variable(value=0.0, name='pitch')
 
-    space_15_dof = lfs.BSplineSpaceNew(num_parametric_dimensions=1, degree=2, coefficients_shape=(num_span_coeffs,))
-    space_2_dof = lfs.BSplineSpaceNew(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
+    space_15_dof = lfs.BSplineSpace(num_parametric_dimensions=1, degree=2, coefficients_shape=(num_span_coeffs,))
+    space_2_dof = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
 
     chord_coeffs = csdl.concatenate(
         [chord_stretch_dvs[i] for i in range(num_chord_stations - 1, 0, -1)] +

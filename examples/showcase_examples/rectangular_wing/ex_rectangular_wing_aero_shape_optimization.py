@@ -5,14 +5,16 @@ import csdl_alpha as csdl
 import numpy as np
 import lsdo_function_spaces as lfs
 
-from lsdo_geo.core.parameterization.free_form_deformation_functions import construct_ffd_block_around_entities
-from lsdo_geo.core.parameterization.sectional_parameterization import (
+import lsdo_geo as lg
+from lsdo_geo import (
+    Geometry,
+    construct_ffd_block_around_entities,
     SectionalParameterization,
-    SectionalParameters
+    SectionalParameters,
+    ParameterizationSolver,
+    GeometricVariables,
+    import_geometry,
 )
-from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver, GeometricVariables
-
-import lsdo_geo
 import VortexAD
 import modopt
 import meshio
@@ -24,11 +26,7 @@ recorder.start()
 # Import initial geometry that will be deformed
 geometry_directory = "examples/example_geometries/"
 file_name = "rectangular_wing_naca0012_10ar"
-imported_function_set = lfs.import_file_patched(file_name=geometry_directory + file_name + ".stp", parallelize=False)
-geometry = lsdo_geo.Geometry(functions=imported_function_set.functions, 
-                                      function_names=imported_function_set.function_names,
-                                      name='imported_geometry',
-                                      space=imported_function_set.space)
+geometry = import_geometry(geometry_directory + file_name + ".stp", parallelize=False)
 
 # Add more spanwise control points to each geometry function via linear interpolation.
 # Since this is a rectangular wing (uniform cross-section), linearly interpolating
@@ -69,7 +67,7 @@ for idx in list(geometry.functions.keys()):
         new_shape = (n_chord, num_spanwise_cp_target)
         new_degree = (orig_degree[0], min(2, num_spanwise_cp_target - 1))
 
-    new_space = lfs.BSplineSpaceNew(
+    new_space = lfs.BSplineSpace(
         num_parametric_dimensions=2,
         degree=new_degree,
         coefficients_shape=new_shape,
@@ -237,7 +235,7 @@ class DVInfo:
     upper: float
     scaler: float = 1.0
 
-space_of_linear_2_dof_b_splines = lfs.BSplineSpaceNew(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
+space_of_linear_2_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
 
 if formulation == 'ar_area':
     # Formulation 1: Aspect Ratio (AR) and Planform Area (S) design variables

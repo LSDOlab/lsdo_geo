@@ -9,9 +9,9 @@ recorder.start()
 
 # region imports and constructions
 # import wing
-imported_wing = lfs.import_file_patched("examples/example_geometries/rectangular_wing.stp", parallelize=False)
+imported_wing = lsdo_geo.import_geometry("examples/example_geometries/rectangular_wing.stp", parallelize=False)
 # imported_wing.functions[3].plot(point_types=["coefficients"], plot_types=['point_cloud'])
-wing_new_function_space = lfs.BSplineSpaceNew(
+wing_new_function_space = lfs.BSplineSpace(
     num_parametric_dimensions=2,
     degree=(2,3),
     coefficients_shape=(3,imported_wing.functions[3].coefficients.shape[1]),
@@ -31,7 +31,7 @@ num_control_points_top = 4
 num_control_points_corner = 1
 num_control_points_side_top = 2
 
-fuselage_b_spline_space = lfs.BSplineSpaceNew(
+fuselage_b_spline_space = lfs.BSplineSpace(
     num_parametric_dimensions=2,
     degree=(1,4),
     coefficients_shape=(2, 2*(num_control_points_top + num_control_points_corner + num_control_points_side_top) -1)
@@ -87,7 +87,7 @@ nose_cone_control_points[2] = nose_cone_front_point
 nose_cone_control_points[3] = fuselage_other_half_surface.coefficients.value[0]
 nose_cone_control_points[3,:,0] = nose_cone_control_points[1,:,0]
 nose_cone_control_points[4] = fuselage_other_half_surface.coefficients.value[0]
-nose_cone_b_spline_space = lfs.BSplineSpaceNew(
+nose_cone_b_spline_space = lfs.BSplineSpace(
     num_parametric_dimensions=2,
     degree=(2,4),
     coefficients_shape=(5, fuselage_half_surface.coefficients.shape[1], 3)
@@ -108,7 +108,7 @@ tail_cone_control_points[2] = tail_cone_back_point
 tail_cone_control_points[3] = fuselage_other_half_surface.coefficients.value[-1]
 tail_cone_control_points[3,:,0] = tail_cone_control_points[1,:,0]
 tail_cone_control_points[4] = fuselage_other_half_surface.coefficients.value[-1]
-tail_cone_b_spline_space = lfs.BSplineSpaceNew(
+tail_cone_b_spline_space = lfs.BSplineSpace(
     num_parametric_dimensions=2,
     degree=(2,4),
     coefficients_shape=(5, fuselage_half_surface.coefficients.shape[1], 3)

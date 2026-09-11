@@ -4,14 +4,16 @@ import csdl_alpha as csdl
 import numpy as np
 import lsdo_function_spaces as lfs
 
-from lsdo_geo.core.parameterization.free_form_deformation_functions import construct_ffd_block_around_entities
-from lsdo_geo.core.parameterization.sectional_parameterization import (
+import lsdo_geo as lg
+from lsdo_geo import (
+    Geometry,
+    construct_ffd_block_around_entities,
     SectionalParameterization,
-    SectionalParameters
+    SectionalParameters,
+    ParameterizationSolver,
+    GeometricVariables,
+    import_geometry,
 )
-from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver, GeometricVariables
-
-import lsdo_geo
 import VortexAD
 import meshio
 import pickle
@@ -22,11 +24,7 @@ recorder.start()
 # Import initial geometry that will be deformed
 geometry_directory = "examples/example_geometries/"
 file_name = "rectangular_wing_naca0012_10ar"
-imported_function_set = lfs.import_file_patched(file_name=geometry_directory + file_name + ".stp", parallelize=False)
-geometry = lsdo_geo.Geometry(functions=imported_function_set.functions, 
-                                      function_names=imported_function_set.function_names,
-                                      name='imported_geometry',
-                                      space=imported_function_set.space)
+geometry = import_geometry(geometry_directory + file_name + ".stp", parallelize=False)
 # geometry.plot()
 
 # endregion Imports
@@ -71,7 +69,8 @@ points2cells = cell_adjacency_data[4]
 TE_properties = VortexAD.TE_detection(points=points_orig,
                              cells=cells_dict,
                              edges2cells=edges2cells,
-                             threshold_theta=125.
+                             points2cells=points2cells,
+                             threshold_theta=125.,
                              )
 
 upper_TE_cells = TE_properties[0] 
@@ -143,8 +142,8 @@ ffd_sectional_parameterization = SectionalParameterization(
 # The coefficients will be used as the states of the parameterization solver, which will be manipulated to solve
 # for the desired geometry (satisfies the design parameters and constraints). The initial values are mainly for
 # debugging to see what the deformation modes do to the geometry since the solver will solve for the actual values.
-space_of_linear_3_dof_b_splines = lfs.BSplineSpaceNew(num_parametric_dimensions=1, degree=1, coefficients_shape=(3,))
-space_of_linear_2_dof_b_splines = lfs.BSplineSpaceNew(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
+space_of_linear_3_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(3,))
+space_of_linear_2_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
 
 chord_stretching_b_spline = lfs.Function(space=space_of_linear_3_dof_b_splines,
                                          coefficients=csdl.Variable(shape=(3,), value=np.array([0., 0., 0.])), name='chord_stretching_b_spline_coefficients')

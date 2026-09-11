@@ -1,10 +1,10 @@
 import time
-import lsdo_geo
-import lsdo_function_spaces as lfs
-lfs.num_workers = 1
 import csdl_alpha as csdl
 import numpy as np
+import lsdo_function_spaces as lfs
 import lsdo_geo as lg
+from lsdo_geo import import_geometry
+lfs.num_workers = 1
 
 # Changes
 # -- Add symmetry

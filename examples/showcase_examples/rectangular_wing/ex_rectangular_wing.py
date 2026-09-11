@@ -4,20 +4,22 @@ import csdl_alpha as csdl
 import numpy as np
 import lsdo_function_spaces as lfs
 
-from lsdo_geo.core.parameterization.free_form_deformation_functions import construct_ffd_block_around_entities
-from lsdo_geo.core.parameterization.sectional_parameterization import (
+import lsdo_geo as lg
+from lsdo_geo import (
+    Geometry,
+    construct_ffd_block_around_entities,
     SectionalParameterization,
     SectionalParameters,
+    ParameterizationSolver,
+    GeometricVariables,
+    import_geometry,
 )
-from lsdo_geo.core.parameterization.parameterization_solver import ParameterizationSolver, GeometricVariables
-
-import lsdo_geo
 
 recorder = csdl.Recorder(inline=True)
 recorder.start()
 
-# Import initiail geometry that will be deformed
-geometry = lsdo_geo.import_geometry(
+# Import initial geometry that will be deformed
+geometry = import_geometry(
     "examples/example_geometries/rectangular_wing.stp",
     parallelize=False,
 )
