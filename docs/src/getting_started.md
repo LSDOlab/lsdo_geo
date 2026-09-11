@@ -4,7 +4,7 @@ This page provides instructions for installing **lsdo_geo**, running the test su
 
 * **GitHub Repository**: [github.com/LSDOlab/lsdo_geo](https://github.com/LSDOlab/lsdo_geo)
 * **LSDO Lab**: [lsdo.eng.ucsd.edu](https://lsdo.eng.ucsd.edu/)
-* **CSDL Framework**: [github.com/LSDOlab/csdl](https://github.com/LSDOlab/csdl)
+* **CSDL Framework (CSDL Alpha)**: [github.com/LSDOlab/CSDL_alpha](https://github.com/LSDOlab/CSDL_alpha)
 
 ---
 

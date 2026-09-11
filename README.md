@@ -121,6 +121,23 @@ sphinx-build -b html docs docs/_build/html
 
 ---
 
+## Citation
+
+If you use `lsdo_geo` in your work or research, please cite:
+
+```bibtex
+@inproceedings{fletcher2026implicit,
+  title     = {Implicit Nonlinear Geometry Parameterization for Multidisciplinary Design Optimization},
+  author    = {Fletcher, Andrew H. and Hwang, John T.},
+  booktitle = {Proceedings of the ASME 2026 International Design Engineering Technical Conferences and Computers and Information in Engineering Conference (IDETC/CIE2026)},
+  number    = {DETC2026-192508},
+  year      = {2026},
+  address   = {Houston, TX}
+}
+```
+
+---
+
 ## License
 
 `lsdo_geo` is distributed under the terms of the Apache License 2.0. See [LICENSE.txt](LICENSE.txt) for details.

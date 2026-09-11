@@ -77,7 +77,7 @@ Constructing $\mathbf{K}_{\text{KKT}}$ requires computing second-order derivativ
 
 `lsdo_geo` integrates tightly with **CSDL (Computational System Design Language)** {cite:p}`gandarillas2024graph`:
 1. **Automated Analytic Derivatives:** CSDL automatically generates reverse-mode vector-Jacobian products (VJPs) and Jacobian-vector products (JVPs) across the computational graph, yielding exact first and second derivatives without finite differences.
-2. **JAX/C++ Compilation:** The entire implicit solver loop compiles into optimized CPU/GPU kernels via JAX or CSDL-Alpha backends.
+2. **JAX/C++ Compilation:** The entire implicit solver loop compiles into optimized CPU/GPU kernels via JAX or CSDL Alpha backends.
 
 ---
 
