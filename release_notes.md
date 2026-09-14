@@ -11,7 +11,7 @@
 * **Extended Python Support**: Full native support and automated test coverage across Python 3.9, 3.10, 3.11, 3.12, 3.13, and 3.14.
 * **NumPy 2.x Ready**: Resolved scalar slice assignment and shape mutation patterns across all geometric transformations and rotation matrices.
 * **Consolidated Sectional Parameterization**: Unified all sectional parameterization under `SectionalParameterization` and `SectionalParameters`, removing legacy redundant modules while preserving backward compatibility.
-* **Modern Standards-Compliant Packaging**: Packaged via `pyproject.toml` (PEP 517/518/621) with SPDX Apache-2.0 licensing and automated setuptools discovery restricted to `lsdo_geo*`.
+* **Modern Standards-Compliant Packaging**: Packaged via `pyproject.toml` (PEP 517/518/621/639) with SPDX LGPL-3.0-or-later licensing and automated setuptools discovery restricted to `lsdo_geo*`.
 * **Continuous Integration**: GitHub Actions workflow updated to `actions/checkout@v7` and `actions/setup-python@v7` running on Node 24 with a 6-job matrix.
 
 ---

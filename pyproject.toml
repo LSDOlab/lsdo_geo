@@ -7,7 +7,7 @@ name = "lsdo_geo"
 description = "A package for geometry and state modeling/representation, parameterization, and mesh creation for MDO."
 readme = "README.md"
 requires-python = ">=3.9"
-license = "Apache-2.0"
+license = "LGPL-3.0-or-later"
 license-files = ["LICENSE.txt"]
 authors = [{name = "Andrew Fletcher", email = "afletcher168@gmail.com"}]
 classifiers = [

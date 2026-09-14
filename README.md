@@ -3,7 +3,7 @@
 [![Documentation Status](https://readthedocs.org/projects/lsdo-geo/badge/?version=latest)](https://lsdo-geo.readthedocs.io/en/latest/?badge=latest)
 [![Tests](https://github.com/LSDOlab/lsdo_geo/actions/workflows/actions.yml/badge.svg)](https://github.com/LSDOlab/lsdo_geo/actions)
 ![Python Version](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)
-[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE.txt)
+[![License](https://img.shields.io/badge/license-LGPL%20v3-blue.svg)](LICENSE.txt)
 
 **lsdo_geo** is a Python library for geometry representation, implicit deformational parameterization, and analytic adjoint sensitivity analysis tailored for gradient-based Multidisciplinary Design Optimization (MDO).
 
@@ -140,4 +140,4 @@ If you use `lsdo_geo` in your work or research, please cite:
 
 ## License
 
-`lsdo_geo` is distributed under the terms of the Apache License 2.0. See [LICENSE.txt](LICENSE.txt) for details.
+`lsdo_geo` is distributed under the terms of the GNU Lesser General Public License v3 (LGPLv3). See [LICENSE.txt](LICENSE.txt) for details.
