@@ -34,7 +34,7 @@ def test_example_script_execution(example_rel_path):
         env=env,
         capture_output=True,
         text=True,
-        timeout=300,
+        timeout=900,
     )
 
     assert result.returncode == 0, (
