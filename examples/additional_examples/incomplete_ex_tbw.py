@@ -205,7 +205,7 @@ sectional_parameters.add_rotation(axis=1, rotation=twist_sectional_parameters)
 
 ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=False)
 
-wing_coefficients = wing_ffd_block.evaluate(ffd_coefficients, plot=False)
+wing_coefficients = wing_ffd_block.evaluate_ffd(ffd_coefficients, plot=False)
 wing.set_coefficients(wing_coefficients)
 
 

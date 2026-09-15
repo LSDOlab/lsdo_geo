@@ -65,5 +65,6 @@ testpaths = ["tests"]
 norecursedirs = [".conda", ".git", "build", "dist", "examples", "tutorials"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "example: marks tests that execute standalone example scripts",
     "optimization: marks long-running optimization test cases",
 ]

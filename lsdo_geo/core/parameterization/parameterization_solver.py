@@ -40,6 +40,14 @@ class GeometricVariables:
         if len(self.desired_value) != len(self.penalty_value):
             raise ValueError('The desired and penalty value must be the same length.')
 
+    @property
+    def computed_values(self) -> list[csdl.Variable]:
+        return self.computed_value
+
+    @property
+    def desired_values(self) -> list[Union[csdl.Variable, float, npt.NDArray[np.float64]]]:
+        return self.desired_value
+
     def add_variable(self, computed_value:csdl.Variable, desired_value:Union[csdl.Variable, float, npt.NDArray[np.float64]], penalty_value:Optional[Union[csdl.Variable,float, npt.NDArray[np.float64]]]=None):
         '''
         Add a geometric variable to the parameterization problem.
@@ -169,7 +177,6 @@ class ParameterizationSolver:
         cost : Union[float,np.ndarray,csdl.Variable], optional
             The cost of the state. This is the scaling factor for the quadratic cost/objective function.
         '''
-        # self.optimization.add_design_variable(parameter)
         state_object = State(state=state, initial_value=initial_value, cost=cost)
         self.states.append(state_object)
         # self.state_costs.append(cost)

@@ -2,6 +2,7 @@ import time
 import csdl_alpha as csdl
 import numpy as np
 import lsdo_function_spaces as lfs
+import lsdo_geo
 import lsdo_geo as lg
 from lsdo_geo import import_geometry
 lfs.num_workers = 1
@@ -669,10 +670,11 @@ sectional_wing_wingspan_stretch = wing_wingspan_stretch_b_spline.evaluate(sectio
 sectional_wing_translation_x = wing_translation_x_b_spline.evaluate(section_parametric_coordinates)
 sectional_wing_translation_z = wing_translation_z_b_spline.evaluate(section_parametric_coordinates)
 
-sectional_parameters = lsdo_geo.SectionalParameters(
-    stretches={0: sectional_wing_chord_stretch},
-    translations={1: sectional_wing_wingspan_stretch, 0: sectional_wing_translation_x, 2: sectional_wing_translation_z}
-)
+sectional_parameters = lsdo_geo.SectionalParameters()
+sectional_parameters.add_stretch(0, sectional_wing_chord_stretch)
+sectional_parameters.add_translation(1, sectional_wing_wingspan_stretch)
+sectional_parameters.add_translation(0, sectional_wing_translation_x)
+sectional_parameters.add_translation(2, sectional_wing_translation_z)
 
 wing_ffd_block_coefficients = wing_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=False)
 wing_coefficients = wing_ffd_block.evaluate_ffd(wing_ffd_block_coefficients, plot=False)
@@ -696,10 +698,11 @@ sectional_h_tail_translation_z = h_tail_translation_z_b_spline.evaluate(section_
 #     'sectional_h_tail_translation_x':sectional_h_tail_translation_x,
 #     'sectional_h_tail_translation_z':sectional_h_tail_translation_z
 #                         }
-sectional_parameters = lsdo_geo.SectionalParameters(
-    stretches={0: sectional_h_tail_chord_stretch},
-    translations={1: sectional_h_tail_span_stretch, 0: sectional_h_tail_translation_x, 2: sectional_h_tail_translation_z}
-)
+sectional_parameters = lsdo_geo.SectionalParameters()
+sectional_parameters.add_stretch(0, sectional_h_tail_chord_stretch)
+sectional_parameters.add_translation(1, sectional_h_tail_span_stretch)
+sectional_parameters.add_translation(0, sectional_h_tail_translation_x)
+sectional_parameters.add_translation(2, sectional_h_tail_translation_z)
 
 h_tail_ffd_block_coefficients = h_tail_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=False)
 h_tail_coefficients = h_tail_ffd_block.evaluate_ffd(h_tail_ffd_block_coefficients, plot=False)
@@ -712,9 +715,8 @@ section_parametric_coordinates = np.linspace(0., 1., fuselage_ffd_block_sectiona
 sectional_fuselage_stretch = fuselage_stretch_b_spline.evaluate(section_parametric_coordinates)
 
 # sectional_parameters = {'sectional_fuselage_stretch':sectional_fuselage_stretch}
-sectional_parameters = lsdo_geo.SectionalParameters(
-    translations={0: sectional_fuselage_stretch}
-)
+sectional_parameters = lsdo_geo.SectionalParameters()
+sectional_parameters.add_translation(0, sectional_fuselage_stretch)
 
 fuselage_ffd_block_coefficients = fuselage_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=False)
 fuselage_and_nose_hub_coefficients = fuselage_ffd_block.evaluate_ffd(fuselage_ffd_block_coefficients, plot=False)
@@ -736,9 +738,9 @@ for i, component_set in enumerate(lift_rotor_related_components):
     section_parametric_coordinates = np.linspace(0., 1., rotor_ffd_block_sectional_parameterization.num_sections).reshape((-1,1))
     sectional_stretch = rotor_stretch_b_spline.evaluate(section_parametric_coordinates)
 
-    sectional_parameters = lsdo_geo.SectionalParameters(
-        stretches={0: sectional_stretch, 1:sectional_stretch}
-    )
+    sectional_parameters = lsdo_geo.SectionalParameters()
+    sectional_parameters.add_stretch(0, sectional_stretch)
+    sectional_parameters.add_stretch(1, sectional_stretch)
 
     rotor_ffd_block_coefficients = rotor_ffd_block_sectional_parameterization.evaluate(sectional_parameters, plot=False)
     rotor_coefficients = rotor_ffd_block.evaluate_ffd(rotor_ffd_block_coefficients, plot=False)
