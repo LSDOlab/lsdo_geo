@@ -31,7 +31,8 @@ geometry_directory = "examples/example_geometries/"
 file_name = "rectangular_wing_naca0012_10ar"
 
 # Resolution toggle: 'fast' (5 spanwise DVs, coarse mesh ~1,272 quads) vs 'full' (8 spanwise DVs, refined mesh 2,872 quads)
-resolution = 'full'  # Options: 'fast' or 'full'
+resolution = 'fast'  # Options: 'fast' or 'full'
+# resolution = 'full'  # Options: 'fast' or 'full'
 
 if resolution == 'fast':
     num_stations = 5
@@ -62,7 +63,11 @@ geometry = import_geometry(
 )
 
 # Scale CAD geometry from baseline 10 m^2 wing to 1.0 m^2 tactical UAV wing
-scale_factor = 1.0 / np.sqrt(10.0)  # = 0.31622776601683794
+# scale_factor = 1.0 / np.sqrt(10.0)  # = 0.31622776601683794
+
+# Scale CAD geometry from baseline 10 m span to 50 m span full-scale BWB size
+scale_factor = 7.5
+
 for function in geometry.functions.values():
     function.coefficients = function.coefficients * scale_factor
 
@@ -276,7 +281,8 @@ projected_panel_centers = geometry.project(panel_centers,
                             grid_search_density_parameter=1,
                             newton_tolerance=1.e-10,
                             grid_search_density_cutoff=30,
-                            projection_tolerance=1.e-2,
+                            projection_tolerance=1.e-1,
+                            use_line_search=True,
                             force_reprojection=False, 
                             plot=False,
                             )
@@ -345,7 +351,7 @@ formulation = 'ar_area'  # Options: 'ar_area' or 'chord_span'
 
 pitch = csdl.Variable(value=5.*np.pi/180) # pitch angle in radians
 elevator_angle = csdl.Variable(value=0.0) # elevator deflection angle in radians
-pitch_4g = csdl.Variable(value=10.0*np.pi/180) # pitch angle for 4.0g pull-up sizing maneuver in radians
+pitch_ss = csdl.Variable(value=10.0*np.pi/180) # pitch angle for pull-up structural sizing maneuver in radians
 if include_neg1g_sizing:
     pitch_neg1g = csdl.Variable(value=-5.0*np.pi/180) # pitch angle for -1.0g push-down sizing maneuver in radians
 payload_cg = csdl.Variable(value=0.40) # payload CG location as fraction of root chord (0.05 to 0.95)
@@ -368,10 +374,10 @@ twist_lower[0] = 0.0  # fix root twist to 0
 twist_upper = np.full(num_chord_stations, 15.0 * np.pi / 180.0)
 twist_upper[0] = 0.0
 
-camber_max_displacement = 0.05 * scale_factor  # 15.8 mm max vertical displacement (~5% chord)
-camber_lower = -camber_max_displacement
-camber_upper = camber_max_displacement
-camber_scaler = 1.0 / camber_max_displacement  # Scales DVs to [-1, 1] range for optimizer
+camber_max_percent = 5.0  # 5.0% chord max camber displacement
+camber_lower = -camber_max_percent
+camber_upper = camber_max_percent
+camber_scaler = 1.0 / camber_max_percent  # Scales DVs in [-5.0, 5.0] to [-1, 1] range for optimizer
 warm_start = False
 
 if formulation == 'ar_area':
@@ -382,13 +388,13 @@ if formulation == 'ar_area':
     twist_dvs = csdl.Variable(shape=(num_chord_stations,), value=np.zeros(num_chord_stations))
 
     design_variables: dict[str, DVInfo] = {
-        'taper_dvs': DVInfo(variable=taper_dvs, lower=0.05, upper=5.0, scaler=2.0),
+        'taper_dvs': DVInfo(variable=taper_dvs, lower=0.10, upper=5.0, scaler=2.0),
         'aspect_ratio': DVInfo(variable=aspect_ratio, lower=2.0, upper=20.0, scaler=0.5),
         # 'sweep_angle_dvs': DVInfo(variable=sweep_angle_dvs, lower=-10.0*np.pi/180, upper=45.0*np.pi/180, scaler=1.e1),
         'sweep_angle_dvs': DVInfo(variable=sweep_angle_dvs, lower=0.0*np.pi/180, upper=45.0*np.pi/180, scaler=1.e1),
         'twist_dvs': DVInfo(variable=twist_dvs, lower=twist_lower, upper=twist_upper, scaler=1.e1),
         'pitch': DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
-        'pitch_4g': DVInfo(variable=pitch_4g, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
+        'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
         'payload_cg': DVInfo(variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1),
         'ttop_dvs': DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.1, scaler=5.e3),
         'tweb_dvs': DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.1, scaler=5.e3),
@@ -429,7 +435,7 @@ if formulation == 'ar_area':
     span_params = csdl.expand(span_stretch_state, (num_ffd_sections,)) * span_weights
 
 elif formulation == 'chord_span':
-    # Formulation 2: chord stretch DVs, sweep DVs, thickness stretch DVs, linear twist DV, span stretch DV, elevator angle, pitch, pitch_4g
+    # Formulation 2: chord stretch DVs, sweep DVs, thickness stretch DVs, linear twist DV, span stretch DV, elevator angle, pitch, pitch_ss
     init_chord = np.zeros(num_chord_stations)
     init_sweep = np.zeros(num_chord_stations)
     init_thick = np.zeros(num_chord_stations)
@@ -437,7 +443,7 @@ elif formulation == 'chord_span':
     init_span = np.array([0.0])
     init_elev = 0.0
     init_pitch = 5.0 * np.pi / 180.0
-    init_pitch_4g = 10.0 * np.pi / 180.0
+    init_pitch_ss = 10.0 * np.pi / 180.0
     if include_neg1g_sizing:
         init_pitch_neg1g = -5.0 * np.pi / 180.0
     init_ttop_val = np.ones(num_thickness_stations) * 0.001
@@ -452,23 +458,22 @@ elif formulation == 'chord_span':
     span_stretch_dv = csdl.Variable(shape=(1,), value=init_span)
     pitch.value = init_pitch
     elevator_angle.value = init_elev
-    pitch_4g.value = init_pitch_4g
+    pitch_ss.value = init_pitch_ss
     if include_neg1g_sizing:
         pitch_neg1g.value = init_pitch_neg1g
     ttop_dvs.value = init_ttop_val
     tweb_dvs.value = init_tweb_val
 
     initial_chord = 1.0 * scale_factor  # 0.3162 m baseline chord
-    chord_stretch_lower = -0.95 * initial_chord  # -0.3004 m (prevents chord collapsing below 5% of baseline)
+    chord_stretch_lower = -0.9 * initial_chord  # -0.3004 m (prevents chord collapsing below 5% of baseline)
     chord_stretch_upper = 4.0 * initial_chord    # 1.2649 m
 
     initial_thickness = 0.12 * initial_chord  # 0.0379 m baseline NACA 0012 thickness
-    thickness_stretch_lower = -0.85 * initial_thickness  # -0.0322 m (prevents thickness collapsing below 15%)
+    thickness_stretch_lower = -0.95 * initial_thickness
     thickness_stretch_upper = 4.0 * initial_thickness    # 0.1518 m
 
     sweep_lower = np.full(num_chord_stations, -0.5 * scale_factor)
-    # sweep_lower = np.full(num_chord_stations, 0.)   # Enforcing backwards sweep only
-    sweep_lower[0] = 0.0  # fix root sweep to 0
+    sweep_lower[0] = 0.0
     sweep_upper = np.full(num_chord_stations, 4.0 * scale_factor)
     sweep_upper[0] = 0.0
 
@@ -482,7 +487,7 @@ elif formulation == 'chord_span':
         'twist_dvs': DVInfo(variable=twist_dvs, lower=twist_lower, upper=twist_upper, scaler=1.e1),
         'span_stretch_dv': DVInfo(variable=span_stretch_dv, lower=span_stretch_lower, upper=span_stretch_upper, scaler=1.0 / scale_factor),
         'pitch': DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
-        'pitch_4g': DVInfo(variable=pitch_4g, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
+        'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
         'payload_cg': DVInfo(variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1),
         'ttop_dvs': DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.05, scaler=5.e3),
         'tweb_dvs': DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.05, scaler=5.e3),
@@ -524,6 +529,9 @@ sectional_parameters.add_rotation(axis=np.array([0., 1., 0.]), rotation=twist_pa
 ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=False)
 
 if include_camber:
+    # Section chord calculated from difference in x coordinate between leading and trailing FFD control points
+    section_chords = ffd_coefficients[-1, :, 0, 0] - ffd_coefficients[0, :, 0, 0]
+
     full_span_camber_list = []
     for c in range(3):
         row = csdl.concatenate(
@@ -532,7 +540,10 @@ if include_camber:
         )
         full_span_camber_list.append(csdl.reshape(row, (1, num_ffd_sections)))
     full_span_camber = csdl.concatenate(full_span_camber_list, axis=0)  # shape (3, num_ffd_sections)
-    camber_delta = csdl.expand(full_span_camber, (3, num_ffd_sections, 2), 'ij->ijk')
+
+    # Convert chord percentage to physical vertical displacement for each section
+    camber_displacement = (full_span_camber / 100.0) * csdl.expand(section_chords, (3, num_ffd_sections), 'j->ij')
+    camber_delta = csdl.expand(camber_displacement, (3, num_ffd_sections, 2), 'ij->ijk')
     ffd_coefficients = ffd_coefficients.set(csdl.slice[1:4, :, :, 2], ffd_coefficients[1:4, :, :, 2] + camber_delta)
 
 geometry_coefficients = ffd_block.evaluate_ffd(coefficients=ffd_coefficients, plot=False)
@@ -602,7 +613,7 @@ if formulation == 'ar_area':
         geometric_variables.add_variable(tc_ratio / 0.12, 1.0, penalty_value=None)
     
     # Enforce planform area and aspect ratio simultaneously (AR normalized by reference 10.0)
-    geometric_variables.add_variable(planform_area, 1.0, penalty_value=None)
+    geometric_variables.add_variable(planform_area / (scale_factor**2), planform_area.value / (scale_factor**2), penalty_value=None)
     geometric_variables.add_variable(aspect_ratio_calc / 10.0, aspect_ratio / 10.0, penalty_value=None)
 
     # Enforce sectional sweep angles between adjacent quarter chord stations
@@ -618,23 +629,41 @@ if formulation == 'ar_area':
 geometry.rotate(rotation_origin=geometry.evaluate(quarter_chord_center), axis_vector=np.array([0., 1., 0.]), angles=pitch, units='radians')
 
 # cruise_speed = csdl.Variable(value=1.)
-cruise_speed = csdl.Variable(value=20.)
-sizing_speed = 1.5 * cruise_speed  # 30.0 m/s (1.5x cruise speed) structural sizing maneuver speed
+if scale_factor == 1.0 or scale_factor == 1.0/np.sqrt(10.0):
+    cruise_speed = csdl.Variable(value=20.)
+    sizing_speed = 1.5 * cruise_speed  # 30.0 m/s (1.5x cruise speed) structural sizing maneuver speed
+    if scale_factor == 1.0/np.sqrt(10.0):
+        # Fixed positive payload weight of 100.0 N (10.19 kg tactical UAV payload)
+        payload_weight = csdl.Variable(value=100.0)
+        load_factor = csdl.Variable(value=4.0)  # 4.0g load factor for sizing maneuver
+    elif scale_factor == 1.0:
+        # Fixed positive payload weight of 1000.0 N
+        payload_weight = csdl.Variable(value=1000.0)
+        load_factor = csdl.Variable(value=3.0)  # 3.0g load factor for sizing maneuver
+elif scale_factor == 7.5:
+    cruise_speed = csdl.Variable(value=140.)    # This is matching normal dynamic pressure without going to altitude
+    sizing_speed = 1.25 * cruise_speed  # (1.25x cruise speed) structural sizing maneuver speed
+    payload_weight = csdl.Variable(value=160000.*4.44822)  # 711,86 kN = 160,000 lbf (4.44822 N/lbf) payload weight
+    load_factor = csdl.Variable(value=2.5)  # 2.5g load factor for sizing maneuver
+else:
+    raise Exception("Cruise speed not defined for scale factor = {}. Set the cruise speed for this scale factor.".format(scale_factor))
+
+load_factor_val = float(np.asarray(load_factor.value).flatten()[0]) if hasattr(load_factor, 'value') else float(load_factor)
 
 # region Aerodynamic solver (panel method)
 # Flight conditions:
 # Node 0 = cruise condition (20 m/s)
 # Node 1 = stability condition (+1.0 deg alpha perturbation, 20 m/s)
-# Node 2 = 5.0g pull-up structural sizing condition (30 m/s, pitch angle = pitch_5g)
-# Node 3 = -1.0g push-down structural sizing condition (24 m/s, pitch angle = pitch_neg1g, optional)
+# Node 2 = structural sizing pull-up condition (sizing_speed, pitch angle = pitch_ss)
+# Node 3 = -1.0g push-down structural sizing condition (optional, pitch angle = pitch_neg1g)
 if include_neg1g_sizing:
     num_nodes = 4
     dalpha_rad = 1.0 * np.pi / 180.0
-    dalpha_4g = pitch_4g - pitch
+    dalpha_ss = pitch_ss - pitch
     dalpha_neg1g = pitch_neg1g - pitch
     v0 = csdl.concatenate([cruise_speed, csdl.Variable(value=0.0), csdl.Variable(value=0.0)])
     v1 = csdl.concatenate([cruise_speed * np.cos(dalpha_rad), csdl.Variable(value=0.0), cruise_speed * np.sin(dalpha_rad)])
-    v2 = csdl.concatenate([sizing_speed * csdl.cos(dalpha_4g), csdl.Variable(value=0.0), sizing_speed * csdl.sin(dalpha_4g)])
+    v2 = csdl.concatenate([sizing_speed * csdl.cos(dalpha_ss), csdl.Variable(value=0.0), sizing_speed * csdl.sin(dalpha_ss)])
     v3 = csdl.concatenate([sizing_speed * csdl.cos(dalpha_neg1g), csdl.Variable(value=0.0), sizing_speed * csdl.sin(dalpha_neg1g)])
     v_stacked = csdl.reshape(csdl.concatenate([v0, v1, v2, v3]), (4, 3))
     rho_array = csdl.Variable(shape=(num_nodes,), value=np.array([1.225, 1.225, 1.225, 1.225]))
@@ -642,10 +671,10 @@ if include_neg1g_sizing:
 else:
     num_nodes = 3
     dalpha_rad = 1.0 * np.pi / 180.0
-    dalpha_4g = pitch_4g - pitch
+    dalpha_ss = pitch_ss - pitch
     v0 = csdl.concatenate([cruise_speed, csdl.Variable(value=0.0), csdl.Variable(value=0.0)])
     v1 = csdl.concatenate([cruise_speed * np.cos(dalpha_rad), csdl.Variable(value=0.0), cruise_speed * np.sin(dalpha_rad)])
-    v2 = csdl.concatenate([sizing_speed * csdl.cos(dalpha_4g), csdl.Variable(value=0.0), sizing_speed * csdl.sin(dalpha_4g)])
+    v2 = csdl.concatenate([sizing_speed * csdl.cos(dalpha_ss), csdl.Variable(value=0.0), sizing_speed * csdl.sin(dalpha_ss)])
     v_stacked = csdl.reshape(csdl.concatenate([v0, v1, v2]), (3, 3))
     rho_array = csdl.Variable(shape=(num_nodes,), value=np.array([1.225, 1.225, 1.225]))
     sos_array = csdl.Variable(shape=(num_nodes,), value=np.array([343.0, 343.0, 343.0]))
@@ -713,8 +742,6 @@ x_payload = x_le_root + payload_cg * root_chord
 y_payload = csdl.Variable(value=np.array([0.0]))
 z_payload = 0.5 * (upper_beam_mesh[0, 2] + lower_beam_mesh[0, 2])
 
-# Fixed positive payload weight of 100.0 N (10.19 kg tactical UAV payload)
-payload_weight = csdl.Variable(value=100.0)
 payload_mass = payload_weight / 9.81
 W_total = structural_mass * 9.81 + payload_weight
 total_mass = structural_mass + payload_mass
@@ -782,35 +809,35 @@ Cp = outputs['Cp']
 dynamic_panel_centers = geometry.evaluate(projected_panel_centers, plot=False)
 dynamic_panel_centers_right = dynamic_panel_centers[:num_right_panels, :]
 panel_forces_right_cruise = outputs['panel_forces'][0, :num_right_panels, :] # shape (num_right_panels, 3) from Node 0 (cruise)
-panel_forces_right_4g = outputs['panel_forces'][2, :num_right_panels, :] # shape (num_right_panels, 3) from Node 2 (4.0g pull-up)
+panel_forces_right_ss = outputs['panel_forces'][2, :num_right_panels, :] # shape (num_right_panels, 3) from Node 2 (structural sizing pull-up)
 if include_neg1g_sizing:
     panel_forces_right_neg1g = outputs['panel_forces'][3, :num_right_panels, :] # shape (num_right_panels, 3) from Node 3 (-1.0g push-down)
 
 W_var = csdl.Variable(value=W_matrix)
 
-# 1. Force & Moment Mapping for 4.0g Sizing Case
-F_node = csdl.matmat(W_var, panel_forces_right_4g)
+# 1. Force & Moment Mapping for Structural Sizing Case
+F_node = csdl.matmat(W_var, panel_forces_right_ss)
 
 B_expand = csdl.expand(beam_mesh, (num_beam_nodes, num_right_panels, 3), 'nj->nij')
 C_expand = csdl.expand(dynamic_panel_centers_right, (num_beam_nodes, num_right_panels, 3), 'ij->nij')
-F_expand = csdl.expand(panel_forces_right_4g, (num_beam_nodes, num_right_panels, 3), 'ij->nij')
+F_expand = csdl.expand(panel_forces_right_ss, (num_beam_nodes, num_right_panels, 3), 'ij->nij')
 W_expand = csdl.expand(W_var, (num_beam_nodes, num_right_panels, 3), 'ni->nij')
 
 r = C_expand - B_expand
 r_cross_F = csdl.cross(r, F_expand, axis=2)
 M_node = csdl.sum(W_expand * r_cross_F, axes=(1,))
 
-# 4.0g Sizing Case: Direct mapped forces and moments from Node 2 pull-up maneuver
-beam_loads_4g = csdl.concatenate([F_node, M_node], axis=1) # shape (num_beam_nodes, 6)
-beam.add_load(beam_loads_4g)
+# Structural Sizing Case: Direct mapped forces and moments from Node 2 pull-up maneuver
+beam_loads_ss = csdl.concatenate([F_node, M_node], axis=1) # shape (num_beam_nodes, 6)
+beam.add_load(beam_loads_ss)
 
-# Solve structural beam model using aframe for 4.0g
+# Solve structural beam model using aframe for structural sizing
 frame = aframe.Frame(beams=[beam])
 frame.solve()
 
 beam_displacement = frame.displacement['wing_spar']
 beam_rotation = frame.rotation['wing_spar']
-tip_twist_4g = beam_rotation[-1, 1]
+tip_twist_ss = beam_rotation[-1, 1]
 beam_stress = frame.compute_stress()['wing_spar'] # shape (num_beam_elements, 5)
 
 # Cross-sectional stress aggregation per element using csdl.maximum with rho=1.0
@@ -922,13 +949,16 @@ for i in range(num_thickness_stations):
 
 # dv_stresses has shape (num_thickness_stations,) -> 5 constraints in fast, 8 in full
 dv_stresses = csdl.concatenate(aggregated_stress_list)
+# don't enforce stresses at tips since load goes to 0
+stresses_to_enforce = dv_stresses[:-2] if resolution == 'fast' else dv_stresses[:-3]
 
 # Yield stress for Aluminum 6061 is 276 MPa.
-# Safety factor of 4.0 applied to obtain the allowable stress:
-safety_factor = 4.0
+# Safety factor of 1.5 applied to obtain the allowable stress:
+safety_factor = 1.5
 yield_stress = 276.0e6
 allowable_stress = yield_stress / safety_factor  # 69.0 MPa
-dv_stresses.set_as_constraint(upper=allowable_stress, scaler=1.0 / allowable_stress)
+# dv_stresses.set_as_constraint(upper=allowable_stress, scaler=1.0 / allowable_stress)
+stresses_to_enforce.set_as_constraint(upper=allowable_stress, scaler=1.0 / allowable_stress)
 
 if include_neg1g_sizing:
     # Root stress constraint for -1.0g sizing condition
@@ -1001,7 +1031,8 @@ objective = D_total
 objective.set_as_objective(scaler=1.e1)
 
 # L = W constraint (Node 0: cruise condition)
-W_ref = 115.0  # reference cruise weight [N]
+payload_weight_val = float(np.asarray(payload_weight.value).flatten()[0]) if hasattr(payload_weight, 'value') else float(payload_weight)
+W_ref = 1.15 * payload_weight_val  # reference cruise weight [N] (~1.15x payload weight)
 lift_trim = lift_effective_cruise - W_total
 lift_trim.set_as_constraint(equals=0.0, scaler=1.0 / W_ref)
 
@@ -1010,19 +1041,19 @@ pitch_moment = M[0, 1]
 pitch_trim = pitch_moment
 pitch_trim.set_as_constraint(equals=0.0, scaler=1.e-1)
 
-# Sizing Lift constraint: L = 4.0 * W (Node 2: 4.0g pull-up sizing condition)
-alpha_local_4g = alpha_local_elem + dalpha_4g
-alpha_abs_4g = csdl.absolute(alpha_local_4g)
-delta_alpha_4g = alpha_abs_4g - alpha_crit
-softplus_val_4g = (1.0 / beta_stall) * csdl.softplus(beta_stall * delta_alpha_4g)
-cl_stall_loss_4g = k_stall_lift * (softplus_val_4g / delta_alpha_ref)
-sign_alpha_4g = alpha_local_4g / (alpha_abs_4g + 1.e-6)
-q_inf_4g = 0.5 * rho_array[2] * (sizing_speed ** 2)
-L_loss_4g = csdl.sum(cl_stall_loss_4g * sign_alpha_4g * q_inf_4g * strip_area)
-lift_effective_4g = L[2] - L_loss_4g
+# Sizing Lift constraint: L = load_factor * W (Node 2: structural sizing pull-up condition)
+alpha_local_ss = alpha_local_elem + dalpha_ss
+alpha_abs_ss = csdl.absolute(alpha_local_ss)
+delta_alpha_ss = alpha_abs_ss - alpha_crit
+softplus_val_ss = (1.0 / beta_stall) * csdl.softplus(beta_stall * delta_alpha_ss)
+cl_stall_loss_ss = k_stall_lift * (softplus_val_ss / delta_alpha_ref)
+sign_alpha_ss = alpha_local_ss / (alpha_abs_ss + 1.e-6)
+q_inf_ss = 0.5 * rho_array[2] * (sizing_speed ** 2)
+L_loss_ss = csdl.sum(cl_stall_loss_ss * sign_alpha_ss * q_inf_ss * strip_area)
+lift_effective_ss = L[2] - L_loss_ss
 
-lift_4g = lift_effective_4g - 4.0 * W_total
-lift_4g.set_as_constraint(equals=0.0, scaler=1.0 / (4.0 * W_ref))
+lift_ss = lift_effective_ss - load_factor * W_total
+lift_ss.set_as_constraint(equals=0.0, scaler=1.0 / (load_factor_val * W_ref))
 
 if include_neg1g_sizing:
     # Sizing Lift constraint: L = -1.0 * W (Node 3: -1.0g push-down sizing condition)
@@ -1036,7 +1067,9 @@ dL_stab = L[1] - L[0]
 dMy_stab = M[1, 1] - M[0, 1]
 neutral_point_x = x_cg - dMy_stab / dL_stab
 static_margin = (neutral_point_x - x_cg) / mean_chord
-static_margin.set_as_constraint(lower=0.1, scaler=1.e1)
+# static_margin.set_as_constraint(lower=0.1, scaler=1.e1)
+static_margin.set_as_constraint(lower=0.05, scaler=2.e1)
+# static_margin.set_as_constraint(equals=0.05, scaler=2.e1)
 
 # # 16-CP Cubic B-spline Fit to Beam Twist under 4.0g Maneuver Load
 # # Conditions: f(0) = 0 (root zero twist), f'(0) = 0 (symmetry), and f(y_k) = theta_k for nodes 1..14
@@ -1077,7 +1110,7 @@ static_margin.set_as_constraint(lower=0.1, scaler=1.e1)
 if formulation == 'chord_span':
     # For chord and span stretch formulation (no ParameterizationSolver),
     # keep planform area constraint (1.0 m^2) and aspect ratio inequality constraint AR <= 20.0
-    planform_area.set_as_constraint(equals=1.0, scaler=1.0)
+    planform_area.set_as_constraint(equals=1.0 * scale_factor**2, scaler=1.0 / (scale_factor**2))
     aspect_ratio_calc.set_as_constraint(upper=20.0, scaler=1.e-1)
     # Enforce constant thickness-to-chord ratio = 0.12 at all stations
     for i in range(num_chord_stations):
@@ -1093,7 +1126,7 @@ for dv_info in design_variables.values():
 
 geometry_coefficients = [geometry_function.coefficients for geometry_function in geometry.functions.values()]
 
-additional_outs = [Di, L, CL, CDi, Cp, panel_mesh, planform_area, aspect_ratio_calc, structural_mass, beam_displacement, beam_rotation, tip_twist_4g, beam_stress, elem_max_stress, dv_stresses, stress_coeffs, ttop_elem, tweb_elem, ttop_dvs, tweb_dvs, twist_dvs, Di_Trefftz, D_profile, D_total, alpha_local_elem, y_strip_pts, W_total, M, CM, pitch_trim, lift_4g, static_margin, neutral_point_x, x_cg, x_payload, payload_cg, x_struct, r_cg, local_chord, local_height, box_width, beam_mesh, F_node, pitch_4g, dynamic_panel_centers_right, panel_forces_right_cruise, panel_forces_right_4g, lift_effective_cruise, lift_effective_4g, L_loss_cruise, L_loss_4g]
+additional_outs = [Di, L, CL, CDi, Cp, panel_mesh, planform_area, aspect_ratio_calc, structural_mass, beam_displacement, beam_rotation, tip_twist_ss, beam_stress, elem_max_stress, dv_stresses, stress_coeffs, ttop_elem, tweb_elem, ttop_dvs, tweb_dvs, twist_dvs, Di_Trefftz, D_profile, D_total, alpha_local_elem, y_strip_pts, W_total, M, CM, pitch_trim, lift_ss, static_margin, neutral_point_x, x_cg, x_payload, payload_cg, x_struct, r_cg, local_chord, local_height, box_width, beam_mesh, F_node, pitch_ss, dynamic_panel_centers_right, panel_forces_right_cruise, panel_forces_right_ss, lift_effective_cruise, lift_effective_ss, L_loss_cruise, L_loss_ss]
 if include_camber:
     additional_outs += [camber_dvs]
 if include_elevator:
@@ -1115,75 +1148,78 @@ for dv_info in design_variables.values():
     if val is not None:
         jax_sim[dv_info.variable] = np.asarray(val)
 
-jax_sim.run()
-# print(f"Final Lift (Cruise Node 0): Effective = {float(np.asarray(jax_sim[lift_effective_cruise]).flatten()[0]):.2f} N (VLM: {float(np.asarray(jax_sim[L]).flatten()[0]):.2f} N, Loss: {float(np.asarray(jax_sim[L_loss_cruise]).flatten()[0]):.2f} N, Total Weight W: {float(np.asarray(jax_sim[W_total]).flatten()[0]):.2f} N)")
-# print(f"Final Lift (4.0g Sizing Node 2): Effective = {float(np.asarray(jax_sim[lift_effective_4g]).flatten()[0]):.2f} N (VLM: {float(np.asarray(jax_sim[L]).flatten()[2]):.2f} N, Loss: {float(np.asarray(jax_sim[L_loss_4g]).flatten()[0]):.2f} N, Target 4.0x Weight: {4.0 * float(np.asarray(jax_sim[W_total]).flatten()[0]):.2f} N)")
-# if include_neg1g_sizing:
-#     print(f"Final Lift (-1.0g Sizing Node 3): {float(np.asarray(jax_sim[L]).flatten()[3]):.2f} N (Target -1.0x Weight: {-1.0 * float(np.asarray(jax_sim[W_total]).flatten()[0]):.2f} N)")
-# print(f"Pitch (Cruise Node 0): {float(np.asarray(jax_sim[pitch]).flatten()[0]) * 180 / np.pi:.2f} deg")
-# print(f"Pitch (4.0g Sizing Node 2): {float(np.asarray(jax_sim[pitch_4g]).flatten()[0]) * 180 / np.pi:.2f} deg")
-# if include_neg1g_sizing:
-#     print(f"Pitch (-1.0g Sizing Node 3): {float(np.asarray(jax_sim[pitch_neg1g]).flatten()[0]) * 180 / np.pi:.2f} deg")
-#     print(f"Root Stress (-1.0g Sizing): {float(np.asarray(jax_sim[root_stress_neg1g]).flatten()[0])/1e6:.2f} MPa (Allowable: {allowable_stress/1e6:.1f} MPa)")
-# print(f"Final Pitching Moment (about CG): {float(np.asarray(jax_sim[M][0, 1]).flatten()[0]):.4f} N*m")
-# print(f"Final Center of Mass (x_cg): {float(np.asarray(jax_sim[x_cg]).flatten()[0]):.4f} m (Struct CG: {float(np.asarray(jax_sim[x_struct]).flatten()[0]):.4f} m, Payload: {float(np.asarray(jax_sim[x_payload]).flatten()[0]):.4f} m [{float(np.asarray(jax_sim[payload_cg]).flatten()[0])*100:.1f}% root chord])")
-# print(f"Total Drag (Objective): {float(np.asarray(jax_sim[D_total]).flatten()[0]):.2f} N (Induced: {float(np.asarray(jax_sim[Di_Trefftz]).flatten()[0]):.2f} N, Profile+Stall: {float(np.asarray(jax_sim[D_profile]).flatten()[0]):.2f} N)")
-# alpha_local_deg_all = np.degrees(np.asarray(jax_sim[alpha_local_elem]).flatten())
-# print(f"Local Strip Alpha (Cruise): Min = {np.min(alpha_local_deg_all):.2f} deg, Max = {np.max(alpha_local_deg_all):.2f} deg")
-# print(f"Half-Beam Mass: {float(np.asarray(jax_sim[structural_mass]).flatten()[0])/2.0:.2f} kg (Full Structural Mass: {float(np.asarray(jax_sim[structural_mass]).flatten()[0]):.2f} kg)")
-# tip_rot_4g_val = np.asarray(jax_sim[beam_rotation])[-1]
-# tip_twist_deg = float(np.asarray(jax_sim[tip_twist_4g]).flatten()[0]) * 180.0 / np.pi
-# print(f"Wing Tip Rotation (4.0g Load): θx (roll slope) = {tip_rot_4g_val[0]*180/np.pi:+.3f}°, θy (twist/pitch) = {tip_twist_deg:+.3f}°, θz (yaw slope) = {tip_rot_4g_val[2]*180/np.pi:+.3f}°")
+# Optional initial diagnostic pass (disabled by default to avoid slow initial JAX compilation)
+run_pre_diagnostics = False
+if run_pre_diagnostics:
+    jax_sim.run()
+    # print(f"Final Lift (Cruise Node 0): Effective = {float(np.asarray(jax_sim[lift_effective_cruise]).flatten()[0]):.2f} N (VLM: {float(np.asarray(jax_sim[L]).flatten()[0]):.2f} N, Loss: {float(np.asarray(jax_sim[L_loss_cruise]).flatten()[0]):.2f} N, Total Weight W: {float(np.asarray(jax_sim[W_total]).flatten()[0]):.2f} N)")
+    # print(f"Final Lift ({load_factor_val:.1f}g Sizing Node 2): Effective = {float(np.asarray(jax_sim[lift_effective_ss]).flatten()[0]):.2f} N (VLM: {float(np.asarray(jax_sim[L]).flatten()[2]):.2f} N, Loss: {float(np.asarray(jax_sim[L_loss_ss]).flatten()[0]):.2f} N, Target {load_factor_val:.1f}x Weight: {load_factor_val * float(np.asarray(jax_sim[W_total]).flatten()[0]):.2f} N)")
+    # if include_neg1g_sizing:
+    #     print(f"Final Lift (-1.0g Sizing Node 3): {float(np.asarray(jax_sim[L]).flatten()[3]):.2f} N (Target -1.0x Weight: {-1.0 * float(np.asarray(jax_sim[W_total]).flatten()[0]):.2f} N)")
+    # print(f"Pitch (Cruise Node 0): {float(np.asarray(jax_sim[pitch]).flatten()[0]) * 180 / np.pi:.2f} deg")
+    # print(f"Pitch ({load_factor_val:.1f}g Sizing Node 2): {float(np.asarray(jax_sim[pitch_ss]).flatten()[0]) * 180 / np.pi:.2f} deg")
+    # if include_neg1g_sizing:
+    #     print(f"Pitch (-1.0g Sizing Node 3): {float(np.asarray(jax_sim[pitch_neg1g]).flatten()[0]) * 180 / np.pi:.2f} deg")
+    #     print(f"Root Stress (-1.0g Sizing): {float(np.asarray(jax_sim[root_stress_neg1g]).flatten()[0])/1e6:.2f} MPa (Allowable: {allowable_stress/1e6:.1f} MPa)")
+    # print(f"Final Pitching Moment (about CG): {float(np.asarray(jax_sim[M][0, 1]).flatten()[0]):.4f} N*m")
+    # print(f"Final Center of Mass (x_cg): {float(np.asarray(jax_sim[x_cg]).flatten()[0]):.4f} m (Struct CG: {float(np.asarray(jax_sim[x_struct]).flatten()[0]):.4f} m, Payload: {float(np.asarray(jax_sim[x_payload]).flatten()[0]):.4f} m [{float(np.asarray(jax_sim[payload_cg]).flatten()[0])*100:.1f}% root chord])")
+    # print(f"Total Drag (Objective): {float(np.asarray(jax_sim[D_total]).flatten()[0]):.2f} N (Induced: {float(np.asarray(jax_sim[Di_Trefftz]).flatten()[0]):.2f} N, Profile+Stall: {float(np.asarray(jax_sim[D_profile]).flatten()[0]):.2f} N)")
+    # alpha_local_deg_all = np.degrees(np.asarray(jax_sim[alpha_local_elem]).flatten())
+    # print(f"Local Strip Alpha (Cruise): Min = {np.min(alpha_local_deg_all):.2f} deg, Max = {np.max(alpha_local_deg_all):.2f} deg")
+    # print(f"Half-Beam Mass: {float(np.asarray(jax_sim[structural_mass]).flatten()[0])/2.0:.2f} kg (Full Structural Mass: {float(np.asarray(jax_sim[structural_mass]).flatten()[0]):.2f} kg)")
+    # tip_rot_ss_val = np.asarray(jax_sim[beam_rotation])[-1]
+    # tip_twist_deg = float(np.asarray(jax_sim[tip_twist_ss]).flatten()[0]) * 180.0 / np.pi
+    # print(f"Wing Tip Rotation ({load_factor_val:.1f}g Load): θx (roll slope) = {tip_rot_ss_val[0]*180/np.pi:+.3f}°, θy (twist/pitch) = {tip_twist_deg:+.3f}°, θz (yaw slope) = {tip_rot_ss_val[2]*180/np.pi:+.3f}°")
 
-# station_twists_deg = np.asarray(jax_sim[all_station_twists]).flatten() * 180.0 / np.pi
-# outboard_twists_deg = np.asarray(jax_sim[outboard_station_twists]).flatten() * 180.0 / np.pi
-# print(f"\n================ 16-CP CUBIC B-SPLINE AEROELASTIC TWIST CONSTRAINTS (4.0g Load Case) ================")
-# print(f"{'Station':7s} | {'eta':6s} | {'y [m]':8s} | {'Twist θy [deg]':16s} | {'Constraint (θy <= 0)':22s} | {'Status':8s}")
-# print("-" * 75)
-# print(f"{0:7d} | {station_eta_eval[0,0]:6.3f} | {chord_station_y[0]:8.3f} | {station_twists_deg[0]:16.6f} | [Fixed Root Boundary] | FEASIBLE")
-# for i in range(1, num_chord_stations):
-#     tw_val = station_twists_deg[i]
-#     st = "FEASIBLE" if tw_val <= 1e-6 else "VIOLATED"
-#     print(f"{i:7d} | {station_eta_eval[i,0]:6.3f} | {chord_station_y[i]:8.3f} | {tw_val:16.6f} | {tw_val:+.4f}° <= 0.0°        | {st:8s}")
+    # station_twists_deg = np.asarray(jax_sim[all_station_twists]).flatten() * 180.0 / np.pi
+    # outboard_twists_deg = np.asarray(jax_sim[outboard_station_twists]).flatten() * 180.0 / np.pi
+    # print(f"\n================ 16-CP CUBIC B-SPLINE AEROELASTIC TWIST CONSTRAINTS ({load_factor_val:.1f}g Load Case) ================")
+    # print(f"{'Station':7s} | {'eta':6s} | {'y [m]':8s} | {'Twist θy [deg]':16s} | {'Constraint (θy <= 0)':22s} | {'Status':8s}")
+    # print("-" * 75)
+    # print(f"{0:7d} | {station_eta_eval[0,0]:6.3f} | {chord_station_y[0]:8.3f} | {station_twists_deg[0]:16.6f} | [Fixed Root Boundary] | FEASIBLE")
+    # for i in range(1, num_chord_stations):
+    #     tw_val = station_twists_deg[i]
+    #     st = "FEASIBLE" if tw_val <= 1e-6 else "VIOLATED"
+    #     print(f"{i:7d} | {station_eta_eval[i,0]:6.3f} | {chord_station_y[i]:8.3f} | {tw_val:16.6f} | {tw_val:+.4f}° <= 0.0°        | {st:8s}")
 
-elem_stress_arr = np.asarray(jax_sim[elem_max_stress]).flatten()
-dv_stress_arr = np.asarray(jax_sim[dv_stresses]).flatten()
-chords_arr = np.asarray(jax_sim[local_chord]).flatten()
-heights_arr = np.asarray(jax_sim[local_height]).flatten()
-widths_arr = np.asarray(jax_sim[box_width]).flatten()
-beam_pts = np.asarray(jax_sim[beam_mesh])
-f_nodes_arr = np.asarray(jax_sim[F_node])
-ttop_elem_arr = np.asarray(jax_sim[ttop_elem]).flatten()
-tweb_elem_arr = np.asarray(jax_sim[tweb_elem]).flatten()
-ttop_dv_arr = np.asarray(jax_sim[ttop_dvs]).flatten()
-tweb_dv_arr = np.asarray(jax_sim[tweb_dvs]).flatten()
-twist_dv_arr = np.asarray(jax_sim[twist_dvs]).flatten()
+    elem_stress_arr = np.asarray(jax_sim[elem_max_stress]).flatten()
+    dv_stress_arr = np.asarray(jax_sim[dv_stresses]).flatten()
+    chords_arr = np.asarray(jax_sim[local_chord]).flatten()
+    heights_arr = np.asarray(jax_sim[local_height]).flatten()
+    widths_arr = np.asarray(jax_sim[box_width]).flatten()
+    beam_pts = np.asarray(jax_sim[beam_mesh])
+    f_nodes_arr = np.asarray(jax_sim[F_node])
+    ttop_elem_arr = np.asarray(jax_sim[ttop_elem]).flatten()
+    tweb_elem_arr = np.asarray(jax_sim[tweb_elem]).flatten()
+    ttop_dv_arr = np.asarray(jax_sim[ttop_dvs]).flatten()
+    tweb_dv_arr = np.asarray(jax_sim[tweb_dvs]).flatten()
+    twist_dv_arr = np.asarray(jax_sim[twist_dvs]).flatten()
 
-print(f"\n================ ELEMENT-BY-ELEMENT BEAM DIAGNOSTIC ({num_beam_elements} Elements, 4.0g Load Case) ================")
-print(f"{'Elem':4s} | {'y_mid [m]':9s} | {'Chord [m]':9s} | {'Height [m]':10s} | {'ttop [mm]':9s} | {'4.0g Fz [N]':11s} | {'Max Stress [MPa]':16s}")
-print("-" * 88)
-y_elem_mid = 0.5 * (beam_pts[:-1, 1] + beam_pts[1:, 1])
-for i in range(num_beam_elements):
-    print(f"{i:4d} | {y_elem_mid[i]:9.3f} | {chords_arr[i]:9.3f} | {heights_arr[i]:10.4f} | {ttop_elem_arr[i]*1e3:9.2f} | {f_nodes_arr[i, 2]:11.2f} | {elem_stress_arr[i]/1e6:16.2f}")
+    print(f"\n================ ELEMENT-BY-ELEMENT BEAM DIAGNOSTIC ({num_beam_elements} Elements, {load_factor_val:.1f}g Load Case) ================")
+    print(f"{'Elem':4s} | {'y_mid [m]':9s} | {'Chord [m]':9s} | {'Height [m]':10s} | {'ttop [mm]':9s} | {f'{load_factor_val:.1f}g Fz [N]':11s} | {'Max Stress [MPa]':16s}")
+    print("-" * 88)
+    y_elem_mid = 0.5 * (beam_pts[:-1, 1] + beam_pts[1:, 1])
+    for i in range(num_beam_elements):
+        print(f"{i:4d} | {y_elem_mid[i]:9.3f} | {chords_arr[i]:9.3f} | {heights_arr[i]:10.4f} | {ttop_elem_arr[i]*1e3:9.2f} | {f_nodes_arr[i, 2]:11.2f} | {elem_stress_arr[i]/1e6:16.2f}")
 
-print(f"\n================ {num_thickness_stations} THICKNESS-STATION AGGREGATED STRESS CONSTRAINTS (Allowable = {allowable_stress/1e6:.1f} MPa) ================")
-print(f"{'Station':7s} | {'eta_peak':8s} | {'Span y [m]':10s} | {'Aggregated Stress [MPa]':24s} | {'Allowable [MPa]':16s} | {'Status':8s}")
-print("-" * 95)
-for j in range(num_thickness_stations):
-    st_val = dv_stress_arr[j] / 1e6
-    y_p_span = thickness_peaks[j] * 4.99 * scale_factor
-    status = "FEASIBLE" if st_val <= (allowable_stress / 1e6) else "VIOLATED"
-    print(f"{j:7d} | {thickness_peaks[j]:8.4f} | {y_p_span:10.3f} | {st_val:24.2f} | {allowable_stress/1e6:16.1f} | {status:8s}")
+    print(f"\n================ {num_thickness_stations} THICKNESS-STATION AGGREGATED STRESS CONSTRAINTS (Allowable = {allowable_stress/1e6:.1f} MPa) ================")
+    print(f"{'Station':7s} | {'eta_peak':8s} | {'Span y [m]':10s} | {'Aggregated Stress [MPa]':24s} | {'Allowable [MPa]':16s} | {'Status':8s}")
+    print("-" * 95)
+    for j in range(num_thickness_stations):
+        st_val = dv_stress_arr[j] / 1e6
+        y_p_span = thickness_peaks[j] * 4.99 * scale_factor
+        status = "FEASIBLE" if st_val <= (allowable_stress / 1e6) else "VIOLATED"
+        print(f"{j:7d} | {thickness_peaks[j]:8.4f} | {y_p_span:10.3f} | {st_val:24.2f} | {allowable_stress/1e6:16.1f} | {status:8s}")
 
-stress_coeffs_arr = np.asarray(jax_sim[stress_coeffs]).flatten()
-if resolution == 'fast':
-    root_deriv_val = (stress_coeffs_arr[1] - stress_coeffs_arr[0]) * 3.0 / knots_stress_15[4]
-    print(f"\n================ 15-CP CUBIC STRESS SPLINE DIAGNOSTIC ================")
-    print(f"Root symmetry check: c0 = {stress_coeffs_arr[0]/1e6:.4f} MPa, c1 = {stress_coeffs_arr[1]/1e6:.4f} MPa, dS/du(0) = {root_deriv_val/1e6:.6f} MPa/unit")
-    print(f"Stress control points (MPa): {np.round(stress_coeffs_arr/1e6, 2)}")
-elif resolution == 'full':
-    print(f"\n================ 8-CP B-SPLINE STRESS DIAGNOSTIC ================")
-    print(f"Stress control points (MPa): {np.round(stress_coeffs_arr/1e6, 2)}")
+    stress_coeffs_arr = np.asarray(jax_sim[stress_coeffs]).flatten()
+    if resolution == 'fast':
+        root_deriv_val = (stress_coeffs_arr[1] - stress_coeffs_arr[0]) * 3.0 / knots_stress_15[4]
+        print(f"\n================ 15-CP CUBIC STRESS SPLINE DIAGNOSTIC ================")
+        print(f"Root symmetry check: c0 = {stress_coeffs_arr[0]/1e6:.4f} MPa, c1 = {stress_coeffs_arr[1]/1e6:.4f} MPa, dS/du(0) = {root_deriv_val/1e6:.6f} MPa/unit")
+        print(f"Stress control points (MPa): {np.round(stress_coeffs_arr/1e6, 2)}")
+    elif resolution == 'full':
+        print(f"\n================ 8-CP B-SPLINE STRESS DIAGNOSTIC ================")
+        print(f"Stress control points (MPa): {np.round(stress_coeffs_arr/1e6, 2)}")
 
 optimization_problem = modopt.CSDLAlphaProblem(
     problem_name='rectangular_wing_to_bwb_aerostructural_optimization',
@@ -1371,11 +1407,11 @@ for iteration in range(num_iterations):
             tw_str = ""
     if 'camber_dvs' in unscaled_values:
         cam_vals = unscaled_values['camber_dvs']
-        max_cam_mm = np.max(np.abs(cam_vals)) * 1e3
-        dv_str += f"\nmax|camber|={max_cam_mm:.1f}mm"
+        max_cam_pct = np.max(np.abs(cam_vals))
+        dv_str += f"\nmax|camber|={max_cam_pct:.2f}% chord"
 
     pitch_val = float(np.asarray(unscaled_values['pitch']).flatten()[0]) if 'pitch' in unscaled_values else 0.0
-    pitch_4g_val = float(np.asarray(unscaled_values['pitch_4g']).flatten()[0]) if 'pitch_4g' in unscaled_values else 0.0
+    pitch_ss_val = float(np.asarray(unscaled_values['pitch_ss']).flatten()[0]) if 'pitch_ss' in unscaled_values else 0.0
     pitch_neg1g_val = float(np.asarray(unscaled_values['pitch_neg1g']).flatten()[0]) if 'pitch_neg1g' in unscaled_values else 0.0
     pitch_neg1g_str = f"  Pitch_-1g={np.degrees(pitch_neg1g_val):.1f}°" if 'pitch_neg1g' in unscaled_values else ""
     elev_val = float(np.asarray(unscaled_values['elevator_angle']).flatten()[0]) if 'elevator_angle' in unscaled_values else 0.0
@@ -1391,7 +1427,7 @@ for iteration in range(num_iterations):
         f"Iteration {iteration}/{num_iterations - 1}\n"
         f"Formulation: {formulation} | Res: {resolution}\n"
         f"{dv_str}\n"
-        f"{elev_str}Pitch={np.degrees(pitch_val):.1f}°  Pitch_4g={np.degrees(pitch_4g_val):.1f}°{pitch_neg1g_str}\n"
+        f"{elev_str}Pitch={np.degrees(pitch_val):.1f}°  Pitch_ss={np.degrees(pitch_ss_val):.1f}°{pitch_neg1g_str}\n"
         f"SM={sm_val:.4f} (x_cg={xcg_val:.3f}m, x_np={xnp_val:.3f}m, x_pay={xpay_val:.3f}m [{pay_cg_val*100:.1f}%])",
         position='upper_left',
         font_size=12,
@@ -1435,12 +1471,12 @@ for iteration in range(num_iterations):
             zcg_val_opt = float(np.asarray(jax_sim[r_cg]).flatten()[2]) if 'r_cg' in globals() else 0.0
             panel_centers_right_opt = np.asarray(jax_sim[dynamic_panel_centers_right])
             f_cruise_opt = np.asarray(jax_sim[panel_forces_right_cruise])
-            f_4g_opt = np.asarray(jax_sim[panel_forces_right_4g])
+            f_ss_opt = np.asarray(jax_sim[panel_forces_right_ss])
             np.savez_compressed(
                 cache_file_opt,
                 panel_centers_right=panel_centers_right_opt,
                 f_cruise=f_cruise_opt,
-                f_4g=f_4g_opt,
+                f_ss=f_ss_opt,
                 xcg_val=xcg_val_opt,
                 zcg_val=zcg_val_opt
             )
