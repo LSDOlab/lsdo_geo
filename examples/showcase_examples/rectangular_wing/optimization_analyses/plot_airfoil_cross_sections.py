@@ -64,18 +64,81 @@ class DVInfo:
 
 
 def find_latest_output_dir(base_dir: str) -> str:
-    """Find the latest modified subdirectory in base_dir."""
+    """Find the latest completed (or active) output subdirectory in base_dir."""
     if not os.path.exists(base_dir):
         raise FileNotFoundError(f"Base output directory not found: {base_dir}")
     folders = [os.path.join(base_dir, d) for d in os.listdir(base_dir)
                if os.path.isdir(os.path.join(base_dir, d))]
     if not folders:
         raise FileNotFoundError(f"No run subdirectories found in: {base_dir}")
-    latest = max(folders, key=os.path.getmtime)
+    
+    # Prefer completed runs containing modopt_results.out
+    completed = [d for d in folders if os.path.exists(os.path.join(d, 'modopt_results.out'))]
+    if completed:
+        latest = max(completed, key=os.path.getmtime)
+    else:
+        # Fallback to any directory with x.out
+        with_x = [d for d in folders if os.path.exists(os.path.join(d, 'x.out'))]
+        latest = max(with_x if with_x else folders, key=os.path.getmtime)
     return os.path.abspath(latest)
 
 
-def parse_design_variables(x_opt: np.ndarray):
+def detect_scale_factor(output_dir: str, repo_root: str) -> float:
+    """
+    Detects the scale factor used in the optimization run:
+    1. Check structural_data.npz if present in output_dir.
+    2. Check lift_and_moment_data.npz to infer from actual half-span.
+    3. Read scale_factor definition from ex_rectangular_wing_to_bwb.py.
+    """
+    # 1. Check structural_data.npz
+    struct_npz = os.path.join(output_dir, 'structural_data.npz')
+    if os.path.exists(struct_npz):
+        try:
+            data = np.load(struct_npz, allow_pickle=True)
+            if 'scale_factor' in data:
+                sf = float(data['scale_factor'])
+                print(f"  Detected scale_factor = {sf} from structural_data.npz")
+                return sf
+        except Exception:
+            pass
+
+    # 2. Check lift_and_moment_data.npz
+    lm_npz = os.path.join(output_dir, 'lift_and_moment_data.npz')
+    if os.path.exists(lm_npz):
+        try:
+            data = np.load(lm_npz, allow_pickle=True)
+            pc = data['panel_centers_right']
+            y_max = float(np.max(pc[:, 1]))
+            if y_max > 15.0:
+                sf = 7.5
+            elif y_max > 2.5:
+                sf = 1.0
+            else:
+                sf = 1.0 / np.sqrt(10.0)
+            print(f"  Inferred scale_factor = {sf} from panel telemetry (half-span = {y_max:.2f} m)")
+            return sf
+        except Exception:
+            pass
+
+    # 3. Read from ex_rectangular_wing_to_bwb.py
+    run_script = os.path.join(repo_root, 'examples/showcase_examples/rectangular_wing/ex_rectangular_wing_to_bwb.py')
+    if os.path.exists(run_script):
+        try:
+            with open(run_script, 'r') as f:
+                for line in f:
+                    stripped = line.strip()
+                    if stripped.startswith('scale_factor =') or stripped.startswith('scale_factor='):
+                        val_str = stripped.split('=')[1].split('#')[0].strip()
+                        sf = float(eval(val_str))
+                        print(f"  Read scale_factor = {sf} from ex_rectangular_wing_to_bwb.py")
+                        return sf
+        except Exception:
+            pass
+
+    return 7.5
+
+
+def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5):
     """
     Auto-detect configuration and parse unscaled physical design variable values.
     Supports 5-station ('fast') and 8-station ('full') runs with or without camber/elevator.
@@ -111,7 +174,6 @@ def parse_design_variables(x_opt: np.ndarray):
 
     num_stations = 5 if resolution == 'fast' else 8
     num_chord_stations = num_stations
-    scale_factor = 1.0 / np.sqrt(10.0)
 
     curr = 0
     taper_dvs_val = x_opt[curr : curr + num_chord_stations - 1] / 2.0
@@ -341,6 +403,8 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     geometry_solver.add_state(span_stretch_state)
     geometry_solver.add_state(sweep_translation_states)
 
+    target_area = 10.0 * (scale_factor ** 2)
+
     geometric_variables = GeometricVariables()
     for i in range(1, num_chord_stations):
         normalized_chord = local_chords[i] / local_chords[0]
@@ -348,7 +412,7 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     for i in range(num_chord_stations):
         tc_ratio = local_thicknesses[i] / local_chords[i]
         geometric_variables.add_variable(tc_ratio / 0.12, 1.0, penalty_value=None)
-    geometric_variables.add_variable(planform_area, 1.0, penalty_value=None)
+    geometric_variables.add_variable(planform_area / target_area, 1.0, penalty_value=None)
     geometric_variables.add_variable(aspect_ratio_calc / 10.0, aspect_ratio / 10.0, penalty_value=None)
 
     qc_pts = [geometry.evaluate(quarter_chord_projections[i]) for i in range(num_chord_stations)]
@@ -365,13 +429,37 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     half_span = total_wingspan / 2.0
     s_ref = float(planform_area.value[0])
     ar_final = float(aspect_ratio_calc.value[0])
+    local_chords_vals = [float(c.value[0]) for c in local_chords]
+    chord_stretch_vals = [float(s) for s in chord_stretch_states.value]
 
     print(f"Deformed Geometry Evaluated:")
     print(f"  Wingspan (b)     = {total_wingspan:.4f} m (Half-Span = {half_span:.4f} m)")
     print(f"  Planform Area (S)= {s_ref:.4f} m^2")
     print(f"  Aspect Ratio (AR)= {ar_final:.2f}")
+    for i, cv in enumerate(local_chords_vals):
+        print(f"  Station {i} Design Chord = {cv:.3f} m (Stretch = {chord_stretch_vals[i]:+.3f} m)")
 
-    return geometry, total_wingspan, half_span
+    # Fine spanwise continuous chord profile sampled directly from CAD surface
+    print("Evaluating fine continuous CAD surface chord profile...")
+    fn_lo = geometry.functions[0]
+    fn_up = geometry.functions[1]
+    n_fine_cad = 120
+    cad_eta = np.linspace(0.0, 0.999, n_fine_cad)
+    v_fine_pts = np.linspace(0.0, 1.0, 120)
+    cad_chords = np.zeros(n_fine_cad)
+    for idx_cad, eta_val in enumerate(cad_eta):
+        coords = np.column_stack([np.full_like(v_fine_pts, eta_val), v_fine_pts])
+        p_lo = fn_lo.evaluate(coords, non_csdl=True)
+        p_up = fn_up.evaluate(coords, non_csdl=True)
+        all_x = np.concatenate([p_lo[:, 0], p_up[:, 0]])
+        cad_chords[idx_cad] = all_x.max() - all_x.min()
+
+    cad_chord_profile = {
+        'eta': cad_eta,
+        'chord': cad_chords,
+    }
+
+    return geometry, total_wingspan, half_span, local_chords_vals, chord_stretch_vals, cad_chord_profile
 
 
 def extract_station_airfoils(geometry, half_span: float, num_stations: int = 8):
@@ -597,13 +685,55 @@ def generate_airfoil_gallery_plot(station_data: list, output_path: str, half_spa
     print(f"Saved Airfoil Gallery Plot to: {output_path}")
 
 
-def generate_shape_evolution_plot(station_data: list, output_path: str, half_span: float):
+def evaluate_symmetric_bspline(right_half_cps: np.ndarray, num_eval_pts: int = 300):
+    """
+    Constructs a symmetric degree-3 (cubic) B-spline across full span (N = 2*n - 1 CPs),
+    and evaluates it along the right half-span (v in [0.5, 1.0], eta in [0.0, 1.0]).
+
+    Guarantees zero slope at the root (eta = 0, v = 0.5) by construction of symmetry.
+    Returns:
+        eta_fine: (num_eval_pts,) normalized spanwise coordinates [0, 1]
+        curve_fine: (num_eval_pts,) evaluated continuous B-spline field
+        greville_eta: (len(right_half_cps),) Greville abscissae (eta locations) of control points
+    """
+    n = len(right_half_cps)
+    N = 2 * n - 1
+    # Symmetrically mirror control points across root
+    full_cps = np.concatenate([right_half_cps[::-1][:-1], right_half_cps])
+
+    sp = lfs.BSplineSpace(num_parametric_dimensions=1, degree=3, coefficients_shape=(N,))
+    knots = sp.knots[0]
+
+    # Greville abscissae across full span
+    p = 3
+    greville_full = np.array([np.mean(knots[i + 1 : i + 1 + p]) for i in range(N)])
+    right_idx = np.where(greville_full >= 0.5 - 1e-9)[0]
+    greville_eta = (greville_full[right_idx] - 0.5) / 0.5
+
+    eta_fine = np.linspace(0.0, 1.0, num_eval_pts)
+    v_fine = (0.5 + 0.5 * eta_fine).reshape(-1, 1)
+    B_matrix = sp.compute_basis_matrix(v_fine).toarray()
+    curve_fine = B_matrix @ full_cps
+
+    return eta_fine, curve_fine, greville_eta
+
+
+def generate_shape_evolution_plot(
+    station_data: list,
+    output_path: str,
+    half_span: float,
+    parsed_dvs: dict = None,
+    local_chords_vals: list = None,
+    chord_stretch_vals: list = None,
+    cad_chord_profile: dict = None,
+):
     """
     Figure 2: Multi-panel comparative analysis:
     (a) Planform cutline map (x-y plane)
     (b) Leading-edge aligned physical cross-section overlay
     (c) Normalized airfoil profile comparison (x/c vs z/c)
-    (d) Spanwise distribution metrics (c, t_max, t/c, twist, camber)
+    (d) Continuous Spanwise Chord Distribution (Symmetric Cubic B-Spline)
+    (e) Continuous Spanwise Aerodynamic Twist Distribution (Symmetric Cubic B-Spline)
     """
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
     fig = plt.figure(figsize=(16, 12), dpi=200)
@@ -635,9 +765,10 @@ def generate_shape_evolution_plot(station_data: list, output_path: str, half_spa
     ax_plan.plot(x_spar_dense, y_dense, '-.', color='#d95f02', linewidth=1.5, label='Internal Spar (25% c)')
 
     # Draw station cutting lines
+    label_offset = max(0.02, 0.012 * half_span)
     for k, (data, col) in enumerate(zip(station_data, colors)):
         ax_plan.plot([data['x_le'], data['x_te']], [data['y'], data['y']], '-', color=col, linewidth=2.2)
-        ax_plan.text(data['x_te'] + 0.02, data['y'], f"Stn {k+1} ($\\eta={data['eta']:.2f}$)",
+        ax_plan.text(data['x_te'] + label_offset, data['y'], f"Stn {k+1} ($\\eta={data['eta']:.2f}$)",
                      color=col, va='center', fontsize=8, fontweight='bold')
 
     ax_plan.set_xlabel("Chordwise Position x [m]", fontsize=10, fontweight='bold')
@@ -686,45 +817,112 @@ def generate_shape_evolution_plot(station_data: list, output_path: str, half_spa
     ax_norm.legend(loc='upper right', frameon=True, facecolor='white', framealpha=0.9, fontsize=8)
 
     # -------------------------------------------------------------------------
-    # Panel (d) & (e): Spanwise Distributions in bottom-right quadrant
+    # Panel (d) & (e): Symmetric Cubic B-Spline Spanwise Distributions
     # -------------------------------------------------------------------------
     from matplotlib.gridspec import GridSpecFromSubplotSpec
     sub_gs = GridSpecFromSubplotSpec(2, 1, subplot_spec=gs[1, 1], hspace=0.35)
-    ax_metric1 = fig.add_subplot(sub_gs[0, 0])
-    ax_metric2 = fig.add_subplot(sub_gs[1, 0])
+    ax_chord = fig.add_subplot(sub_gs[0, 0])
+    ax_twist = fig.add_subplot(sub_gs[1, 0])
 
-    etas = [d['eta'] for d in station_data]
-    chords = [d['chord'] for d in station_data]
-    tcs = [d['tc_ratio'] for d in station_data]
-    twists = [d['twist_deg'] for d in station_data]
-    cambers = [d['camber_ratio'] for d in station_data]
+    # 1. Chord B-Spline & CAD Surface
+    scale_factor = parsed_dvs.get('scale_factor', 7.5) if parsed_dvs is not None else 7.5
+    baseline_chord = 1.0 * scale_factor
 
-    # Subplot 1: Chord and Twist
-    ax_twist = ax_metric1.twinx()
-    l1 = ax_metric1.plot(etas, chords, 'o-', color='#d62728', linewidth=2.0, markersize=5, label='Chord $c$ [m]')
-    l2 = ax_twist.plot(etas, twists, 's--', color='#9467bd', linewidth=1.8, markersize=5, label='Twist [deg]')
-    ax_metric1.set_ylabel('Chord $c$ [m]', color='#d62728', fontweight='bold', fontsize=9)
-    ax_twist.set_ylabel('Twist [deg]', color='#9467bd', fontweight='bold', fontsize=9)
-    ax_metric1.tick_params(axis='y', labelcolor='#d62728')
+    if chord_stretch_vals is not None:
+        chord_cps = baseline_chord + np.array(chord_stretch_vals)
+    elif local_chords_vals is not None:
+        chord_cps = np.array(local_chords_vals)
+    else:
+        chord_cps = np.array([d['chord'] for d in station_data])
+
+    eta_fine, ffd_chord_curve, chord_cp_eta = evaluate_symmetric_bspline(chord_cps)
+    c_root_val = float(chord_cps[0])
+
+    # FFD continuous B-spline curve
+    ax_chord.plot(
+        eta_fine, ffd_chord_curve, '-', color='#d62728', linewidth=2.5,
+        label=f'FFD Chord B-spline $c(y)$ ($c_{{\\mathrm{{root}}}}={c_root_val:.2f}$ m)'
+    )
+    # FFD chord control points
+    ax_chord.plot(
+        chord_cp_eta, chord_cps, 'o', color='#d62728', markersize=7,
+        markeredgecolor='black', zorder=5, label=f'Chord CPs ($c_0+\\Delta c_k$, $N={len(chord_cps)}$)'
+    )
+
+    # CAD surface physical chord profile
+    if cad_chord_profile is not None:
+        ax_chord.plot(
+            cad_chord_profile['eta'], cad_chord_profile['chord'], '--',
+            color='#1f77b4', linewidth=2.0, alpha=0.9,
+            label='Physical CAD Surface Chord'
+        )
+
+    # Sliced stations for comparison
+    sliced_etas = [d['eta'] for d in station_data]
+    sliced_chords = [d['chord'] for d in station_data]
+    ax_chord.scatter(
+        sliced_etas, sliced_chords, marker='d', color='#2ca02c', s=35, zorder=4,
+        alpha=0.85, label=f'Sliced Sections ($N={len(sliced_chords)}$)'
+    )
+
+    # Secondary axis: Taper Ratio c / c_root
+    ax_taper = ax_chord.twinx()
+    ax_taper.plot(eta_fine, ffd_chord_curve / c_root_val, ':', color='#7f7f7f', alpha=0.5, linewidth=1.2)
+    ax_taper.set_ylabel(r'Taper Ratio $c / c_{\mathrm{root}}$', color='#555555', fontweight='bold', fontsize=9)
+    ax_taper.tick_params(axis='y', labelcolor='#555555')
+    ax_taper.grid(False)
+
+    ax_chord.set_ylabel('Chord $c$ [m]', color='#d62728', fontweight='bold', fontsize=9.5)
+    ax_chord.tick_params(axis='y', labelcolor='#d62728')
+    ax_chord.set_title('(d) Spanwise Chord Distribution (FFD B-Spline & CAD Surface)', fontsize=10.5, fontweight='bold', pad=5)
+    ax_chord.set_xlim([0.0, 1.0])
+    y_max_chord = max(np.max(ffd_chord_curve), np.max(chord_cps))
+    if cad_chord_profile is not None:
+        y_max_chord = max(y_max_chord, np.max(cad_chord_profile['chord']))
+    chord_ylim = [0.0, y_max_chord * 1.15]
+    ax_chord.set_ylim(chord_ylim)
+    ax_taper.set_ylim([chord_ylim[0] / c_root_val, chord_ylim[1] / c_root_val])
+    ax_chord.grid(True, linestyle=':', alpha=0.6)
+    ax_chord.legend(loc='upper right', frameon=True, framealpha=0.92, fontsize=7.5)
+
+    # 2. Twist B-Spline & Section Incidence
+    twist_dvs_deg = np.degrees(parsed_dvs['twist_dvs']) if parsed_dvs is not None else np.zeros(5)
+    eta_fine_tw, twist_curve, twist_cp_eta = evaluate_symmetric_bspline(twist_dvs_deg)
+
+    # Continuous aerodynamic twist B-spline
+    ax_twist.plot(
+        eta_fine_tw, twist_curve, '-', color='#9467bd', linewidth=2.5,
+        label=r'FFD Aerodynamic Twist $\theta(y)$'
+    )
+    # Twist design variable control points
+    ax_twist.plot(
+        twist_cp_eta, twist_dvs_deg, 's', color='#9467bd', markersize=7,
+        markeredgecolor='black', zorder=5, label=f'Twist DVs ($tw_k$, Peak: {np.min(twist_dvs_deg):.1f}°)'
+    )
+
+    # Sliced section geometric incidence angle
+    sliced_twists = [d['twist_deg'] for d in station_data]
+    ax_twist.plot(
+        sliced_etas, sliced_twists, '^--', color='#2ca02c', markersize=6, linewidth=1.5,
+        alpha=0.85, label=r'CAD Surface Incidence $\arctan(\Delta z / c)$'
+    )
+
+    # Mark active lower bound (-15 deg)
+    ax_twist.axhline(
+        -15.0, color='#d62728', linestyle=':', linewidth=1.5, alpha=0.8,
+        label=r'Washout Lower Bound ($-15^{\circ}$)'
+    )
+
+    ax_twist.set_xlabel(r'Normalized Spanwise Coordinate $\eta = y / (b/2)$', fontsize=9.5, fontweight='bold')
+    ax_twist.set_ylabel('Twist / Incidence [deg]', color='#9467bd', fontweight='bold', fontsize=9.5)
     ax_twist.tick_params(axis='y', labelcolor='#9467bd')
-    ax_metric1.set_title('(d) Planform & Twist Distribution', fontsize=10, fontweight='bold', pad=4)
-    lines_top = l1 + l2
-    ax_metric1.legend(lines_top, [l.get_label() for l in lines_top], loc='upper right', fontsize=8, frameon=True, framealpha=0.85)
-    ax_metric1.grid(True, linestyle=':', alpha=0.6)
-
-    # Subplot 2: t/c ratio and Camber ratio
-    ax_cam = ax_metric2.twinx()
-    l3 = ax_metric2.plot(etas, tcs, 'o-', color='#1f77b4', linewidth=2.0, markersize=5, label='$t/c$ [%]')
-    l4 = ax_cam.plot(etas, cambers, '^--', color='#2ca02c', linewidth=1.8, markersize=5, label='Camber [% $c$]')
-    ax_metric2.set_xlabel('Normalized Spanwise Coordinate $\\eta = y/(b/2)$', fontsize=9, fontweight='bold')
-    ax_metric2.set_ylabel('$t/c$ [%]', color='#1f77b4', fontweight='bold', fontsize=9)
-    ax_cam.set_ylabel('Camber [% $c$]', color='#2ca02c', fontweight='bold', fontsize=9)
-    ax_metric2.tick_params(axis='y', labelcolor='#1f77b4')
-    ax_cam.tick_params(axis='y', labelcolor='#2ca02c')
-    ax_metric2.set_title('(e) Thickness Ratio & Camber Distribution', fontsize=10, fontweight='bold', pad=4)
-    lines_bot = l3 + l4
-    ax_metric2.legend(lines_bot, [l.get_label() for l in lines_bot], loc='upper right', fontsize=8, frameon=True, framealpha=0.85)
-    ax_metric2.grid(True, linestyle=':', alpha=0.6)
+    ax_twist.set_title('(e) Spanwise Aerodynamic Twist & Surface Incidence Distribution', fontsize=10.5, fontweight='bold', pad=5)
+    ax_twist.set_xlim([0.0, 1.0])
+    y_min_tw = min(-18.0, float(np.min(twist_curve)) - 3.0, float(np.min(twist_dvs_deg)) - 2.5)
+    y_max_tw = max(4.0, float(np.max(twist_curve)) + 2.0, float(np.max(twist_dvs_deg)) + 2.0)
+    ax_twist.set_ylim([y_min_tw, y_max_tw])
+    ax_twist.grid(True, linestyle=':', alpha=0.6)
+    ax_twist.legend(loc='lower left', ncol=2, frameon=True, framealpha=0.92, fontsize=7.5)
 
     fig.suptitle(
         f"Spanwise Airfoil Shape Transition & Geometric Parameter Evolution\n"
@@ -791,11 +989,14 @@ def main():
 
     print(f"Loaded {num_iters} iterations. Extracting final optimal design vector.")
 
+    # Detect scale factor
+    scale_factor = detect_scale_factor(target_dir, repo_root)
+
     # Parse DVs
-    parsed_dvs = parse_design_variables(x_opt)
+    parsed_dvs = parse_design_variables(x_opt, scale_factor=scale_factor)
 
     # Reconstruct authentic geometry
-    geometry, total_wingspan, half_span = build_and_evaluate_geometry(parsed_dvs, repo_root)
+    geometry, total_wingspan, half_span, local_chords_vals, chord_stretch_vals, cad_chord_profile = build_and_evaluate_geometry(parsed_dvs, repo_root)
 
     # Extract 8 cross-section stations along half-span
     station_data = extract_station_airfoils(geometry, half_span, num_stations=8)
@@ -806,11 +1007,19 @@ def main():
     telemetry_path = os.path.join(target_dir, "airfoil_cross_sections_data.npz")
 
     generate_airfoil_gallery_plot(station_data, gallery_fig_path, half_span)
-    generate_shape_evolution_plot(station_data, evolution_fig_path, half_span)
+    generate_shape_evolution_plot(
+        station_data,
+        evolution_fig_path,
+        half_span,
+        parsed_dvs=parsed_dvs,
+        local_chords_vals=local_chords_vals,
+        chord_stretch_vals=chord_stretch_vals,
+        cad_chord_profile=cad_chord_profile,
+    )
     save_airfoil_telemetry(station_data, telemetry_path, half_span)
 
     # Also copy artifacts to the active agent brain directory if available
-    artifact_dir = "/home/andrew/.gemini/antigravity/brain/5d53fe94-f3d4-4c8e-aec8-721ba87a6dbf"
+    artifact_dir = os.environ.get('ARTIFACT_DIR', '/home/andrew/.gemini/antigravity/brain/f4b8c9ca-9e69-4a92-8ee3-962e5e21793d')
     if os.path.exists(artifact_dir):
         shutil.copy2(gallery_fig_path, os.path.join(artifact_dir, "airfoil_cross_sections_gallery.png"))
         shutil.copy2(evolution_fig_path, os.path.join(artifact_dir, "airfoil_shape_evolution.png"))

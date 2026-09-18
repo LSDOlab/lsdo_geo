@@ -99,7 +99,7 @@ for idx in list(geometry.functions.keys()):
             for k in range(3):
                 new_coeffs[:, j, k] = np.linspace(coeffs[0, j, k], coeffs[-1, j, k], num_spanwise_cp_target)
         new_shape = (num_spanwise_cp_target, n_chord)
-        new_degree = (min(2, num_spanwise_cp_target - 1), orig_degree[1])
+        new_degree = (min(3, num_spanwise_cp_target - 1), orig_degree[1])
     else:
         n_chord = coeffs.shape[0]
         new_coeffs = np.zeros((n_chord, num_spanwise_cp_target, 3))
@@ -107,7 +107,7 @@ for idx in list(geometry.functions.keys()):
             for k in range(3):
                 new_coeffs[j, :, k] = np.linspace(coeffs[j, 0, k], coeffs[j, -1, k], num_spanwise_cp_target)
         new_shape = (n_chord, num_spanwise_cp_target)
-        new_degree = (orig_degree[0], min(2, num_spanwise_cp_target - 1))
+        new_degree = (orig_degree[0], min(3, num_spanwise_cp_target - 1))
 
     new_space = lfs.BSplineSpace(
         num_parametric_dimensions=2,
@@ -315,10 +315,11 @@ for i in range(num_right_panels):
 # Construct a Free Form Deformation (FFD) block around the geometry
 # region Create Parameterization Objects
 # Camber formulation option: adds 3x5 (fast) or 3x8 (full) FFD camber DVs
-include_camber = True  # Options: True or False
+include_camber = False  # Options: True or False
 
 # Elevator formulation option: default off when camber is on
-include_elevator = False if include_camber else True  # Options: True or False
+# include_elevator = False if include_camber else True  # Options: True or False
+include_elevator = False  # Options: True or False
 
 # Construct a Free Form Deformation (FFD) block around the geometry
 # 5 chordwise control points when camber is active (excluding LE & TE gives 3 interior points)
@@ -329,8 +330,6 @@ ffd_degree_chordwise = 2 if include_camber else 1
 #       The "manual" method is to use construct_ffd_block_from_corners, which allows for defining the coefficients directly.
 ffd_block = construct_ffd_block_around_entities(entities=geometry, 
                                                 num_coefficients=(num_ffd_coefficients_chordwise, num_ffd_sections, 2), degree=(ffd_degree_chordwise, 3, 1))
-# ffd_block.plot()
-
 # Define an axial sectional parameterization for the FFD volume. 
 # This views the FFD volume as a series of 2D sections (as defined by the control points) 
 # that can be allowed to stretch, translate, and rotate independently.
@@ -394,10 +393,10 @@ if formulation == 'ar_area':
         'sweep_angle_dvs': DVInfo(variable=sweep_angle_dvs, lower=0.0*np.pi/180, upper=70.0*np.pi/180, scaler=1.e1),
         'twist_dvs': DVInfo(variable=twist_dvs, lower=twist_lower, upper=twist_upper, scaler=1.e1),
         'pitch': DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
-        'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
-        'payload_cg': DVInfo(variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1),
-        'ttop_dvs': DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.1, scaler=5.e3),
-        'tweb_dvs': DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.1, scaler=5.e3),
+        # 'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
+        # 'payload_cg': DVInfo(variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1),
+        # 'ttop_dvs': DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.1, scaler=5.e3),
+        # 'tweb_dvs': DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.1, scaler=5.e3),
     }
     if include_elevator:
         design_variables['elevator_angle'] = DVInfo(variable=elevator_angle, lower=-25.0*np.pi/180, upper=25.0*np.pi/180, scaler=1.e1)
@@ -613,7 +612,7 @@ if formulation == 'ar_area':
         geometric_variables.add_variable(tc_ratio / 0.12, 1.0, penalty_value=None)
     
     # Enforce planform area and aspect ratio simultaneously (AR normalized by reference 10.0)
-    geometric_variables.add_variable(planform_area / (scale_factor**2), planform_area.value / (scale_factor**2), penalty_value=None)
+    geometric_variables.add_variable(planform_area / (10*scale_factor**2), planform_area.value / (10*scale_factor**2), penalty_value=None)
     geometric_variables.add_variable(aspect_ratio_calc / 10.0, aspect_ratio / 10.0, penalty_value=None)
 
     # Enforce sectional sweep angles between adjacent quarter chord stations
@@ -642,9 +641,9 @@ if scale_factor == 1.0 or scale_factor == 1.0/np.sqrt(10.0):
         load_factor = csdl.Variable(value=3.0)  # 3.0g load factor for sizing maneuver
 elif scale_factor == 7.5:
     cruise_speed = csdl.Variable(value=140.)    # This is matching normal dynamic pressure without going to altitude
-    sizing_speed = 1.25 * cruise_speed  # (1.25x cruise speed) structural sizing maneuver speed
+    sizing_speed = 1.2 * cruise_speed  # (1.2x cruise speed) structural sizing maneuver speed
     payload_weight = csdl.Variable(value=160000.*4.44822)  # 711,86 kN = 160,000 lbf (4.44822 N/lbf) payload weight
-    load_factor = csdl.Variable(value=2.5)  # 2.5g load factor for sizing maneuver
+    load_factor = csdl.Variable(value=3.0)  # 3.0g load factor for sizing maneuver
 else:
     raise Exception("Cruise speed not defined for scale factor = {}. Set the cruise speed for this scale factor.".format(scale_factor))
 
@@ -959,7 +958,7 @@ safety_factor = 1.5
 yield_stress = 276.0e6
 allowable_stress = yield_stress / safety_factor  # 69.0 MPa
 # dv_stresses.set_as_constraint(upper=allowable_stress, scaler=1.0 / allowable_stress)
-stresses_to_enforce.set_as_constraint(upper=allowable_stress, scaler=1.0 / allowable_stress)
+# stresses_to_enforce.set_as_constraint(upper=allowable_stress, scaler=1.0 / allowable_stress)
 
 if include_neg1g_sizing:
     # Root stress constraint for -1.0g sizing condition
@@ -1030,7 +1029,7 @@ D_total = Di_Trefftz + D_profile
 
 # Reference values for scaling constraints and objective function
 payload_weight_val = float(np.asarray(payload_weight.value).flatten()[0]) if hasattr(payload_weight, 'value') else float(payload_weight)
-W_ref = 1.15 * payload_weight_val  # reference cruise weight [N] (~1.15x payload weight)
+W_ref = 2.0 * payload_weight_val  # reference cruise weight [N] (~1.15x payload weight)
 D_ref = W_ref / 20. # reference drag [N] (~1/20 of payload weight if we assume L/D ~ 20)
 c_ref = scale_factor * 1.0 # Initial chord length
 
@@ -1040,13 +1039,13 @@ objective.set_as_objective(scaler=1.e1 / D_ref)
 
 # L = W constraint (Node 0: cruise condition)
 lift_trim = lift_effective_cruise - W_total
-lift_trim.set_as_constraint(equals=0.0, scaler=1.0 / W_ref)
+lift_trim.set_as_constraint(equals=0.0, scaler=1.0 / (5*W_ref))
 
 # Pitch / Moment trim constraint: My = 0 about dynamic center of mass (x_cg)
 
 pitch_moment = M[0, 1]
 pitch_trim = pitch_moment
-pitch_trim.set_as_constraint(equals=0.0, scaler=1.0 / (W_ref * c_ref))
+# pitch_trim.set_as_constraint(equals=0.0, scaler=1.0 / (W_ref * c_ref))
 
 # Sizing Lift constraint: L = load_factor * W (Node 2: structural sizing pull-up condition)
 alpha_local_ss = alpha_local_elem + dalpha_ss
@@ -1060,7 +1059,7 @@ L_loss_ss = csdl.sum(cl_stall_loss_ss * sign_alpha_ss * q_inf_ss * strip_area)
 lift_effective_ss = L[2] - L_loss_ss
 
 lift_ss = lift_effective_ss - load_factor * W_total
-lift_ss.set_as_constraint(equals=0.0, scaler=1.0 / (load_factor_val * W_ref))
+# lift_ss.set_as_constraint(equals=0.0, scaler=1.0 / (load_factor_val * W_ref))
 
 if include_neg1g_sizing:
     # Sizing Lift constraint: L = -1.0 * W (Node 3: -1.0g push-down sizing condition)
@@ -1075,7 +1074,7 @@ dMy_stab = M[1, 1] - M[0, 1]
 neutral_point_x = x_cg - dMy_stab / dL_stab
 static_margin = (neutral_point_x - x_cg) / mean_chord
 # static_margin.set_as_constraint(lower=0.1, scaler=1.e1)
-static_margin.set_as_constraint(lower=0.05, scaler=2.e1)
+# static_margin.set_as_constraint(lower=0.05, scaler=2.e1)
 # static_margin.set_as_constraint(equals=0.05, scaler=2.e1)
 
 # # 16-CP Cubic B-spline Fit to Beam Twist under 4.0g Maneuver Load
@@ -1116,8 +1115,8 @@ static_margin.set_as_constraint(lower=0.05, scaler=2.e1)
 
 if formulation == 'chord_span':
     # For chord and span stretch formulation (no ParameterizationSolver),
-    # keep planform area constraint (1.0 m^2) and aspect ratio inequality constraint AR <= 15.0
-    planform_area.set_as_constraint(equals=1.0 * scale_factor**2, scaler=1.0 / (scale_factor**2))
+    # keep planform area constraint (10.0 m^2) and aspect ratio inequality constraint AR <= 15.0
+    planform_area.set_as_constraint(equals=10.0 * scale_factor**2, scaler=1.0 / (10*scale_factor**2))
     aspect_ratio_calc.set_as_constraint(upper=15.0, scaler=1.e-1)
     # Enforce constant thickness-to-chord ratio = 0.12 at all stations
     for i in range(num_chord_stations):
@@ -1491,6 +1490,33 @@ for iteration in range(num_iterations):
         except Exception as e:
             print(f"Warning: could not save panel telemetry cache: {e}")
 
+        # Cache structural telemetry for generate_structural_plots.py
+        struct_cache_opt = os.path.join(latest_folder, 'structural_data.npz')
+        try:
+            np.savez_compressed(
+                struct_cache_opt,
+                beam_pts_opt=np.asarray(jax_sim[beam_mesh]),
+                scale_factor=float(scale_factor),
+                allowable_stress=float(allowable_stress),
+                chords_opt=np.asarray(jax_sim[local_chord]).flatten(),
+                heights_opt=np.asarray(jax_sim[local_height]).flatten(),
+                widths_opt=np.asarray(jax_sim[box_width]).flatten(),
+                ttop_elem_opt=np.asarray(jax_sim[ttop_elem]).flatten(),
+                tweb_elem_opt=np.asarray(jax_sim[tweb_elem]).flatten(),
+                elem_stress_ss=np.asarray(jax_sim[elem_max_stress]).flatten(),
+                dv_stress_ss=np.asarray(jax_sim[dv_stresses]).flatten(),
+                stress_coeffs_ss=np.asarray(jax_sim[stress_coeffs]).flatten(),
+                ttop_dvs_opt=np.asarray(jax_sim[ttop_dvs]).flatten(),
+                tweb_dvs_opt=np.asarray(jax_sim[tweb_dvs]).flatten(),
+                thickness_peaks=np.asarray(thickness_peaks),
+                knots_stress_15=np.asarray(knots_stress_15) if 'knots_stress_15' in globals() else np.array([]),
+                resolution=str(resolution),
+                load_factor_val=float(load_factor_val) if 'load_factor_val' in globals() else 2.5,
+            )
+            print(f"Cached structural telemetry saved to: {struct_cache_opt}")
+        except Exception as e:
+            print(f"Warning: could not save structural telemetry cache: {e}")
+
 plotter.close()
 print(f"Video saved to: {video_path}")
 
@@ -1579,3 +1605,4 @@ if os.path.exists(artifact_dir):
 
 # endregion Plot Summary Figure
 # endregion Plot Optimization History
+
