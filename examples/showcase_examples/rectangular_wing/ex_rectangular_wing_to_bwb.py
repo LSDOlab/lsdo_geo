@@ -389,9 +389,9 @@ if formulation == 'ar_area':
 
     design_variables: dict[str, DVInfo] = {
         'taper_dvs': DVInfo(variable=taper_dvs, lower=0.10, upper=5.0, scaler=2.0),
-        'aspect_ratio': DVInfo(variable=aspect_ratio, lower=2.0, upper=20.0, scaler=0.5),
+        'aspect_ratio': DVInfo(variable=aspect_ratio, lower=2.0, upper=15.0, scaler=0.5),
         # 'sweep_angle_dvs': DVInfo(variable=sweep_angle_dvs, lower=-10.0*np.pi/180, upper=45.0*np.pi/180, scaler=1.e1),
-        'sweep_angle_dvs': DVInfo(variable=sweep_angle_dvs, lower=0.0*np.pi/180, upper=45.0*np.pi/180, scaler=1.e1),
+        'sweep_angle_dvs': DVInfo(variable=sweep_angle_dvs, lower=0.0*np.pi/180, upper=70.0*np.pi/180, scaler=1.e1),
         'twist_dvs': DVInfo(variable=twist_dvs, lower=twist_lower, upper=twist_upper, scaler=1.e1),
         'pitch': DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
         'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
@@ -950,7 +950,8 @@ for i in range(num_thickness_stations):
 # dv_stresses has shape (num_thickness_stations,) -> 5 constraints in fast, 8 in full
 dv_stresses = csdl.concatenate(aggregated_stress_list)
 # don't enforce stresses at tips since load goes to 0
-stresses_to_enforce = dv_stresses[:-2] if resolution == 'fast' else dv_stresses[:-3]
+# stresses_to_enforce = dv_stresses[:-2] if resolution == 'fast' else dv_stresses[:-3]
+stresses_to_enforce = dv_stresses[:-1] if resolution == 'fast' else dv_stresses[:-1]
 
 # Yield stress for Aluminum 6061 is 276 MPa.
 # Safety factor of 1.5 applied to obtain the allowable stress:
@@ -1027,19 +1028,25 @@ lift_effective_cruise = L[0] - L_loss_cruise
 # Total aircraft drag objective: Induced Drag + Strip-Wise Profile & Stall Drag
 D_total = Di_Trefftz + D_profile
 
-objective = D_total
-objective.set_as_objective(scaler=1.e1)
-
-# L = W constraint (Node 0: cruise condition)
+# Reference values for scaling constraints and objective function
 payload_weight_val = float(np.asarray(payload_weight.value).flatten()[0]) if hasattr(payload_weight, 'value') else float(payload_weight)
 W_ref = 1.15 * payload_weight_val  # reference cruise weight [N] (~1.15x payload weight)
+D_ref = W_ref / 20. # reference drag [N] (~1/20 of payload weight if we assume L/D ~ 20)
+c_ref = scale_factor * 1.0 # Initial chord length
+
+objective = D_total
+# objective.set_as_objective(scaler=1.e1)
+objective.set_as_objective(scaler=1.e1 / D_ref)
+
+# L = W constraint (Node 0: cruise condition)
 lift_trim = lift_effective_cruise - W_total
 lift_trim.set_as_constraint(equals=0.0, scaler=1.0 / W_ref)
 
 # Pitch / Moment trim constraint: My = 0 about dynamic center of mass (x_cg)
+
 pitch_moment = M[0, 1]
 pitch_trim = pitch_moment
-pitch_trim.set_as_constraint(equals=0.0, scaler=1.e-1)
+pitch_trim.set_as_constraint(equals=0.0, scaler=1.0 / (W_ref * c_ref))
 
 # Sizing Lift constraint: L = load_factor * W (Node 2: structural sizing pull-up condition)
 alpha_local_ss = alpha_local_elem + dalpha_ss
@@ -1109,9 +1116,9 @@ static_margin.set_as_constraint(lower=0.05, scaler=2.e1)
 
 if formulation == 'chord_span':
     # For chord and span stretch formulation (no ParameterizationSolver),
-    # keep planform area constraint (1.0 m^2) and aspect ratio inequality constraint AR <= 20.0
+    # keep planform area constraint (1.0 m^2) and aspect ratio inequality constraint AR <= 15.0
     planform_area.set_as_constraint(equals=1.0 * scale_factor**2, scaler=1.0 / (scale_factor**2))
-    aspect_ratio_calc.set_as_constraint(upper=20.0, scaler=1.e-1)
+    aspect_ratio_calc.set_as_constraint(upper=15.0, scaler=1.e-1)
     # Enforce constant thickness-to-chord ratio = 0.12 at all stations
     for i in range(num_chord_stations):
         tc_ratio = local_thicknesses[i] / local_chords[i]
