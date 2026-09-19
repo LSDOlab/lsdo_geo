@@ -121,18 +121,44 @@ right_fuselage_sectional_parameterization = SectionalParameterization(name="righ
 left_propeller_sectional_parameterization = SectionalParameterization(name="left_propeller_sectional_parameterization", parameterized_points=left_propeller_ffd_block.coefficients, principal_parametric_dimension=0)
 right_propeller_sectional_parameterization = SectionalParameterization(name="right_propeller_sectional_parameterization", parameterized_points=right_propeller_ffd_block.coefficients, principal_parametric_dimension=0)
 
-# B-spline Function Spaces
-space_3dof_linear = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(3,))
-space_2dof_linear = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
-space_1dof_constant = lfs.BSplineSpace(num_parametric_dimensions=1, degree=0, coefficients_shape=(1,))
-
 # Parameterization States
-wing_chord_stretch_bs = lfs.Function(space=space_3dof_linear, coefficients=csdl.Variable(shape=(3,), value=np.zeros(3)), name="wing_chord_stretch")
-wing_span_stretch_bs = lfs.Function(space=space_2dof_linear, coefficients=csdl.Variable(shape=(2,), value=np.zeros(2)), name="wing_span_stretch")
+# Wing (symmetric chord stretch and span stretch across centerline)
+wing_root_chord_stretch = csdl.Variable(value=0., name="wing_root_chord_stretch")
+wing_tip_chord_stretch = csdl.Variable(value=0., name="wing_tip_chord_stretch")
+wing_span_stretch = csdl.Variable(value=0., name="wing_span_stretch")
 
-tail_chord_stretch_bs = lfs.Function(space=space_3dof_linear, coefficients=csdl.Variable(shape=(3,), value=np.zeros(3)), name="tail_chord_stretch")
-tail_span_stretch_bs = lfs.Function(space=space_2dof_linear, coefficients=csdl.Variable(shape=(2,), value=np.zeros(2)), name="tail_span_stretch")
-# tail_trans_x_bs = lfs.Function(space=space_1dof_constant, coefficients=csdl.Variable(shape=(1,), value=np.zeros(1)), name="tail_trans_x")
+wing_mid_chord = 0.5 * (wing_tip_chord_stretch + wing_root_chord_stretch)
+wing_sectional_chord_stretches = csdl.concatenate((
+    wing_tip_chord_stretch,
+    wing_mid_chord,
+    wing_root_chord_stretch,
+    wing_mid_chord,
+    wing_tip_chord_stretch,
+))
+wing_sectional_span_translations = csdl.concatenate((
+    -wing_span_stretch,
+    -wing_span_stretch / 2,
+    csdl.Variable(value=0.),
+    wing_span_stretch / 2,
+    wing_span_stretch,
+))
+
+# Tail (symmetric chord stretch, span stretch, and longitudinal translation)
+tail_root_chord_stretch = csdl.Variable(value=0., name="tail_root_chord_stretch")
+tail_tip_chord_stretch = csdl.Variable(value=0., name="tail_tip_chord_stretch")
+tail_span_stretch = csdl.Variable(value=0., name="tail_span_stretch")
+tail_translation_x = csdl.Variable(value=0., name="tail_translation_x")
+
+tail_sectional_chord_stretches = csdl.concatenate((
+    tail_tip_chord_stretch,
+    tail_root_chord_stretch,
+    tail_tip_chord_stretch,
+))
+tail_sectional_span_translations = csdl.concatenate((
+    -tail_span_stretch,
+    csdl.Variable(value=0.),
+    tail_span_stretch,
+))
 
 # left_fuselage_stretch_bs = lfs.Function(space=space_2dof_linear, coefficients=csdl.Variable(shape=(2,), value=np.zeros(2)), name="left_fuselage_stretch")
 # right_fuselage_stretch_bs = lfs.Function(space=space_2dof_linear, coefficients=csdl.Variable(shape=(2,), value=np.zeros(2)), name="right_fuselage_stretch")
@@ -158,21 +184,23 @@ left_propeller_translation = propeller_translation.set(
 
 # region Evaluate Forward Parameterization Map
 # Wing
-u_wing = np.linspace(0, 1, wing_sectional_parameterization.num_sections).reshape((-1, 1))
 wing_params = SectionalParameters()
-wing_params.add_stretch(axis=0, stretch=wing_chord_stretch_bs.evaluate(u_wing))
-wing_params.add_translation(axis=1, translation=wing_span_stretch_bs.evaluate(u_wing))
+wing_params.add_stretch(axis=0, stretch=wing_sectional_chord_stretches)
+wing_params.add_translation(axis=1, translation=wing_sectional_span_translations)
 wing_ffd_coeffs = wing_sectional_parameterization.evaluate(wing_params, plot=False)
 wing.set_coefficients(wing_ffd_block.evaluate_ffd(wing_ffd_coeffs, plot=False))
 
 # Tail
-u_tail = np.linspace(0, 1, tail_sectional_parameterization.num_sections).reshape((-1, 1))
 tail_params = SectionalParameters()
-tail_params.add_stretch(axis=0, stretch=tail_chord_stretch_bs.evaluate(u_tail))
-tail_params.add_translation(axis=1, translation=tail_span_stretch_bs.evaluate(u_tail))
-tail_params.add_translation(axis=0, translation=tail_trans_x_bs.evaluate(u_tail))
+tail_params.add_stretch(axis=0, stretch=tail_sectional_chord_stretches)
+tail_params.add_translation(axis=1, translation=tail_sectional_span_translations)
 tail_ffd_coeffs = tail_sectional_parameterization.evaluate(tail_params, plot=False)
 tail.set_coefficients(tail_ffd_block.evaluate_ffd(tail_ffd_coeffs, plot=False))
+tail.translate(translation=csdl.concatenate((
+    tail_translation_x,
+    csdl.Variable(value=0.),
+    csdl.Variable(value=0.),
+)))
 
 # Fuselages
 # u_fuse = np.linspace(0, 1, left_fuselage_sectional_parameterization.num_sections).reshape((-1, 1))
@@ -186,6 +214,7 @@ left_fuselage.translate(translation=left_fuselage_translation)
 rf_params = SectionalParameters()
 rf_params.add_translation(axis=0, translation=fuselage_sectional_stretches)
 right_fuselage.set_coefficients(right_fuselage_ffd_block.evaluate_ffd(right_fuselage_sectional_parameterization.evaluate(rf_params, plot=False), plot=False))
+right_fuselage.translate(translation=right_fuselage_translation)
 
 # Propellers (radial stretch on Y & Z, longitudinal translation on X)
 
@@ -267,7 +296,6 @@ propeller_radius_dv = csdl.Variable(name="propeller_radius", value=np.array([4.0
 
 # region Setup and Evaluate Geometry Parameterization Solver
 print("=== Initial Geometry Parameters ===")
-print(f"Scale Factor = {scale_factor:.2f}")
 print(f"Wing: Area = {wing_area_comp.value[0]:.2f}, AR = {wing_ar_comp.value[0]:.2f}, Taper = {wing_taper_comp.value[0]:.4f}, Span = {wing_span_comp.value[0]:.2f}")
 print(f"Tail: Area = {tail_area_comp.value[0]:.2f}, AR = {tail_ar_comp.value[0]:.2f}, Taper = {tail_taper_comp.value[0]:.4f}, Span = {tail_span_comp.value[0]:.2f}")
 print(f"Tail Moment Arm = {tail_moment_arm_comp.value[0]:.2f}")
@@ -278,10 +306,13 @@ print()
 parameterization_solver = ParameterizationSolver()
 
 # Solver States
-parameterization_solver.add_state(wing_chord_stretch_bs.coefficients)
-parameterization_solver.add_state(wing_span_stretch_bs.coefficients)
-parameterization_solver.add_state(tail_chord_stretch_bs.coefficients)
-parameterization_solver.add_state(tail_span_stretch_bs.coefficients)
+parameterization_solver.add_state(wing_root_chord_stretch)
+parameterization_solver.add_state(wing_tip_chord_stretch)
+parameterization_solver.add_state(wing_span_stretch)
+parameterization_solver.add_state(tail_root_chord_stretch)
+parameterization_solver.add_state(tail_tip_chord_stretch)
+parameterization_solver.add_state(tail_span_stretch)
+parameterization_solver.add_state(tail_translation_x)
 parameterization_solver.add_state(fuselage_stretch)
 parameterization_solver.add_state(fuselage_translation)
 parameterization_solver.add_state(propeller_stretch)
@@ -295,11 +326,15 @@ parameterization_solver.add_state(propeller_translation)
 # parameterization_solver.add_state(right_prop_trans_x_bs.coefficients)
 
 # Constraints
-parameterization_solver.add_equality_constraint(wing_tip_chord_l_comp, wing_tip_chord_r_comp)
-parameterization_solver.add_equality_constraint(tail_tip_chord_l_comp, tail_tip_chord_r_comp)
-parameterization_solver.add_equality_constraint(conn_tail_lf, conn_tail_lf.value)
+# Symmetric constraints are satisfied by construction:
+# - Left and right wing tip chords are symmetric by definition
+# - Left and right tail tip chords are symmetric by definition
+# - Left tail attachment and propeller attachment are symmetric to right attachments
+# parameterization_solver.add_equality_constraint(wing_tip_chord_l_comp, wing_tip_chord_r_comp)
+# parameterization_solver.add_equality_constraint(tail_tip_chord_l_comp, tail_tip_chord_r_comp)
+# parameterization_solver.add_equality_constraint(conn_tail_lf, conn_tail_lf.value)
 parameterization_solver.add_equality_constraint(conn_tail_rf, conn_tail_rf.value)
-parameterization_solver.add_equality_constraint(conn_prop_lf, conn_prop_lf.value)
+# parameterization_solver.add_equality_constraint(conn_prop_lf, conn_prop_lf.value)
 parameterization_solver.add_equality_constraint(conn_prop_rf, conn_prop_rf.value)
 
 # Geometric Variables
