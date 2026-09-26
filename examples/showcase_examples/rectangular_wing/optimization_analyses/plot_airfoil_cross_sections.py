@@ -19,6 +19,7 @@ import sys
 import glob
 import shutil
 import pickle
+import argparse
 from typing import Union
 from dataclasses import dataclass
 import numpy as np
@@ -138,119 +139,368 @@ def detect_scale_factor(output_dir: str, repo_root: str) -> float:
     return 7.5
 
 
-def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5):
+def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_dir: str = None, formulation_override: str = None, resolution_override: str = None):
     """
     Auto-detect configuration and parse unscaled physical design variable values.
-    Supports 5-station ('fast') and 8-station ('full') runs with or without camber/elevator.
+    Supports both 'ar_area' and 'chord_span' formulations across 'fast' (5-station)
+    and 'full' (8-station) resolutions, with or without camber and elevator.
     """
     n_dv = len(x_opt)
     print(f"\nAnalyzing design variable vector of length {n_dv}...")
 
-    if n_dv == 42:
-        resolution = 'fast'
-        include_camber = True
-        include_elevator = False
-    elif n_dv == 28:
-        resolution = 'fast'
-        include_camber = False
-        include_elevator = True
-    elif n_dv == 66:
-        resolution = 'full'
-        include_camber = True
-        include_elevator = False
-    elif n_dv == 43:
-        resolution = 'full'
-        include_camber = False
-        include_elevator = True
-    elif n_dv >= 60:
-        resolution = 'full'
-        include_camber = True
-        include_elevator = False
-    else:
-        # Default fallback to fast with camber
-        resolution = 'fast'
-        include_camber = True
-        include_elevator = False
+    formulation = formulation_override
+    resolution = resolution_override
+    include_camber = None
+    include_elevator = None
+
+    # 1. Check saved metadata in output folder
+    dv_names = None
+    if target_dir is not None:
+        for fn in ['lift_and_moment_data.npz', 'structural_data.npz']:
+            fpath = os.path.join(target_dir, fn)
+            if os.path.exists(fpath):
+                try:
+                    data = np.load(fpath, allow_pickle=True)
+                    if dv_names is None and 'dv_names' in data:
+                        dv_names = [str(x) for x in data['dv_names']]
+                    if formulation is None and 'formulation' in data:
+                        formulation = str(data['formulation'])
+                    if resolution is None and 'resolution' in data:
+                        resolution = str(data['resolution'])
+                    if include_camber is None and 'include_camber' in data:
+                        include_camber = bool(data['include_camber'])
+                    if include_elevator is None and 'include_elevator' in data:
+                        include_elevator = bool(data['include_elevator'])
+                except Exception:
+                    pass
+
+    # 2. Dynamic parsing if dv_names metadata is available
+    if dv_names is not None:
+        if formulation is None:
+            if any(k in dv_names for k in ['chord_stretch_dvs', 'span_stretch_dv', 'thickness_stretch_dvs']):
+                formulation = 'chord_span'
+            else:
+                formulation = 'ar_area'
+
+        if resolution is None:
+            for res_candidate, n_stn in [('fast', 5), ('full', 8)]:
+                expected_len = 0
+                for name in dv_names:
+                    if name in ['chord_stretch_dvs', 'sweep_dvs', 'thickness_stretch_dvs', 'twist_dvs', 'ttop_dvs', 'tweb_dvs']:
+                        expected_len += n_stn
+                    elif name in ['taper_dvs', 'sweep_angle_dvs']:
+                        expected_len += n_stn - 1
+                    elif name == 'camber_dvs':
+                        expected_len += 3 * n_stn
+                    else:
+                        expected_len += 1
+                if expected_len == n_dv:
+                    resolution = res_candidate
+                    break
+            if resolution is None:
+                resolution = 'fast' if n_dv <= 35 else 'full'
+
+        num_stations = 5 if resolution == 'fast' else 8
+        num_chord_stations = num_stations
+        initial_chord = 1.0 * scale_factor
+        initial_thickness = 0.12 * initial_chord
+        camber_max_percent = 5.0
+
+        curr = 0
+        dv_dict = {}
+        for name in dv_names:
+            if name in ['chord_stretch_dvs', 'sweep_dvs']:
+                dv_dict[name] = x_opt[curr : curr + num_chord_stations] * scale_factor
+                curr += num_chord_stations
+            elif name == 'thickness_stretch_dvs':
+                dv_dict[name] = x_opt[curr : curr + num_chord_stations] * initial_thickness
+                curr += num_chord_stations
+            elif name == 'twist_dvs':
+                dv_dict[name] = x_opt[curr : curr + num_chord_stations] / 10.0
+                curr += num_chord_stations
+            elif name == 'span_stretch_dv':
+                dv_dict[name] = x_opt[curr : curr + 1] * scale_factor
+                curr += 1
+            elif name in ['pitch', 'pitch_ss', 'pitch_neg1g', 'payload_cg']:
+                dv_dict[name] = x_opt[curr : curr + 1] / 10.0
+                curr += 1
+            elif name in ['ttop_dvs', 'tweb_dvs']:
+                dv_dict[name] = x_opt[curr : curr + num_stations] / 5000.0
+                curr += num_stations
+            elif name == 'elevator_angle':
+                dv_dict[name] = float(x_opt[curr : curr + 1] / 10.0)
+                curr += 1
+            elif name == 'camber_dvs':
+                camber_scaler = 1.0 / camber_max_percent
+                dv_dict[name] = (x_opt[curr : curr + 3 * num_chord_stations] / camber_scaler).reshape((3, num_chord_stations))
+                curr += 3 * num_chord_stations
+            elif name == 'taper_dvs':
+                dv_dict[name] = x_opt[curr : curr + num_chord_stations - 1] / 2.0
+                curr += num_chord_stations - 1
+            elif name == 'aspect_ratio':
+                dv_dict[name] = x_opt[curr : curr + 1] / 0.5
+                curr += 1
+            elif name == 'sweep_angle_dvs':
+                dv_dict[name] = x_opt[curr : curr + num_chord_stations - 1] / 10.0
+                curr += num_chord_stations - 1
+            else:
+                print(f"  Warning: Unrecognized DV name '{name}', assuming size 1")
+                dv_dict[name] = x_opt[curr : curr + 1]
+                curr += 1
+
+        if formulation == 'chord_span':
+            include_camber = 'camber_dvs' in dv_dict
+            include_elevator = 'elevator_angle' in dv_dict
+            include_sweep = 'sweep_dvs' in dv_dict
+            parsed = {
+                'formulation': 'chord_span',
+                'resolution': resolution,
+                'include_camber': include_camber,
+                'include_elevator': include_elevator,
+                'include_sweep': include_sweep,
+                'num_stations': num_stations,
+                'scale_factor': scale_factor,
+                'chord_stretch_dvs': dv_dict.get('chord_stretch_dvs', np.zeros(num_chord_stations)),
+                'sweep_dvs': dv_dict.get('sweep_dvs', np.zeros(num_chord_stations)),
+                'thickness_stretch_dvs': dv_dict.get('thickness_stretch_dvs', np.zeros(num_chord_stations)),
+                'twist_dvs': dv_dict.get('twist_dvs', np.zeros(num_chord_stations)),
+                'span_stretch_dv': dv_dict.get('span_stretch_dv', np.array([0.0])),
+                'pitch': dv_dict.get('pitch', np.array([0.0])),
+                'pitch_ss': dv_dict.get('pitch_ss', np.array([0.0])),
+                'camber_dvs': dv_dict.get('camber_dvs', np.zeros((3, num_chord_stations))),
+                'elevator_angle': dv_dict.get('elevator_angle', 0.0),
+            }
+            print(f"  Detected Formulation : Chord & Span Stretch ('chord_span') [via dv_names metadata]")
+            print(f"  Resolution           : {resolution} ({num_stations} design stations)")
+            print(f"  Active DVs ({len(dv_names)}): {dv_names}")
+            print(f"  Camber DVs Active    : {include_camber}")
+            print(f"  Elevator Active      : {include_elevator}")
+            print(f"  Chord Stretches (m)  : {np.round(parsed['chord_stretch_dvs'], 3)}")
+            print(f"  Effective Chords (m) : {np.round(initial_chord + parsed['chord_stretch_dvs'], 3)}")
+            print(f"  Twist Angles (deg)   : {np.round(np.degrees(parsed['twist_dvs']), 2)}")
+            print(f"  Span Stretch (m)     : {float(parsed['span_stretch_dv'][0]):.3f}")
+            return parsed
+        else:
+            include_camber = 'camber_dvs' in dv_dict
+            include_elevator = 'elevator_angle' in dv_dict
+            parsed = {
+                'formulation': 'ar_area',
+                'resolution': resolution,
+                'include_camber': include_camber,
+                'include_elevator': include_elevator,
+                'num_stations': num_stations,
+                'scale_factor': scale_factor,
+                'taper_dvs': dv_dict.get('taper_dvs', np.ones(num_chord_stations - 1)),
+                'aspect_ratio': dv_dict.get('aspect_ratio', np.array([10.0])),
+                'sweep_angle_dvs': dv_dict.get('sweep_angle_dvs', np.zeros(num_chord_stations - 1)),
+                'twist_dvs': dv_dict.get('twist_dvs', np.zeros(num_chord_stations)),
+                'pitch': dv_dict.get('pitch', np.array([0.0])),
+                'pitch_ss': dv_dict.get('pitch_ss', np.array([0.0])),
+                'payload_cg': dv_dict.get('payload_cg', np.array([0.4])),
+                'ttop_dvs': dv_dict.get('ttop_dvs', np.full(num_stations, 0.001)),
+                'tweb_dvs': dv_dict.get('tweb_dvs', np.full(num_stations, 0.001)),
+                'camber_dvs': dv_dict.get('camber_dvs', np.zeros((3, num_chord_stations))),
+                'elevator_angle': dv_dict.get('elevator_angle', 0.0),
+            }
+            print(f"  Detected Formulation : Aspect Ratio & Area ('ar_area') [via dv_names metadata]")
+            print(f"  Resolution           : {resolution} ({num_stations} design stations)")
+            print(f"  Active DVs ({len(dv_names)}): {dv_names}")
+            print(f"  Camber DVs Active    : {include_camber}")
+            print(f"  Elevator Active      : {include_elevator}")
+            print(f"  Aspect Ratio         : {float(parsed['aspect_ratio'][0]):.2f}")
+            print(f"  Taper Ratios         : {np.round(parsed['taper_dvs'], 4)}")
+            print(f"  Twist Angles (deg)   : {np.round(np.degrees(parsed['twist_dvs']), 2)}")
+            return parsed
+
+    # 3. Fallback heuristic detection from vector length if dv_names is not available
+    if formulation is None:
+        if n_dv in [50, 26, 32, 17, 58, 34, 27]:
+            formulation = 'chord_span'
+        elif n_dv in [66, 43, 42, 28]:
+            formulation = 'ar_area'
+        elif n_dv >= 48:
+            formulation = 'chord_span'
+        else:
+            formulation = 'ar_area'
+
+    if resolution is None:
+        if formulation == 'chord_span':
+            resolution = 'fast' if n_dv in [17, 32, 22, 37, 27] else 'full'
+        else:
+            resolution = 'fast' if n_dv in [27, 28, 42] else 'full'
+
+    if include_camber is None:
+        if formulation == 'chord_span':
+            include_camber = (n_dv in [50, 32, 58, 37, 27])
+        else:
+            include_camber = (n_dv in [66, 42])
+
+    if include_elevator is None:
+        if formulation == 'chord_span':
+            include_elevator = False
+        else:
+            include_elevator = (n_dv in [28, 43])
 
     num_stations = 5 if resolution == 'fast' else 8
     num_chord_stations = num_stations
+    initial_chord = 1.0 * scale_factor
+    initial_thickness = 0.12 * initial_chord
 
-    curr = 0
-    taper_dvs_val = x_opt[curr : curr + num_chord_stations - 1] / 2.0
-    curr += num_chord_stations - 1
+    if formulation == 'chord_span':
+        curr = 0
+        chord_stretch_dvs_val = x_opt[curr : curr + num_chord_stations] * scale_factor
+        curr += num_chord_stations
 
-    ar_val = x_opt[curr : curr + 1] / 0.5
-    curr += 1
+        include_sweep = (n_dv in [58, 34, 37, 22])
+        if include_sweep:
+            sweep_dvs_val = x_opt[curr : curr + num_chord_stations] * scale_factor
+            curr += num_chord_stations
+        else:
+            sweep_dvs_val = np.zeros(num_chord_stations)
 
-    sweep_angle_dvs_val = x_opt[curr : curr + num_chord_stations - 1] / 10.0
-    curr += num_chord_stations - 1
+        thickness_stretch_dvs_val = x_opt[curr : curr + num_chord_stations] * initial_thickness
+        curr += num_chord_stations
 
-    twist_dvs_val = x_opt[curr : curr + num_chord_stations] / 10.0
-    curr += num_chord_stations
+        include_twist = (n_dv not in [27])
+        if include_twist:
+            twist_dvs_val = x_opt[curr : curr + num_chord_stations] / 10.0
+            curr += num_chord_stations
+        else:
+            twist_dvs_val = np.zeros(num_chord_stations)
 
-    pitch_val = x_opt[curr : curr + 1] / 10.0
-    curr += 1
+        if n_dv in [26, 17]:  # historical runs with fixed span stretch but pitch and pitch_ss
+            span_stretch_dv_val = np.array([0.0])
+            pitch_val = x_opt[curr : curr + 1] / 10.0
+            curr += 1
+            pitch_ss_val = x_opt[curr : curr + 1] / 10.0
+            curr += 1
+        else:
+            span_stretch_dv_val = x_opt[curr : curr + 1] * scale_factor if curr < n_dv else np.array([0.0])
+            curr += 1
+            pitch_val = x_opt[curr : curr + 1] / 10.0 if curr < n_dv else np.array([0.0])
+            curr += 1
+            pitch_ss_val = np.array([0.0])
 
-    pitch_ss_val = x_opt[curr : curr + 1] / 10.0
-    curr += 1
+        if include_elevator and curr < n_dv:
+            elevator_val = float(x_opt[curr : curr + 1] / 10.0)
+            curr += 1
+        else:
+            elevator_val = 0.0
 
-    payload_cg_val = x_opt[curr : curr + 1] / 10.0
-    curr += 1
+        camber_max_percent = 5.0
+        camber_scaler = 1.0 / camber_max_percent
+        if include_camber and curr < n_dv and (curr + 3 * num_chord_stations <= n_dv):
+            camber_dvs_val = (x_opt[curr : curr + 3 * num_chord_stations] / camber_scaler).reshape((3, num_chord_stations))
+            curr += 3 * num_chord_stations
+        else:
+            camber_dvs_val = np.zeros((3, num_chord_stations))
 
-    ttop_val = x_opt[curr : curr + num_stations] / 5000.0
-    curr += num_stations
+        parsed = {
+            'formulation': 'chord_span',
+            'resolution': resolution,
+            'include_camber': include_camber,
+            'include_elevator': include_elevator,
+            'include_sweep': include_sweep,
+            'num_stations': num_stations,
+            'scale_factor': scale_factor,
+            'chord_stretch_dvs': chord_stretch_dvs_val,
+            'sweep_dvs': sweep_dvs_val,
+            'thickness_stretch_dvs': thickness_stretch_dvs_val,
+            'twist_dvs': twist_dvs_val,
+            'span_stretch_dv': span_stretch_dv_val,
+            'pitch': pitch_val,
+            'camber_dvs': camber_dvs_val,
+            'elevator_angle': elevator_val,
+        }
 
-    tweb_val = x_opt[curr : curr + num_stations] / 5000.0
-    curr += num_stations
+        print(f"  Detected Formulation : Chord & Span Stretch ('chord_span') [fallback heuristic]")
+        print(f"  Resolution           : {resolution} ({num_stations} design stations)")
+        print(f"  Camber DVs Active    : {include_camber}")
+        print(f"  Elevator Active      : {include_elevator}")
+        print(f"  Chord Stretches (m)  : {np.round(chord_stretch_dvs_val, 3)}")
+        print(f"  Effective Chords (m) : {np.round(initial_chord + chord_stretch_dvs_val, 3)}")
+        print(f"  Twist Angles (deg)   : {np.round(np.degrees(twist_dvs_val), 2)}")
+        print(f"  Span Stretch (m)     : {float(span_stretch_dv_val[0]):.3f}")
+        return parsed
 
-    camber_max_percent = 5.0  # 5.0% chord max camber displacement
-    camber_scaler = 1.0 / camber_max_percent  # Scales DVs in [-5.0, 5.0] to [-1, 1] range for optimizer
+    else:  # ar_area formulation
+        curr = 0
+        taper_dvs_val = x_opt[curr : curr + num_chord_stations - 1] / 2.0
+        curr += num_chord_stations - 1
 
-    if include_camber:
-        camber_dvs_val = (x_opt[curr : curr + 3 * num_chord_stations] / camber_scaler).reshape((3, num_chord_stations))
-        curr += 3 * num_chord_stations
-    else:
-        camber_dvs_val = np.zeros((3, num_chord_stations))
-
-    if include_elevator and curr < n_dv:
-        elevator_val = float(x_opt[curr : curr + 1] / 10.0)
+        ar_val = x_opt[curr : curr + 1] / 0.5
         curr += 1
-    else:
-        elevator_val = 0.0
 
-    parsed = {
-        'resolution': resolution,
-        'include_camber': include_camber,
-        'include_elevator': include_elevator,
-        'num_stations': num_stations,
-        'scale_factor': scale_factor,
-        'taper_dvs': taper_dvs_val,
-        'aspect_ratio': ar_val,
-        'sweep_angle_dvs': sweep_angle_dvs_val,
-        'twist_dvs': twist_dvs_val,
-        'pitch': pitch_val,
-        'pitch_ss': pitch_ss_val,
-        'payload_cg': payload_cg_val,
-        'ttop_dvs': ttop_val,
-        'tweb_dvs': tweb_val,
-        'camber_dvs': camber_dvs_val,
-        'elevator_angle': elevator_val,
-    }
+        sweep_angle_dvs_val = x_opt[curr : curr + num_chord_stations - 1] / 10.0
+        curr += num_chord_stations - 1
 
-    print(f"  Detected Formulation : Aspect Ratio & Area ('ar_area')")
-    print(f"  Resolution           : {resolution} ({num_stations} design stations)")
-    print(f"  Camber DVs Active    : {include_camber}")
-    print(f"  Elevator Active      : {include_elevator}")
-    print(f"  Aspect Ratio         : {float(ar_val[0]):.2f}")
-    print(f"  Taper Ratios         : {np.round(taper_dvs_val, 4)}")
-    print(f"  Twist Angles (deg)   : {np.round(np.degrees(twist_dvs_val), 2)}")
-    return parsed
+        twist_dvs_val = x_opt[curr : curr + num_chord_stations] / 10.0
+        curr += num_chord_stations
+
+        pitch_val = x_opt[curr : curr + 1] / 10.0
+        curr += 1
+
+        pitch_ss_val = x_opt[curr : curr + 1] / 10.0 if curr < n_dv else np.array([0.0])
+        curr += 1
+
+        payload_cg_val = x_opt[curr : curr + 1] / 10.0 if curr < n_dv else np.array([0.4])
+        curr += 1
+
+        ttop_val = x_opt[curr : curr + num_stations] / 5000.0 if curr < n_dv else np.full(num_stations, 0.001)
+        curr += num_stations
+
+        tweb_val = x_opt[curr : curr + num_stations] / 5000.0 if curr < n_dv else np.full(num_stations, 0.001)
+        curr += num_stations
+
+        camber_max_percent = 5.0
+        camber_scaler = 1.0 / camber_max_percent
+        if include_camber and curr < n_dv and (curr + 3 * num_chord_stations <= n_dv):
+            camber_dvs_val = (x_opt[curr : curr + 3 * num_chord_stations] / camber_scaler).reshape((3, num_chord_stations))
+            curr += 3 * num_chord_stations
+        else:
+            camber_dvs_val = np.zeros((3, num_chord_stations))
+
+        if include_elevator and curr < n_dv:
+            elevator_val = float(x_opt[curr : curr + 1] / 10.0)
+            curr += 1
+        else:
+            elevator_val = 0.0
+
+        parsed = {
+            'formulation': 'ar_area',
+            'resolution': resolution,
+            'include_camber': include_camber,
+            'include_elevator': include_elevator,
+            'num_stations': num_stations,
+            'scale_factor': scale_factor,
+            'taper_dvs': taper_dvs_val,
+            'aspect_ratio': ar_val,
+            'sweep_angle_dvs': sweep_angle_dvs_val,
+            'twist_dvs': twist_dvs_val,
+            'pitch': pitch_val,
+            'pitch_ss': pitch_ss_val,
+            'payload_cg': payload_cg_val,
+            'ttop_dvs': ttop_val,
+            'tweb_dvs': tweb_val,
+            'camber_dvs': camber_dvs_val,
+            'elevator_angle': elevator_val,
+        }
+
+        print(f"  Detected Formulation : Aspect Ratio & Area ('ar_area') [fallback heuristic]")
+        print(f"  Resolution           : {resolution} ({num_stations} design stations)")
+        print(f"  Camber DVs Active    : {include_camber}")
+        print(f"  Elevator Active      : {include_elevator}")
+        print(f"  Aspect Ratio         : {float(ar_val[0]):.2f}")
+        print(f"  Taper Ratios         : {np.round(taper_dvs_val, 4)}")
+        print(f"  Twist Angles (deg)   : {np.round(np.degrees(twist_dvs_val), 2)}")
+        return parsed
 
 
 def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     """
-    Builds the CSDL parameterization and evaluates ParameterizationSolver inline.
-    Returns the updated Geometry object, total wingspan, and half-span.
+    Builds the CSDL parameterization and evaluates deformed CAD geometry.
+    Supports both 'chord_span' (direct FFD) and 'ar_area' (ParameterizationSolver).
+    Returns geometry, total_wingspan, half_span, local_chords_vals, chord_stretch_vals, cad_chord_profile.
     """
     scale_factor = parsed_dvs['scale_factor']
     num_stations = parsed_dvs['num_stations']
@@ -258,6 +508,8 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     num_ffd_sections = 2 * num_stations - 1
     include_camber = parsed_dvs['include_camber']
     include_elevator = parsed_dvs['include_elevator']
+    formulation = parsed_dvs['formulation']
+    resolution = parsed_dvs['resolution']
 
     recorder = csdl.Recorder(inline=True)
     recorder.start()
@@ -313,21 +565,13 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     upper_thickness_projections = [geometry.project(np.array([0.3 * scale_factor, y, 0.05 * scale_factor]), direction=np.array([0, 0, -1])) for y in chord_station_y]
     lower_thickness_projections = [geometry.project(np.array([0.3 * scale_factor, y, -0.05 * scale_factor]), direction=np.array([0, 0, 1])) for y in chord_station_y]
 
-    nx_area, ny_area = 21, 41
-    x_grid = np.linspace(0.0, 1.0 * scale_factor, nx_area)
-    y_grid = np.linspace(-5.0 * scale_factor, 5.0 * scale_factor, ny_area)
-    X_mesh, Y_mesh = np.meshgrid(x_grid, y_grid, indexing='ij')
-    upper_seed_pts = np.column_stack([X_mesh.ravel(), Y_mesh.ravel(), np.full(X_mesh.size, 0.05 * scale_factor)])
-    lower_seed_pts = np.column_stack([X_mesh.ravel(), Y_mesh.ravel(), np.full(X_mesh.size, -0.05 * scale_factor)])
-    projected_upper_skin = geometry.project(upper_seed_pts, force_reprojection=False, direction=np.array([0, 0, -1]), plot=False)
-    projected_lower_skin = geometry.project(lower_seed_pts, force_reprojection=False, direction=np.array([0, 0, 1]), plot=False)
-
     num_ffd_coefficients_chordwise = 5 if include_camber else 2
     ffd_degree_chordwise = 2 if include_camber else 1
+    ffd_spanwise_degree = 2 if (formulation == 'chord_span' or resolution == 'full') else 3
     ffd_block = construct_ffd_block_around_entities(
         entities=geometry,
         num_coefficients=(num_ffd_coefficients_chordwise, num_ffd_sections, 2),
-        degree=(ffd_degree_chordwise, 3, 1)
+        degree=(ffd_degree_chordwise, ffd_spanwise_degree, 1)
     )
     ffd_sectional_parameterization = SectionalParameterization(
         name='ffd_param',
@@ -335,107 +579,197 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
         principal_parametric_dimension=1
     )
 
-    # Initialize variables directly with optimal values
-    taper_dvs = csdl.Variable(shape=(num_chord_stations - 1,), value=parsed_dvs['taper_dvs'])
-    aspect_ratio = csdl.Variable(shape=(1,), value=parsed_dvs['aspect_ratio'])
-    sweep_angle_dvs = csdl.Variable(shape=(num_chord_stations - 1,), value=parsed_dvs['sweep_angle_dvs'])
-    twist_dvs = csdl.Variable(shape=(num_chord_stations,), value=parsed_dvs['twist_dvs'])
-    if include_camber:
-        camber_dvs = csdl.Variable(shape=(3, num_chord_stations), value=parsed_dvs['camber_dvs'])
+    if formulation == 'chord_span':
+        print("Executing Direct Sectional FFD Parameterization ('chord_span')...")
+        chord_stretch_dvs = parsed_dvs['chord_stretch_dvs']
+        sweep_dvs = parsed_dvs['sweep_dvs']
+        thickness_stretch_dvs = parsed_dvs['thickness_stretch_dvs']
+        twist_dvs = parsed_dvs['twist_dvs']
+        span_stretch_dv = parsed_dvs['span_stretch_dv']
 
-    chord_stretch_states = csdl.Variable(shape=(num_chord_stations,), value=np.zeros(num_chord_stations))
-    thickness_stretch_states = csdl.Variable(shape=(num_chord_stations,), value=np.zeros(num_chord_stations))
-    span_stretch_state = csdl.Variable(value=0.0)
-    sweep_translation_states = csdl.Variable(shape=(num_chord_stations - 1,), value=np.zeros(num_chord_stations - 1))
-    sweep_full_half = csdl.concatenate([csdl.Variable(value=0.0), sweep_translation_states])
+        chord_params = csdl.concatenate(
+            [csdl.Variable(value=chord_stretch_dvs[i]) for i in range(num_chord_stations - 1, 0, -1)] +
+            [csdl.Variable(value=chord_stretch_dvs[i]) for i in range(num_chord_stations)]
+        )
+        sweep_params = csdl.concatenate(
+            [csdl.Variable(value=sweep_dvs[i]) for i in range(num_chord_stations - 1, 0, -1)] +
+            [csdl.Variable(value=sweep_dvs[i]) for i in range(num_chord_stations)]
+        )
+        thickness_params = csdl.concatenate(
+            [csdl.Variable(value=thickness_stretch_dvs[i]) for i in range(num_chord_stations - 1, 0, -1)] +
+            [csdl.Variable(value=thickness_stretch_dvs[i]) for i in range(num_chord_stations)]
+        )
+        twist_params = csdl.concatenate(
+            [csdl.Variable(value=twist_dvs[i]) for i in range(num_chord_stations - 1, 0, -1)] +
+            [csdl.Variable(value=twist_dvs[i]) for i in range(num_chord_stations)]
+        )
+        span_weights = np.linspace(-1.0, 1.0, num_ffd_sections)
+        span_params = csdl.Variable(value=span_stretch_dv[0] * span_weights)
 
-    chord_params = csdl.concatenate([chord_stretch_states[i] for i in range(num_chord_stations - 1, 0, -1)] + [chord_stretch_states[i] for i in range(num_chord_stations)])
-    sweep_params = csdl.concatenate([sweep_full_half[i] for i in range(num_chord_stations - 1, 0, -1)] + [sweep_full_half[i] for i in range(num_chord_stations)])
-    thickness_params = csdl.concatenate([thickness_stretch_states[i] for i in range(num_chord_stations - 1, 0, -1)] + [thickness_stretch_states[i] for i in range(num_chord_stations)])
-    twist_params = csdl.concatenate([twist_dvs[i] for i in range(num_chord_stations - 1, 0, -1)] + [twist_dvs[i] for i in range(num_chord_stations)])
-    span_weights = np.linspace(-1.0, 1.0, num_ffd_sections)
-    span_params = csdl.expand(span_stretch_state, (num_ffd_sections,)) * span_weights
+        sectional_parameters = SectionalParameters()
+        sectional_parameters.add_stretch(axis=np.array([1., 0., 0.]), stretch=chord_params)
+        sectional_parameters.add_translation(axis=np.array([1., 0., 0.]), translation=sweep_params)
+        sectional_parameters.add_stretch(axis=np.array([0., 0., 1.]), stretch=thickness_params)
+        sectional_parameters.add_translation(axis=np.array([0., 1., 0.]), translation=span_params)
+        sectional_parameters.add_rotation(axis=np.array([0., 1., 0.]), rotation=twist_params, parametric_coordinate=np.array([0.25, 0.5]))
 
-    sectional_parameters = SectionalParameters()
-    sectional_parameters.add_stretch(axis=np.array([1., 0., 0.]), stretch=chord_params)
-    sectional_parameters.add_translation(axis=np.array([1., 0., 0.]), translation=sweep_params)
-    sectional_parameters.add_stretch(axis=np.array([0., 0., 1.]), stretch=thickness_params)
-    sectional_parameters.add_translation(axis=np.array([0., 1., 0.]), translation=span_params)
-    sectional_parameters.add_rotation(axis=np.array([0., 1., 0.]), rotation=twist_params, parametric_coordinate=np.array([0.25, 0.5]))
+        ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=False)
 
-    ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=False)
-    if include_camber:
-        # Section chord calculated from difference in x coordinate between leading and trailing FFD control points
-        section_chords = ffd_coefficients[-1, :, 0, 0] - ffd_coefficients[0, :, 0, 0]
+        if include_camber:
+            camber_dvs = parsed_dvs['camber_dvs']
+            section_chords = ffd_coefficients[-1, :, 0, 0] - ffd_coefficients[0, :, 0, 0]
+            full_span_camber_list = []
+            for c in range(3):
+                row = csdl.concatenate(
+                    [csdl.Variable(value=camber_dvs[c, i]) for i in range(num_chord_stations - 1, 0, -1)] +
+                    [csdl.Variable(value=camber_dvs[c, i]) for i in range(num_chord_stations)]
+                )
+                full_span_camber_list.append(csdl.reshape(row, (1, num_ffd_sections)))
+            full_span_camber = csdl.concatenate(full_span_camber_list, axis=0)
+            camber_displacement = (full_span_camber / 100.0) * csdl.expand(section_chords, (3, num_ffd_sections), 'j->ij')
+            camber_delta = csdl.expand(camber_displacement, (3, num_ffd_sections, 2), 'ij->ijk')
+            ffd_coefficients = ffd_coefficients.set(csdl.slice[1:4, :, :, 2], ffd_coefficients[1:4, :, :, 2] + camber_delta)
 
-        full_span_camber_list = []
-        for c in range(3):
-            row = csdl.concatenate([camber_dvs[c, i] for i in range(num_chord_stations - 1, 0, -1)] + [camber_dvs[c, i] for i in range(num_chord_stations)])
-            full_span_camber_list.append(csdl.reshape(row, (1, num_ffd_sections)))
-        full_span_camber = csdl.concatenate(full_span_camber_list, axis=0)
+        geometry_coefficients = ffd_block.evaluate_ffd(coefficients=ffd_coefficients, plot=False)
+        geometry.set_coefficients(geometry_coefficients)
 
-        # Convert chord percentage to physical vertical displacement for each section
-        camber_displacement = (full_span_camber / 100.0) * csdl.expand(section_chords, (3, num_ffd_sections), 'j->ij')
-        camber_delta = csdl.expand(camber_displacement, (3, num_ffd_sections, 2), 'ij->ijk')
-        ffd_coefficients = ffd_coefficients.set(csdl.slice[1:4, :, :, 2], ffd_coefficients[1:4, :, :, 2] + camber_delta)
+        if include_elevator and abs(parsed_dvs['elevator_angle']) > 1e-6:
+            from lsdo_geo import rotate
+            elevator_angle = csdl.Variable(value=parsed_dvs['elevator_angle'])
+            elevator_hinge = geometry.project(np.array([0.8 * scale_factor, 0.0, 0.0]))
+            hinge_origin = geometry.evaluate(elevator_hinge)
+            for f_idx, row_slc in [(0, slice(0, 6)), (5, slice(0, 6)), (1, slice(97, None)), (4, slice(97, None))]:
+                func = geometry.functions[f_idx]
+                sub_pts = func.coefficients[:4, row_slc, :]
+                rot_sub = rotate(
+                    points=sub_pts,
+                    rotation_origin=hinge_origin,
+                    axis_vector=np.array([0., 1., 0.]),
+                    angles=-elevator_angle,
+                    units='radians'
+                )
+                func.coefficients[:4, row_slc, :] = rot_sub
 
-    geometry_coefficients = ffd_block.evaluate_ffd(coefficients=ffd_coefficients, plot=False)
-    geometry.set_coefficients(geometry_coefficients)
+        wingspan_eval = geometry.evaluate(leading_edge_right)[1] - geometry.evaluate(leading_edge_left)[1]
+        wingspan_val = wingspan_eval.value if hasattr(wingspan_eval, 'value') else wingspan_eval
+        total_wingspan = float(np.abs(np.squeeze(wingspan_val)))
+        half_span = total_wingspan / 2.0
+        local_chords_vals = []
+        for i in range(num_chord_stations):
+            ch_eval = geometry.evaluate(chord_te_projections[i])[0] - geometry.evaluate(chord_le_projections[i])[0]
+            val = ch_eval.value if hasattr(ch_eval, 'value') else ch_eval
+            local_chords_vals.append(float(np.squeeze(val)))
+        chord_stretch_vals = [float(s) for s in chord_stretch_dvs]
 
-    wingspan = geometry.evaluate(leading_edge_right)[1] - geometry.evaluate(leading_edge_left)[1]
-    local_chords = [geometry.evaluate(chord_te_projections[i])[0] - geometry.evaluate(chord_le_projections[i])[0] for i in range(num_chord_stations)]
-    local_thicknesses = [geometry.evaluate(upper_thickness_projections[i])[2] - geometry.evaluate(lower_thickness_projections[i])[2] for i in range(num_chord_stations)]
+    else:  # ar_area formulation with ParameterizationSolver
+        # Initialize variables directly with optimal values
+        taper_dvs = csdl.Variable(shape=(num_chord_stations - 1,), value=parsed_dvs['taper_dvs'])
+        aspect_ratio = csdl.Variable(shape=(1,), value=parsed_dvs['aspect_ratio'])
+        sweep_angle_dvs = csdl.Variable(shape=(num_chord_stations - 1,), value=parsed_dvs['sweep_angle_dvs'])
+        twist_dvs = csdl.Variable(shape=(num_chord_stations,), value=parsed_dvs['twist_dvs'])
+        if include_camber:
+            camber_dvs = csdl.Variable(shape=(3, num_chord_stations), value=parsed_dvs['camber_dvs'])
 
-    upper_skin_pts = geometry.evaluate(projected_upper_skin, plot=False)
-    lower_skin_pts = geometry.evaluate(projected_lower_skin, plot=False)
-    chord_surface_pts = 0.5 * (upper_skin_pts + lower_skin_pts)
-    chord_surface_grid = csdl.reshape(chord_surface_pts, (nx_area, ny_area, 3))
-    v_x = chord_surface_grid[1:, :-1, :] - chord_surface_grid[:-1, :-1, :]
-    v_y = chord_surface_grid[:-1, 1:, :] - chord_surface_grid[:-1, :-1, :]
-    area_vectors = csdl.cross(v_x, v_y, axis=2)
-    element_areas = csdl.norm(area_vectors, axes=(2,))
-    planform_area = csdl.sum(element_areas)
-    aspect_ratio_calc = (wingspan**2) / planform_area
+        chord_stretch_states = csdl.Variable(shape=(num_chord_stations,), value=np.zeros(num_chord_stations))
+        thickness_stretch_states = csdl.Variable(shape=(num_chord_stations,), value=np.zeros(num_chord_stations))
+        span_stretch_state = csdl.Variable(value=0.0)
+        sweep_translation_states = csdl.Variable(shape=(num_chord_stations - 1,), value=np.zeros(num_chord_stations - 1))
+        sweep_full_half = csdl.concatenate([csdl.Variable(value=0.0), sweep_translation_states])
 
-    geometry_solver = ParameterizationSolver()
-    geometry_solver.add_state(chord_stretch_states)
-    geometry_solver.add_state(thickness_stretch_states)
-    geometry_solver.add_state(span_stretch_state)
-    geometry_solver.add_state(sweep_translation_states)
+        chord_params = csdl.concatenate([chord_stretch_states[i] for i in range(num_chord_stations - 1, 0, -1)] + [chord_stretch_states[i] for i in range(num_chord_stations)])
+        sweep_params = csdl.concatenate([sweep_full_half[i] for i in range(num_chord_stations - 1, 0, -1)] + [sweep_full_half[i] for i in range(num_chord_stations)])
+        thickness_params = csdl.concatenate([thickness_stretch_states[i] for i in range(num_chord_stations - 1, 0, -1)] + [thickness_stretch_states[i] for i in range(num_chord_stations)])
+        twist_params = csdl.concatenate([twist_dvs[i] for i in range(num_chord_stations - 1, 0, -1)] + [twist_dvs[i] for i in range(num_chord_stations)])
+        span_weights = np.linspace(-1.0, 1.0, num_ffd_sections)
+        span_params = csdl.expand(span_stretch_state, (num_ffd_sections,)) * span_weights
 
-    target_area = 10.0 * (scale_factor ** 2)
+        sectional_parameters = SectionalParameters()
+        sectional_parameters.add_stretch(axis=np.array([1., 0., 0.]), stretch=chord_params)
+        sectional_parameters.add_translation(axis=np.array([1., 0., 0.]), translation=sweep_params)
+        sectional_parameters.add_stretch(axis=np.array([0., 0., 1.]), stretch=thickness_params)
+        sectional_parameters.add_translation(axis=np.array([0., 1., 0.]), translation=span_params)
+        sectional_parameters.add_rotation(axis=np.array([0., 1., 0.]), rotation=twist_params, parametric_coordinate=np.array([0.25, 0.5]))
 
-    geometric_variables = GeometricVariables()
-    for i in range(1, num_chord_stations):
-        normalized_chord = local_chords[i] / local_chords[0]
-        geometric_variables.add_variable(normalized_chord, taper_dvs[i - 1], penalty_value=None)
-    for i in range(num_chord_stations):
-        tc_ratio = local_thicknesses[i] / local_chords[i]
-        geometric_variables.add_variable(tc_ratio / 0.12, 1.0, penalty_value=None)
-    geometric_variables.add_variable(planform_area / target_area, 1.0, penalty_value=None)
-    geometric_variables.add_variable(aspect_ratio_calc / 10.0, aspect_ratio / 10.0, penalty_value=None)
+        ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=False)
+        if include_camber:
+            section_chords = ffd_coefficients[-1, :, 0, 0] - ffd_coefficients[0, :, 0, 0]
+            full_span_camber_list = []
+            for c in range(3):
+                row = csdl.concatenate([camber_dvs[c, i] for i in range(num_chord_stations - 1, 0, -1)] + [camber_dvs[c, i] for i in range(num_chord_stations)])
+                full_span_camber_list.append(csdl.reshape(row, (1, num_ffd_sections)))
+            full_span_camber = csdl.concatenate(full_span_camber_list, axis=0)
+            camber_displacement = (full_span_camber / 100.0) * csdl.expand(section_chords, (3, num_ffd_sections), 'j->ij')
+            camber_delta = csdl.expand(camber_displacement, (3, num_ffd_sections, 2), 'ij->ijk')
+            ffd_coefficients = ffd_coefficients.set(csdl.slice[1:4, :, :, 2], ffd_coefficients[1:4, :, :, 2] + camber_delta)
 
-    qc_pts = [geometry.evaluate(quarter_chord_projections[i]) for i in range(num_chord_stations)]
-    for i in range(num_chord_stations - 1):
-        dx = qc_pts[i + 1][0] - qc_pts[i][0]
-        dy = qc_pts[i + 1][1] - qc_pts[i][1]
-        sectional_sweep = csdl.arctan(dx / dy)
-        geometric_variables.add_variable(sectional_sweep, sweep_angle_dvs[i], penalty_value=None)
+        geometry_coefficients = ffd_block.evaluate_ffd(coefficients=ffd_coefficients, plot=False)
+        geometry.set_coefficients(geometry_coefficients)
 
-    print("Executing ParameterizationSolver (in-line Newton solver)...")
-    geometry_solver.evaluate(geometric_variables)
+        wingspan = geometry.evaluate(leading_edge_right)[1] - geometry.evaluate(leading_edge_left)[1]
+        local_chords = [geometry.evaluate(chord_te_projections[i])[0] - geometry.evaluate(chord_le_projections[i])[0] for i in range(num_chord_stations)]
+        local_thicknesses = [geometry.evaluate(upper_thickness_projections[i])[2] - geometry.evaluate(lower_thickness_projections[i])[2] for i in range(num_chord_stations)]
 
-    total_wingspan = float(wingspan.value[0])
-    half_span = total_wingspan / 2.0
-    s_ref = float(planform_area.value[0])
-    ar_final = float(aspect_ratio_calc.value[0])
-    local_chords_vals = [float(c.value[0]) for c in local_chords]
-    chord_stretch_vals = [float(s) for s in chord_stretch_states.value]
+        nx_area, ny_area = 21, 41
+        x_grid = np.linspace(0.0, 1.0 * scale_factor, nx_area)
+        y_grid = np.linspace(-5.0 * scale_factor, 5.0 * scale_factor, ny_area)
+        X_mesh, Y_mesh = np.meshgrid(x_grid, y_grid, indexing='ij')
+        upper_seed_pts = np.column_stack([X_mesh.ravel(), Y_mesh.ravel(), np.full(X_mesh.size, 0.05 * scale_factor)])
+        lower_seed_pts = np.column_stack([X_mesh.ravel(), Y_mesh.ravel(), np.full(X_mesh.size, -0.05 * scale_factor)])
+        projected_upper_skin = geometry.project(upper_seed_pts, force_reprojection=False, direction=np.array([0, 0, -1]), plot=False)
+        projected_lower_skin = geometry.project(lower_seed_pts, force_reprojection=False, direction=np.array([0, 0, 1]), plot=False)
+
+        upper_skin_pts = geometry.evaluate(projected_upper_skin, plot=False)
+        lower_skin_pts = geometry.evaluate(projected_lower_skin, plot=False)
+        chord_surface_pts = 0.5 * (upper_skin_pts + lower_skin_pts)
+        chord_surface_grid = csdl.reshape(chord_surface_pts, (nx_area, ny_area, 3))
+        v_x = chord_surface_grid[1:, :-1, :] - chord_surface_grid[:-1, :-1, :]
+        v_y = chord_surface_grid[:-1, 1:, :] - chord_surface_grid[:-1, :-1, :]
+        area_vectors = csdl.cross(v_x, v_y, axis=2)
+        element_areas = csdl.norm(area_vectors, axes=(2,))
+        planform_area = csdl.sum(element_areas)
+        aspect_ratio_calc = (wingspan**2) / planform_area
+
+        geometry_solver = ParameterizationSolver()
+        geometry_solver.add_state(chord_stretch_states)
+        geometry_solver.add_state(thickness_stretch_states)
+        geometry_solver.add_state(span_stretch_state)
+        geometry_solver.add_state(sweep_translation_states)
+
+        target_area = 10.0 * (scale_factor ** 2)
+
+        geometric_variables = GeometricVariables()
+        for i in range(1, num_chord_stations):
+            normalized_chord = local_chords[i] / local_chords[0]
+            geometric_variables.add_variable(normalized_chord, taper_dvs[i - 1], penalty_value=None)
+        for i in range(num_chord_stations):
+            tc_ratio = local_thicknesses[i] / local_chords[i]
+            geometric_variables.add_variable(tc_ratio / 0.12, 1.0, penalty_value=None)
+        geometric_variables.add_variable(planform_area / target_area, 1.0, penalty_value=None)
+        geometric_variables.add_variable(aspect_ratio_calc / 10.0, aspect_ratio / 10.0, penalty_value=None)
+
+        qc_pts = [geometry.evaluate(quarter_chord_projections[i]) for i in range(num_chord_stations)]
+        for i in range(num_chord_stations - 1):
+            dx = qc_pts[i + 1][0] - qc_pts[i][0]
+            dy = qc_pts[i + 1][1] - qc_pts[i][1]
+            sectional_sweep = csdl.arctan(dx / dy)
+            geometric_variables.add_variable(sectional_sweep, sweep_angle_dvs[i], penalty_value=None)
+
+        print("Executing ParameterizationSolver (in-line Newton solver)...")
+        geometry_solver.evaluate(geometric_variables)
+
+        total_wingspan = float(wingspan.value[0])
+        half_span = total_wingspan / 2.0
+        s_ref = float(planform_area.value[0])
+        ar_final = float(aspect_ratio_calc.value[0])
+        local_chords_vals = [float(c.value[0]) for c in local_chords]
+        chord_stretch_vals = [float(s) for s in chord_stretch_states.value]
 
     print(f"Deformed Geometry Evaluated:")
     print(f"  Wingspan (b)     = {total_wingspan:.4f} m (Half-Span = {half_span:.4f} m)")
-    print(f"  Planform Area (S)= {s_ref:.4f} m^2")
-    print(f"  Aspect Ratio (AR)= {ar_final:.2f}")
+    if 's_ref' in locals():
+        print(f"  Planform Area (S)= {s_ref:.4f} m^2")
+    if 'ar_final' in locals():
+        print(f"  Aspect Ratio (AR)= {ar_final:.2f}")
     for i, cv in enumerate(local_chords_vals):
         print(f"  Station {i} Design Chord = {cv:.3f} m (Stretch = {chord_stretch_vals[i]:+.3f} m)")
 
@@ -613,8 +947,12 @@ def generate_airfoil_gallery_plot(station_data: list, output_path: str, half_spa
     Figure 1: 4x2 Grid of individual stations with detailed annotations.
     """
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
-    fig, axes = plt.subplots(4, 2, figsize=(15, 14), dpi=200)
+    n_stns = len(station_data)
+    nrows = (n_stns + 1) // 2
+    fig, axes = plt.subplots(nrows, 2, figsize=(15, 3.5 * nrows), dpi=200)
     axes = axes.flatten()
+    for extra_ax in axes[n_stns:]:
+        fig.delaxes(extra_ax)
 
     c_upper = '#1f77b4'
     c_lower = '#2ca02c'
@@ -675,7 +1013,7 @@ def generate_airfoil_gallery_plot(station_data: list, output_path: str, half_spa
             ax.legend(loc='upper right', frameon=True, framealpha=0.9, fontsize=7.5)
 
     fig.suptitle(
-        f"Optimized Airfoil Cross-Sections Across 8 Spanwise Stations\n"
+        f"Optimized Airfoil Cross-Sections Across {n_stns} Spanwise Stations\n"
         f"BWB Aerostructural Optimization | Half-Span $b/2 = {half_span:.3f}$ m",
         fontsize=14, fontweight='bold', y=0.99
     )
@@ -963,9 +1301,15 @@ def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     repo_root = os.path.abspath(os.path.join(script_dir, "../../../.."))
 
+    parser = argparse.ArgumentParser(description="Extract and plot airfoil cross-sections from optimization results.")
+    parser.add_argument("run_dir", nargs="?", default=None, help="Path to optimization output folder containing x.out")
+    parser.add_argument("--formulation", choices=["auto", "chord_span", "ar_area"], default="auto", help="Wing parameterization formulation")
+    parser.add_argument("--resolution", choices=["auto", "fast", "full"], default="auto", help="Spanwise resolution ('fast' = 5 stations, 'full' = 8 stations)")
+    args = parser.parse_args()
+
     # Determine target run output folder
-    if len(sys.argv) > 1:
-        target_dir = os.path.abspath(sys.argv[1])
+    if args.run_dir:
+        target_dir = os.path.abspath(args.run_dir)
     else:
         base_output_dir = os.path.join(repo_root, "rectangular_wing_to_bwb_aerostructural_optimization_outputs")
         target_dir = find_latest_output_dir(base_output_dir)
@@ -992,14 +1336,24 @@ def main():
     # Detect scale factor
     scale_factor = detect_scale_factor(target_dir, repo_root)
 
+    formulation_override = None if args.formulation == "auto" else args.formulation
+    resolution_override = None if args.resolution == "auto" else args.resolution
+
     # Parse DVs
-    parsed_dvs = parse_design_variables(x_opt, scale_factor=scale_factor)
+    parsed_dvs = parse_design_variables(
+        x_opt,
+        scale_factor=scale_factor,
+        target_dir=target_dir,
+        formulation_override=formulation_override,
+        resolution_override=resolution_override,
+    )
+    num_stations = parsed_dvs['num_stations']
 
     # Reconstruct authentic geometry
     geometry, total_wingspan, half_span, local_chords_vals, chord_stretch_vals, cad_chord_profile = build_and_evaluate_geometry(parsed_dvs, repo_root)
 
-    # Extract 8 cross-section stations along half-span
-    station_data = extract_station_airfoils(geometry, half_span, num_stations=8)
+    # Extract cross-section stations along half-span
+    station_data = extract_station_airfoils(geometry, half_span, num_stations=num_stations)
 
     # Generate Output Figures and Data
     gallery_fig_path = os.path.join(target_dir, "airfoil_cross_sections_gallery.png")
@@ -1019,7 +1373,7 @@ def main():
     save_airfoil_telemetry(station_data, telemetry_path, half_span)
 
     # Also copy artifacts to the active agent brain directory if available
-    artifact_dir = os.environ.get('ARTIFACT_DIR', '/home/andrew/.gemini/antigravity/brain/f4b8c9ca-9e69-4a92-8ee3-962e5e21793d')
+    artifact_dir = os.environ.get('ARTIFACT_DIR', '/home/andrew/.gemini/antigravity/brain/680209fd-293d-4fa0-9f6c-ae59a72a6987')
     if os.path.exists(artifact_dir):
         shutil.copy2(gallery_fig_path, os.path.join(artifact_dir, "airfoil_cross_sections_gallery.png"))
         shutil.copy2(evolution_fig_path, os.path.join(artifact_dir, "airfoil_shape_evolution.png"))
@@ -1027,7 +1381,7 @@ def main():
 
     # Summary table
     print("\n" + "=" * 80)
-    print("SUMMARY: AIRFOIL CROSS SECTIONS ALONG 8 SPANWISE STATIONS")
+    print(f"SUMMARY: AIRFOIL CROSS SECTIONS ALONG {len(station_data)} SPANWISE STATIONS")
     print("=" * 80)
     print(f"{'Stn':4s} | {'eta':6s} | {'y [m]':8s} | {'Chord [m]':10s} | {'t_max [mm]':11s} | {'t/c [%]':8s} | {'Twist [deg]':12s} | {'Camber [mm]':12s}")
     print("-" * 80)

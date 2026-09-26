@@ -10,7 +10,8 @@ Supports:
 - Full fallback to evaluate the optimal state using jax_sim if cache is not yet generated
 - Multi-resolution compatibility ('fast' 5-station / 15-CP stress spline vs 'full' 8-station)
 """
-import os, sys
+import os
+import sys
 import glob
 import shutil
 import numpy as np
@@ -37,332 +38,321 @@ for p in [
 
 import lsdo_function_spaces as lfs
 
-# -------------------------------------------------------------------------
-# Determine Target Optimization Output Directory & Cache Path
-# -------------------------------------------------------------------------
-if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
-    arg_target = os.path.abspath(sys.argv[1])
-    if os.path.isfile(arg_target) and arg_target.endswith('.npz'):
-        cache_file = arg_target
-        output_folder = os.path.dirname(arg_target)
+
+def generate_structural_plots(output_folder=None, artifact_dir=None, force_rerun=False):
+    """Generate structural thickness and stress analysis plots and copy to artifact directory."""
+    if output_folder is None:
+        if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
+            arg_target = os.path.abspath(sys.argv[1])
+            if os.path.isfile(arg_target) and arg_target.endswith('.npz'):
+                cache_file = arg_target
+                output_folder = os.path.dirname(arg_target)
+            else:
+                output_folder = arg_target
+                cache_file = os.path.join(output_folder, 'structural_data.npz')
+        else:
+            output_base_dir = os.path.join(repo_root, 'rectangular_wing_to_bwb_aerostructural_optimization_outputs')
+            output_folders = glob.glob(os.path.join(output_base_dir, '*'))
+            if not output_folders:
+                raise FileNotFoundError(f"No optimization output runs found in {output_base_dir}")
+            output_folder = max(output_folders, key=os.path.getmtime)
+            cache_file = os.path.join(output_folder, 'structural_data.npz')
     else:
-        output_folder = arg_target
+        output_folder = os.path.abspath(output_folder)
         cache_file = os.path.join(output_folder, 'structural_data.npz')
-else:
-    output_base_dir = os.path.join(repo_root, 'rectangular_wing_to_bwb_aerostructural_optimization_outputs')
-    output_folders = glob.glob(os.path.join(output_base_dir, '*'))
-    if not output_folders:
-        raise FileNotFoundError(f"No optimization output runs found in {output_base_dir}")
-    output_folder = max(output_folders, key=os.path.getmtime)
-    cache_file = os.path.join(output_folder, 'structural_data.npz')
 
-print(f"Target optimization output directory: {output_folder}")
-artifact_dir = os.environ.get('ARTIFACT_DIR', '/home/andrew/.gemini/antigravity/brain/f4b8c9ca-9e69-4a92-8ee3-962e5e21793d')
+    print(f"Target optimization output directory: {output_folder}")
 
-force_rerun = '--force' in sys.argv or '-f' in sys.argv
+    if artifact_dir is None:
+        candidate_ids = [
+            '0c0a47e5-2e16-41bb-9139-10357c23c5ee',
+            '3256dd7c-d4c8-4c73-887d-131361f9d0c3',
+            'f4b8c9ca-9e69-4a92-8ee3-962e5e21793d',
+            '680209fd-293d-4fa0-9f6c-ae59a72a6987',
+        ]
+        artifact_dir = os.environ.get('ARTIFACT_DIR', None)
+        if not artifact_dir or not os.path.exists(artifact_dir):
+            for c_id in candidate_ids:
+                cand_path = f'/home/andrew/.gemini/antigravity/brain/{c_id}'
+                if os.path.exists(cand_path):
+                    artifact_dir = cand_path
+                    break
 
-# -------------------------------------------------------------------------
-# Load Cached Telemetry or Run Model Evaluation Fallback
-# -------------------------------------------------------------------------
-if os.path.exists(cache_file) and not force_rerun:
-    print(f"Loading cached structural telemetry from: {cache_file}")
-    data = np.load(cache_file, allow_pickle=True)
-else:
-    # Check for existing telemetry files with matching structural data
-    alt_candidates = (
-        glob.glob(os.path.join(output_folder, '*structural*.npz')) +
-        glob.glob(os.path.join(output_folder, '*telemetry*.npz'))
-    )
-    if alt_candidates and not force_rerun:
-        alt_file = alt_candidates[0]
-        print(f"Loading existing telemetry cache from: {alt_file}")
-        data = np.load(alt_file, allow_pickle=True)
-    else:
-        print(f"No cache found at {cache_file}; running model evaluation...")
-        import csdl_alpha as csdl
-        recorder = csdl.Recorder(inline=True)
-        recorder.start()
-        import examples.showcase_examples.rectangular_wing.ex_rectangular_wing_to_bwb as main_script
-        jax_sim = main_script.jax_sim
-        design_variables = main_script.design_variables
+    if '--force' in sys.argv or '-f' in sys.argv:
+        force_rerun = True
 
-        x_out_path = os.path.join(output_folder, 'x.out')
-        if not os.path.exists(x_out_path):
-            raise FileNotFoundError(f"Optimization history file not found: {x_out_path}")
-        x_history = np.loadtxt(x_out_path)
-        if len(x_history.shape) == 1:
-            x_history = x_history.reshape(1, -1)
-        x_opt = x_history[-1]
-
-        # Set optimal design variables on jax_sim
-        curr_idx = 0
-        for name, dv_info in design_variables.items():
-            var_size = int(np.prod(dv_info.variable.shape))
-            slc = slice(curr_idx, curr_idx + var_size)
-            unscaled_val = (x_opt[slc] / dv_info.scaler).reshape(dv_info.variable.shape)
-            jax_sim[dv_info.variable] = unscaled_val
-            curr_idx += var_size
-
-        # Evaluate model at optimal point
-        jax_sim.run()
-
-        # Extract structural telemetry
-        beam_pts_opt = np.asarray(jax_sim[main_script.beam_mesh])
-        scale_factor_val = float(main_script.scale_factor)
-        allowable_stress_val = float(main_script.allowable_stress)
-        chords_opt = np.asarray(jax_sim[main_script.local_chord]).flatten()
-        heights_opt = np.asarray(jax_sim[main_script.local_height]).flatten()
-        widths_opt = np.asarray(jax_sim[main_script.box_width]).flatten()
-        ttop_elem_opt = np.asarray(jax_sim[main_script.ttop_elem]).flatten()
-        tweb_elem_opt = np.asarray(jax_sim[main_script.tweb_elem]).flatten()
-        elem_stress_ss = np.asarray(jax_sim[main_script.elem_max_stress]).flatten()
-        dv_stress_ss = np.asarray(jax_sim[main_script.dv_stresses]).flatten()
-        stress_coeffs_ss = np.asarray(jax_sim[main_script.stress_coeffs]).flatten()
-        ttop_dvs_opt = np.asarray(jax_sim[main_script.ttop_dvs]).flatten()
-        tweb_dvs_opt = np.asarray(jax_sim[main_script.tweb_dvs]).flatten()
-        thickness_peaks = np.asarray(main_script.thickness_peaks)
-        knots_stress_15 = np.asarray(main_script.knots_stress_15) if hasattr(main_script, 'knots_stress_15') else np.array([])
-        resolution_val = str(main_script.resolution)
-        load_factor_val = float(main_script.load_factor_val) if hasattr(main_script, 'load_factor_val') else 2.5
-
-        # Save cache for instant reuse
-        np.savez_compressed(
-            cache_file,
-            beam_pts_opt=beam_pts_opt,
-            scale_factor=scale_factor_val,
-            allowable_stress=allowable_stress_val,
-            chords_opt=chords_opt,
-            heights_opt=heights_opt,
-            widths_opt=widths_opt,
-            ttop_elem_opt=ttop_elem_opt,
-            tweb_elem_opt=tweb_elem_opt,
-            elem_stress_ss=elem_stress_ss,
-            dv_stress_ss=dv_stress_ss,
-            stress_coeffs_ss=stress_coeffs_ss,
-            ttop_dvs_opt=ttop_dvs_opt,
-            tweb_dvs_opt=tweb_dvs_opt,
-            thickness_peaks=thickness_peaks,
-            knots_stress_15=knots_stress_15,
-            resolution=resolution_val,
-            load_factor_val=load_factor_val,
-        )
-        print(f"Saved structural telemetry cache to: {cache_file}")
+    # -------------------------------------------------------------------------
+    # Load Cached Telemetry or Run Model Evaluation Fallback
+    # -------------------------------------------------------------------------
+    if os.path.exists(cache_file) and not force_rerun:
+        print(f"Loading cached structural telemetry from: {cache_file}")
         data = np.load(cache_file, allow_pickle=True)
+    else:
+        alt_candidates = (
+            glob.glob(os.path.join(output_folder, '*structural*.npz')) +
+            glob.glob(os.path.join(output_folder, '*telemetry*.npz'))
+        )
+        if alt_candidates and not force_rerun:
+            alt_file = alt_candidates[0]
+            print(f"Loading existing telemetry cache from: {alt_file}")
+            data = np.load(alt_file, allow_pickle=True)
+        else:
+            print(f"No cache found at {cache_file}; running model evaluation...")
+            import csdl_alpha as csdl
+            recorder = csdl.Recorder(inline=True)
+            recorder.start()
+            import examples.showcase_examples.rectangular_wing.ex_rectangular_wing_to_bwb as main_script
+            jax_sim = main_script.jax_sim
+            design_variables = main_script.design_variables
 
-# -------------------------------------------------------------------------
-# Parse Structural Parameters & Normalization
-# -------------------------------------------------------------------------
-beam_pts = data['beam_pts_opt']
-half_span = float(beam_pts[-1, 1])
-scale_factor = float(data['scale_factor']) if 'scale_factor' in data else 1.0
-allowable_stress = float(data['allowable_stress']) / 1e6  # to MPa
-load_factor_val = float(data['load_factor_val']) if 'load_factor_val' in data else 2.5
+            x_out_path = os.path.join(output_folder, 'x.out')
+            if not os.path.exists(x_out_path):
+                raise FileNotFoundError(f"Optimization history file not found: {x_out_path}")
+            x_history = np.loadtxt(x_out_path)
+            if len(x_history.shape) == 1:
+                x_history = x_history.reshape(1, -1)
+            x_opt = x_history[-1]
 
-# Element geometry & locations
-y_elem_mid = 0.5 * (beam_pts[:-1, 1] + beam_pts[1:, 1])
-chords = data['chords_opt']
-heights = data['heights_opt']
-widths = data['widths_opt']
-ttop_elem = data['ttop_elem_opt'] * 1e3  # mm
-tweb_elem = data['tweb_elem_opt'] * 1e3  # mm
+            curr_idx = 0
+            for name, dv_info in design_variables.items():
+                var_size = int(np.prod(dv_info.variable.shape))
+                slc = slice(curr_idx, curr_idx + var_size)
+                unscaled_val = (x_opt[slc] / dv_info.scaler).reshape(dv_info.variable.shape)
+                jax_sim[dv_info.variable] = unscaled_val
+                curr_idx += var_size
 
-# Stresses with flexible key fallback (supports 'ss', '4g', or generic keys)
-elem_stress = (data['elem_stress_ss'] if 'elem_stress_ss' in data else (
-    data['elem_stress_4g'] if 'elem_stress_4g' in data else data['elem_stress']
-)) / 1e6  # MPa
+            jax_sim.run()
 
-dv_stress = (data['dv_stress_ss'] if 'dv_stress_ss' in data else (
-    data['dv_stress_4g'] if 'dv_stress_4g' in data else data['dv_stress']
-)) / 1e6  # MPa
+            beam_pts_opt = np.asarray(jax_sim[main_script.beam_mesh])
+            scale_factor_val = float(main_script.scale_factor)
+            allowable_stress_val = float(main_script.allowable_stress)
+            chords_opt = np.asarray(jax_sim[main_script.local_chord]).flatten()
+            heights_opt = np.asarray(jax_sim[main_script.local_height]).flatten()
+            widths_opt = np.asarray(jax_sim[main_script.box_width]).flatten()
+            ttop_elem_opt = np.asarray(jax_sim[main_script.ttop_elem]).flatten()
+            tweb_elem_opt = np.asarray(jax_sim[main_script.tweb_elem]).flatten()
+            elem_stress_ss = np.asarray(jax_sim[main_script.elem_max_stress]).flatten()
+            dv_stress_ss = np.asarray(jax_sim[main_script.dv_stresses]).flatten()
+            stress_coeffs_ss = np.asarray(jax_sim[main_script.stress_coeffs]).flatten()
+            ttop_dvs_opt = np.asarray(jax_sim[main_script.ttop_dvs]).flatten()
+            tweb_dvs_opt = np.asarray(jax_sim[main_script.tweb_dvs]).flatten()
+            thickness_peaks = np.asarray(main_script.thickness_peaks)
+            knots_stress_15 = np.asarray(main_script.knots_stress_15) if hasattr(main_script, 'knots_stress_15') else np.array([])
+            resolution_val = str(main_script.resolution)
+            load_factor_val = float(main_script.load_factor_val) if hasattr(main_script, 'load_factor_val') else 2.5
 
-stress_coeffs_arr = (data['stress_coeffs_ss'] if 'stress_coeffs_ss' in data else (
-    data['stress_coeffs_4g'] if 'stress_coeffs_4g' in data else data['stress_coeffs']
-))
+            np.savez_compressed(
+                cache_file,
+                beam_pts_opt=beam_pts_opt,
+                scale_factor=scale_factor_val,
+                allowable_stress=allowable_stress_val,
+                chords_opt=chords_opt,
+                heights_opt=heights_opt,
+                widths_opt=widths_opt,
+                ttop_elem_opt=ttop_elem_opt,
+                tweb_elem_opt=tweb_elem_opt,
+                elem_stress_ss=elem_stress_ss,
+                dv_stress_ss=dv_stress_ss,
+                stress_coeffs_ss=stress_coeffs_ss,
+                ttop_dvs_opt=ttop_dvs_opt,
+                tweb_dvs_opt=tweb_dvs_opt,
+                thickness_peaks=thickness_peaks,
+                knots_stress_15=knots_stress_15,
+                resolution=resolution_val,
+                load_factor_val=load_factor_val,
+            )
+            print(f"Saved structural telemetry cache to: {cache_file}")
+            data = np.load(cache_file, allow_pickle=True)
 
-thickness_peaks = data['thickness_peaks']
-y_peaks = thickness_peaks * half_span
-ttop_dvs_opt = data['ttop_dvs_opt']
-tweb_dvs_opt = data['tweb_dvs_opt']
+    # Unpack telemetry
+    beam_pts = data['beam_pts_opt']
+    scale_factor = float(data['scale_factor'])
+    allowable_stress = float(data['allowable_stress']) / 1e6
+    elem_stress = data['elem_stress_ss'] / 1e6
+    dv_stress = data['dv_stress_ss'] / 1e6
+    stress_coeffs = data['stress_coeffs_ss'] / 1e6
+    ttop_elem = data['ttop_elem_opt'] * 1e3
+    tweb_elem = data['tweb_elem_opt'] * 1e3
+    ttop_dvs = data['ttop_dvs_opt'] * 1e3
+    tweb_dvs = data['tweb_dvs_opt'] * 1e3
+    thickness_peaks = data['thickness_peaks']
+    chords = data['chords_opt']
+    heights = data['heights_opt']
+    widths = data['widths_opt']
+    resolution = str(data['resolution']) if 'resolution' in data else 'fast'
+    load_factor = float(data['load_factor_val']) if 'load_factor_val' in data else 2.5
 
-# -------------------------------------------------------------------------
-# Continuous B-Spline Field Evaluations
-# -------------------------------------------------------------------------
-y_fine = np.linspace(0.0, half_span, 400)
-u_fine = (y_fine / half_span).reshape(-1, 1)
+    # -------------------------------------------------------------------------
+    # Spatial Coordinates and B-Spline Continuous Field Evaluation
+    # -------------------------------------------------------------------------
+    y_nodes = beam_pts[:, 1]
+    half_span = float(np.max(y_nodes))
+    y_elem_mid = 0.5 * (y_nodes[:-1] + y_nodes[1:])
+    y_peaks = thickness_peaks * half_span
+    num_dvs = len(thickness_peaks)
 
-# 1. Thickness Distributions (Degree 2 B-Spline)
-num_dvs = len(ttop_dvs_opt)
-sp_thick = lfs.BSplineSpace(num_parametric_dimensions=1, degree=2, coefficients_shape=(num_dvs,))
-B_thick = sp_thick.compute_basis_matrix(u_fine).toarray()
+    # Continuous B-Spline Stress Field
+    N_EVAL = 300
+    y_fine = np.linspace(0.0, half_span, N_EVAL)
+    tau_fine = y_fine / half_span
 
-ttop_fine = (B_thick @ ttop_dvs_opt) * 1e3  # mm
-tweb_fine = (B_thick @ tweb_dvs_opt) * 1e3  # mm
-ttop_cps = ttop_dvs_opt * 1e3
-tweb_cps = tweb_dvs_opt * 1e3
-y_cps = thickness_peaks * half_span
+    if 'knots_stress_15' in data and len(data['knots_stress_15']) > 0:
+        knots = data['knots_stress_15']
+    else:
+        num_stress_cp = len(stress_coeffs)
+        k_int = np.linspace(0.0, 1.0, num_stress_cp - 2)[1:-1]
+        knots = np.concatenate([[0.0, 0.0, 0.0, 0.0], k_int, [1.0, 1.0, 1.0, 1.0]])
 
-# 2. Stress Field B-Spline (Supports 15-CP cubic clamped with S'(0)=0 or 8-CP quadratic)
-knots_stress_15 = data['knots_stress_15'] if ('knots_stress_15' in data and len(data['knots_stress_15']) > 0) else None
-if len(stress_coeffs_arr) == 15 and knots_stress_15 is not None:
-    sp_stress = lfs.BSplineSpace(
+    space_stress = lfs.BSplineSpace(
         num_parametric_dimensions=1,
         degree=3,
-        coefficients_shape=(15,),
-        knots=(knots_stress_15,)
+        coefficients_shape=(len(stress_coeffs),),
+        knots=knots,
     )
-elif len(stress_coeffs_arr) == 8:
-    sp_stress = lfs.BSplineSpace(
-        num_parametric_dimensions=1,
-        degree=2,
-        coefficients_shape=(8,)
+    B_eval = space_stress.compute_basis_matrix(tau_fine.reshape((-1, 1))).toarray()
+    stress_field = np.asarray(B_eval @ stress_coeffs).flatten()
+
+    margin_of_safety_field = (allowable_stress / np.maximum(stress_field, 1e-3)) - 1.0
+
+    # -------------------------------------------------------------------------
+    # Plotting: 4-Panel Aerostructural Analysis
+    # -------------------------------------------------------------------------
+    fig, axes = plt.subplots(2, 2, figsize=(15, 11), dpi=200)
+    fig.suptitle(
+        f"Transonic BWB Wingbox Structural Analysis ({resolution.upper()} Resolution, {load_factor:.1f}g Pull-Up Maneuver)\n"
+        f"Half-Span: b/2 = {half_span:.2f} m | Allowable Stress $\\sigma_{{\\mathrm{{allow}}}} = {allowable_stress:.1f}$ MPa",
+        fontsize=14, fontweight='bold', y=0.98
     )
-else:
-    sp_stress = lfs.BSplineSpace(
-        num_parametric_dimensions=1,
-        degree=min(2, len(stress_coeffs_arr) - 1),
-        coefficients_shape=(len(stress_coeffs_arr),)
+
+    color_stress = "#b2182b"
+    color_allow = "#2166ac"
+    color_top = "#2c7bb6"
+    color_web = "#d7191c"
+    color_chord = "#4d4d4d"
+    color_height = "#1a9641"
+    color_width = "#fdae61"
+
+    # --- Subplot 1: Spar Cap and Web Thickness ---
+    ax_t = axes[0, 0]
+    ax_t.plot(y_elem_mid, ttop_elem, 'o-', color=color_top, linewidth=2.2, markersize=5, label='Spar Cap Thickness ($t_{\\mathrm{top}}$)')
+    ax_t.plot(y_elem_mid, tweb_elem, 's-', color=color_web, linewidth=2.2, markersize=5, label='Shear Web Thickness ($t_{\\mathrm{web}}$)')
+    ax_t.scatter(y_peaks, ttop_dvs, color=color_top, s=70, marker='D', edgecolor='black', zorder=5, label='Design Variables ($t_{\\mathrm{top}}$)')
+    ax_t.scatter(y_peaks, tweb_dvs, color=color_web, s=70, marker='D', edgecolor='black', zorder=5, label='Design Variables ($t_{\\mathrm{web}}$)')
+
+    ax_t.set_title("Internal Spar Sizing: Cap & Web Thickness Distributions", fontsize=11, fontweight='bold')
+    ax_t.set_xlabel("Spanwise Coordinate $y$ [m]", fontsize=10, fontweight='bold')
+    ax_t.set_ylabel("Thickness [mm]", fontsize=10, fontweight='bold')
+    ax_t.set_xlim([0, half_span * 1.02])
+    ax_t.set_ylim(bottom=0.0)
+    ax_t.grid(True, linestyle=":", alpha=0.6)
+    ax_t.legend(loc='upper right', frameon=True, framealpha=0.92, fontsize=8.5)
+
+    # --- Subplot 2: Cross-Sectional Geometry ---
+    ax_g = axes[0, 1]
+    ax_g.plot(y_elem_mid, chords, '^-', color=color_chord, linewidth=2.2, markersize=5, label='Local Chord ($c$)')
+    ax_g.set_ylabel("Chord [m]", fontsize=10, fontweight='bold', color=color_chord)
+    ax_g.tick_params(axis='y', labelcolor=color_chord)
+    ax_g.set_xlabel("Spanwise Coordinate $y$ [m]", fontsize=10, fontweight='bold')
+    ax_g.set_xlim([0, half_span * 1.02])
+    ax_g.set_ylim(bottom=0.0)
+    ax_g.grid(True, linestyle=":", alpha=0.6)
+
+    ax_g2 = ax_g.twinx()
+    ax_g2.plot(y_elem_mid, heights * 100.0, 'o-', color=color_height, linewidth=2.0, markersize=4, label='Box Height ($h_{\\mathrm{box}}$)')
+    ax_g2.plot(y_elem_mid, widths * 100.0, 's-', color=color_width, linewidth=2.0, markersize=4, label='Box Width ($w_{\\mathrm{box}}$)')
+    ax_g2.set_ylabel("Box Height & Width [cm]", fontsize=10, fontweight='bold', color=color_height)
+    ax_g2.tick_params(axis='y', labelcolor=color_height)
+    ax_g2.set_ylim(bottom=0.0)
+
+    lines_1, labels_1 = ax_g.get_legend_handles_labels()
+    lines_2, labels_2 = ax_g2.get_legend_handles_labels()
+    ax_g.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper right', frameon=True, framealpha=0.92, fontsize=8.5)
+    ax_g.set_title("Wingbox Sectional Dimensions (Chord, Height, Width)", fontsize=11, fontweight='bold')
+
+    # --- Subplot 3: Stress vs Allowable Limit ---
+    ax_s = axes[1, 0]
+    ax_s.plot(y_fine, stress_field, '-', color=color_stress, linewidth=2.5, label='Continuous Stress Spline $\\sigma(y)$')
+    ax_s.step(np.concatenate([[y_nodes[0]], y_nodes[1:]]),
+              np.concatenate([[elem_stress[0]], elem_stress]),
+              where='pre', color='#fd8d3c', linestyle='--', linewidth=1.5, label='Beam Element Stress (Discrete)')
+    ax_s.scatter(y_elem_mid, elem_stress, color='#fd8d3c', s=35, zorder=4, edgecolor='black', linewidth=0.5)
+    ax_s.scatter(y_peaks, dv_stress, marker='s', s=85, color='darkred', edgecolor='black', linewidth=1.2, zorder=6, label='Aggregated Station Stress (Constraints)')
+    ax_s.axhline(allowable_stress, color=color_allow, linestyle='--', linewidth=2.2, label=f'Allowable Stress Limit ({allowable_stress:.1f} MPa)')
+
+    ax_s.set_title(f"Von Mises Stress Distribution vs Yield Limit ({load_factor:.1f}g Pull-Up)", fontsize=11, fontweight='bold')
+    ax_s.set_xlabel("Spanwise Coordinate $y$ [m]", fontsize=10, fontweight='bold')
+    ax_s.set_ylabel("Peak Stress $\\sigma$ [MPa]", fontsize=10, fontweight='bold')
+    ax_s.set_xlim([0, half_span * 1.02])
+    ax_s.set_ylim([0, max(allowable_stress * 1.18, np.max(stress_field) * 1.12)])
+    ax_s.grid(True, linestyle=":", alpha=0.6)
+    ax_s.legend(loc='lower left', frameon=True, framealpha=0.92, fontsize=8.5)
+
+    # --- Subplot 4: Margin of Safety ---
+    ax_m = axes[1, 1]
+    ax_m.plot(y_fine, margin_of_safety_field, color='#252525', linewidth=2.2, label='Margin of Safety $\\mathrm{MS}(y)$')
+    ax_m.axhline(0.0, color='red', linestyle='--', linewidth=1.8, label='Critical Limit ($\\mathrm{MS} = 0$)')
+    ax_m.fill_between(y_fine, margin_of_safety_field, 0.0, where=(margin_of_safety_field >= 0.0),
+                      color='#31a354', alpha=0.25, interpolate=True, label='Safe Structural Region ($\\mathrm{MS} > 0$)')
+    ax_m.fill_between(y_fine, margin_of_safety_field, 0.0, where=(margin_of_safety_field < 0.0),
+                      color='#de2d26', alpha=0.35, interpolate=True, label='Yield Failure Region ($\\mathrm{MS} < 0$)')
+
+    ax_m.set_title("Structural Margin of Safety $\\mathrm{MS} = (\\sigma_{\\mathrm{allow}} / \\sigma) - 1$", fontsize=11, fontweight='bold')
+    ax_m.set_xlabel("Spanwise Coordinate $y$ [m]", fontsize=10, fontweight='bold')
+    ax_m.set_ylabel("Margin of Safety [-]", fontsize=10, fontweight='bold')
+    ax_m.set_xlim([0, half_span * 1.02])
+    ax_m.set_ylim([-0.15, min(4.0, max(2.0, np.max(margin_of_safety_field[:int(N_EVAL * 0.85)]) * 1.2))])
+    ax_m.grid(True, linestyle=":", alpha=0.6)
+    ax_m.legend(loc='upper right', frameon=True, framealpha=0.92, fontsize=8.5)
+
+    ax_m.annotate(
+        "Inboard Sizing Active\n$\\mathrm{MS} \\approx 0.00$ (Fully Stressed Spar)",
+        xy=(0.05 * half_span, 0.0), xytext=(0.25 * half_span, 0.8),
+        arrowprops=dict(arrowstyle="->", color="black", lw=1.3),
+        fontsize=8.5, fontweight='bold', bbox=dict(boxstyle="round,pad=0.3", fc="#ddffdd", ec="gray", lw=0.8)
     )
 
-B_stress = sp_stress.compute_basis_matrix(u_fine).toarray()
-stress_field = (B_stress @ stress_coeffs_arr) / 1e6  # MPa
+    plt.tight_layout()
 
-# -------------------------------------------------------------------------
-# Figure: Comprehensive Structural Analysis (2 x 2 Subplots)
-# -------------------------------------------------------------------------
-plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
-fig, axes = plt.subplots(2, 2, figsize=(14, 10.5), dpi=200)
-fig.suptitle(
-    f"Structural Optimization Analysis: Thickness & Stress Distributions\n"
-    f"Structural Sizing Maneuver ({load_factor_val:.1f}g) | Allowable Stress = {allowable_stress:.1f} MPa | Half-Span $b/2 = {half_span:.2f}$ m",
-    fontsize=13, fontweight='bold', y=0.98
-)
+    out_fig_name = 'structural_thickness_and_stress_analysis.png'
+    out_local = os.path.join(output_folder, out_fig_name)
+    plt.savefig(out_local, dpi=200, bbox_inches='tight')
+    print(f"\nUpdated structural distribution figure saved to: {out_local}")
 
-# Colors
-c_cap = '#1f77b4'
-c_web = '#2ca02c'
-c_stress = '#d62728'
-c_elem = '#9467bd'
-c_allow = '#b2182b'
-c_box = '#ff7f0e'
+    if artifact_dir and os.path.exists(artifact_dir):
+        out_artifact = os.path.join(artifact_dir, out_fig_name)
+        shutil.copy2(out_local, out_artifact)
+        print(f"Figure also saved to artifact directory: {out_artifact}")
 
-# ---------------- Subplot (0, 0): Spar Cap & Web Thickness Distributions ----------------
-ax_t = axes[0, 0]
-ax_t.plot(y_fine, ttop_fine, '-', color=c_cap, linewidth=2.5, label=r'Spar Cap Thickness $t_{\mathrm{top}}(y)$ (B-spline)')
-ax_t.plot(y_cps, ttop_cps, 'o', color=c_cap, markersize=7, markeredgecolor='black', label=f'Cap Control Points ($N={num_dvs}$)')
-ax_t.plot(y_fine, tweb_fine, '--', color=c_web, linewidth=2.2, label=r'Shear Web Thickness $t_{\mathrm{web}}(y)$ (B-spline)')
-ax_t.plot(y_cps, tweb_cps, 's', color=c_web, markersize=6, markeredgecolor='black', label='Web Control Points (at 0.10 mm bound)')
-ax_t.scatter(y_elem_mid, ttop_elem, color=c_cap, alpha=0.5, s=25, zorder=4, label=r'Element Midpoint $t_{\mathrm{top}}$')
+    plt.close()
 
-ax_t.set_xlabel("Spanwise Coordinate $y$ [m]", fontsize=11, fontweight='bold')
-ax_t.set_ylabel("Thickness [mm]", fontsize=11, fontweight='bold')
-ax_t.set_title("(a) Structural Spar Cap & Shear Web Thickness Distributions", fontsize=11.5, fontweight='bold', pad=8)
-ax_t.set_xlim([0.0, half_span * 1.02])
-ax_t.set_ylim(bottom=0.0, top=max(np.max(ttop_fine), np.max(ttop_cps)) * 1.18)
-ax_t.grid(True, linestyle=':', alpha=0.6)
-ax_t.legend(loc='upper right', frameon=True, framealpha=0.92, fontsize=8.5)
+    # -------------------------------------------------------------------------
+    # Terminal Summary Table
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print(f"STRUCTURAL TELEMETRY SUMMARY (Run: {os.path.basename(output_folder)})")
+    print("=" * 80)
+    print(f"Wing Half-Span (b/2):            {half_span:.3f} m")
+    print(f"Allowable Stress (sigma_allow):  {allowable_stress:.1f} MPa")
+    print(f"Peak Element Stress:             {np.max(elem_stress):.2f} MPa")
+    print(f"Peak Continuous Spline Stress:   {np.max(stress_field):.2f} MPa")
+    print(f"Number of Beam Elements:         {len(y_elem_mid)}")
+    print(f"Number of Thickness Stations:    {num_dvs}")
+    print("-" * 80)
+    print(f"{'Elem':4s} | {'y_mid [m]':9s} | {'Chord [m]':9s} | {'Width [cm]':10s} | {'Height [cm]':11s} | {'ttop [mm]':9s} | {'tweb [mm]':9s} | {'Stress [MPa]':12s}")
+    print("-" * 80)
+    for i in range(len(y_elem_mid)):
+        print(f"{i:4d} | {y_elem_mid[i]:9.3f} | {chords[i]:9.3f} | {widths[i]*100.0:10.2f} | {heights[i]*100.0:11.2f} | {ttop_elem[i]:9.2f} | {tweb_elem[i]:9.2f} | {elem_stress[i]:12.2f}")
+    print("-" * 80)
+    print(f"{'Station':7s} | {'eta_peak':8s} | {'Span y [m]':10s} | {'Aggregated Stress [MPa]':24s} | {'Allowable [MPa]':16s} | {'Status':8s}")
+    print("-" * 80)
+    for j in range(num_dvs):
+        st_val = dv_stress[j]
+        status = "FEASIBLE" if st_val <= (allowable_stress + 1e-4) else "VIOLATED"
+        print(f"{j:7d} | {thickness_peaks[j]:8.4f} | {y_peaks[j]:10.3f} | {st_val:24.2f} | {allowable_stress:16.1f} | {status:8s}")
+    print("=" * 80 + "\n")
 
-# ---------------- Subplot (0, 1): Spanwise Stress Distribution vs Allowable ----------------
-ax_s = axes[0, 1]
-ax_s.plot(y_fine, stress_field, '-', color=c_stress, linewidth=2.5, label=f'Cubic Stress Spline $S(y)$ (Peak: {np.max(stress_field):.1f} MPa)')
-ax_s.plot(y_elem_mid, elem_stress, 'o', color=c_elem, markersize=6.5, markeredgecolor='black', label=f'{len(elem_stress)} FEA Beam Elements Maximum Stress')
-ax_s.axhline(allowable_stress, color=c_allow, linestyle='--', linewidth=2.0, label=f'Allowable Stress Limit $\\sigma_{{\\mathrm{{allow}}}} = {allowable_stress:.1f}$ MPa')
-ax_s.plot(y_peaks, dv_stress, '^', color='black', markersize=8, label='Station Aggregated Constraint Stresses')
+    return out_local
 
-ax_s.fill_between(y_fine, 0, stress_field, color=c_stress, alpha=0.12)
-ax_s.fill_between(y_fine, allowable_stress, max(80.0, allowable_stress * 1.25), color=c_allow, alpha=0.08, label=f'Infeasible Region ($>{allowable_stress:.0f}$ MPa)')
 
-ax_s.set_xlabel("Spanwise Coordinate $y$ [m]", fontsize=11, fontweight='bold')
-ax_s.set_ylabel(r"Peak Cross-Sectional Stress $\sigma$ [MPa]", fontsize=11, fontweight='bold')
-ax_s.set_title(f"(b) Spanwise Stress Distribution ({load_factor_val:.1f}g Structural Sizing Load)", fontsize=11.5, fontweight='bold', pad=8)
-ax_s.set_xlim([0.0, half_span * 1.02])
-ax_s.set_ylim([-5.0, max(allowable_stress * 1.15, np.max(stress_field) * 1.15)])
-ax_s.grid(True, linestyle=':', alpha=0.6)
-ax_s.legend(loc='lower left', frameon=True, framealpha=0.92, fontsize=8.5)
-
-# Annotation on active root stress
-ax_s.annotate(
-    f"Active Root Constraint\n$\\sigma(0) = {stress_field[0]:.2f}$ MPa\n$S'(0) = 0$ (Symmetry)",
-    xy=(0.0, stress_field[0]), xytext=(0.18 * half_span, min(65.0, allowable_stress * 0.88)),
-    arrowprops=dict(arrowstyle="->", color="black", lw=1.3),
-    fontsize=8.5, fontweight='bold', bbox=dict(boxstyle="round,pad=0.3", fc="#ffffdd", ec="gray", lw=0.8)
-)
-
-# ---------------- Subplot (1, 0): Internal Wingbox Dimensions ----------------
-ax_b = axes[1, 0]
-ax_b.plot(y_elem_mid, widths * 100.0, 'o-', color=c_box, linewidth=2.2, label=r'Box Width $w(y) = 0.40 c(y)$ [cm]')
-ax_b.plot(y_elem_mid, heights * 100.0, 's-', color='#8c564b', linewidth=2.2, label=r'Box Height $h(y) = 0.50 t_{\mathrm{local}}(y)$ [cm]')
-ax_b.plot(y_elem_mid, chords * 100.0, ':', color='gray', linewidth=1.8, label=r'Full Local Chord $c(y)$ [cm]')
-
-ax_b.set_xlabel("Spanwise Coordinate $y$ [m]", fontsize=11, fontweight='bold')
-ax_b.set_ylabel("Cross-Section Dimension [cm]", fontsize=11, fontweight='bold')
-ax_b.set_title("(c) Internal Wingbox Spar Dimensions Along the Span", fontsize=11.5, fontweight='bold', pad=8)
-ax_b.set_xlim([0.0, half_span * 1.02])
-ax_b.set_ylim(bottom=0.0)
-ax_b.grid(True, linestyle=':', alpha=0.6)
-ax_b.legend(loc='upper right', frameon=True, framealpha=0.92, fontsize=8.5)
-
-# ---------------- Subplot (1, 1): Structural Safety Margin Profile ----------------
-ax_m = axes[1, 1]
-# Margin of Safety: MS = (sigma_allow / sigma_actual) - 1
-stress_pos = np.maximum(stress_field, 0.5)
-ms_field = (allowable_stress / stress_pos) - 1.0
-
-ax_m.plot(y_fine, ms_field, '-', color='#2b83ba', linewidth=2.5, label=r'Margin of Safety $\mathrm{MS} = \frac{\sigma_{\mathrm{allow}}}{\sigma} - 1$')
-ax_m.axhline(0.0, color=c_allow, linestyle='--', linewidth=1.8, label=r'Critical Yield Boundary ($\mathrm{MS} = 0$)')
-ax_m.plot(y_peaks, (allowable_stress / dv_stress) - 1.0, '^', color='black', markersize=8, label='Station MS Points')
-
-ax_m.set_xlabel("Spanwise Coordinate $y$ [m]", fontsize=11, fontweight='bold')
-ax_m.set_ylabel(r"Margin of Safety $\mathrm{MS}$", fontsize=11, fontweight='bold')
-ax_m.set_title("(d) Structural Margin of Safety Across the Span", fontsize=11.5, fontweight='bold', pad=8)
-ax_m.set_xlim([0.0, half_span * 1.02])
-ax_m.set_ylim([-0.1, 4.0])
-ax_m.grid(True, linestyle=':', alpha=0.6)
-ax_m.legend(loc='upper right', frameon=True, framealpha=0.92, fontsize=8.5)
-
-ax_m.annotate(
-    "Inboard Sizing Active\n$\\mathrm{MS} \\approx 0.00$ (Fully Stressed Spar)",
-    xy=(0.05 * half_span, 0.0), xytext=(0.25 * half_span, 0.8),
-    arrowprops=dict(arrowstyle="->", color="black", lw=1.3),
-    fontsize=8.5, fontweight='bold', bbox=dict(boxstyle="round,pad=0.3", fc="#ddffdd", ec="gray", lw=0.8)
-)
-
-plt.tight_layout()
-
-# Save figure in output folder and artifact directory
-out_fig_name = 'structural_thickness_and_stress_analysis.png'
-out_local = os.path.join(output_folder, out_fig_name)
-plt.savefig(out_local, dpi=200, bbox_inches='tight')
-print(f"\nUpdated structural distribution figure saved to: {out_local}")
-
-if os.path.exists(artifact_dir):
-    out_artifact = os.path.join(artifact_dir, out_fig_name)
-    shutil.copy2(out_local, out_artifact)
-    print(f"Figure also saved to artifact directory: {out_artifact}")
-
-plt.close()
-
-# -------------------------------------------------------------------------
-# Terminal Summary Table
-# -------------------------------------------------------------------------
-print("\n" + "=" * 80)
-print(f"STRUCTURAL TELEMETRY SUMMARY (Run: {os.path.basename(output_folder)})")
-print("=" * 80)
-print(f"Wing Half-Span (b/2):            {half_span:.3f} m")
-print(f"Allowable Stress (sigma_allow):  {allowable_stress:.1f} MPa")
-print(f"Peak Element Stress:             {np.max(elem_stress):.2f} MPa")
-print(f"Peak Continuous Spline Stress:   {np.max(stress_field):.2f} MPa")
-print(f"Number of Beam Elements:         {len(y_elem_mid)}")
-print(f"Number of Thickness Stations:    {num_dvs}")
-print("-" * 80)
-print(f"{'Elem':4s} | {'y_mid [m]':9s} | {'Chord [m]':9s} | {'Width [cm]':10s} | {'Height [cm]':11s} | {'ttop [mm]':9s} | {'tweb [mm]':9s} | {'Stress [MPa]':12s}")
-print("-" * 80)
-for i in range(len(y_elem_mid)):
-    print(f"{i:4d} | {y_elem_mid[i]:9.3f} | {chords[i]:9.3f} | {widths[i]*100.0:10.2f} | {heights[i]*100.0:11.2f} | {ttop_elem[i]:9.2f} | {tweb_elem[i]:9.2f} | {elem_stress[i]:12.2f}")
-print("-" * 80)
-print(f"{'Station':7s} | {'eta_peak':8s} | {'Span y [m]':10s} | {'Aggregated Stress [MPa]':24s} | {'Allowable [MPa]':16s} | {'Status':8s}")
-print("-" * 80)
-for j in range(num_dvs):
-    st_val = dv_stress[j]
-    status = "FEASIBLE" if st_val <= (allowable_stress + 1e-4) else "VIOLATED"
-    print(f"{j:7d} | {thickness_peaks[j]:8.4f} | {y_peaks[j]:10.3f} | {st_val:24.2f} | {allowable_stress:16.1f} | {status:8s}")
-print("=" * 80 + "\n")
+if __name__ == '__main__':
+    generate_structural_plots()
