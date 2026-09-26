@@ -7,27 +7,47 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import CubicSpline
 
 # Ensure all relevant packages are on sys.path
-sys.path.insert(0, '/home/andrew/optimization/VortexAD')
-sys.path.insert(0, '/home/andrew/optimization/aframe')
-sys.path.insert(0, '/home/andrew/optimization/csdl')
-sys.path.insert(0, '/home/andrew/optimization/CSDL_alpha')
-sys.path.insert(0, '/home/andrew/optimization/lsdo_geo')
-sys.path.insert(0, '/home/andrew/optimization/lsdo_geo/examples/showcase_examples/rectangular_wing')
-
-# Paths
 import glob
-if len(sys.argv) > 1:
-    output_folder = os.path.abspath(sys.argv[1])
+script_dir = os.path.dirname(os.path.abspath(__file__))
+repo_root = os.path.abspath(os.path.join(script_dir, '../../../..'))
+opt_root = os.path.abspath(os.path.join(repo_root, '..'))
+
+for p in [
+    repo_root,
+    os.path.join(repo_root, 'examples/showcase_examples/rectangular_wing'),
+    os.path.join(opt_root, 'lsdo_b_splines_cython'),
+    os.path.join(opt_root, 'VortexAD'),
+    os.path.join(opt_root, 'aframe'),
+    os.path.join(opt_root, 'csdl'),
+    os.path.join(opt_root, 'CSDL_alpha'),
+    os.path.join(opt_root, 'lsdo_geo'),
+    os.path.join(opt_root, 'lsdo_function_spaces'),
+    os.path.join(opt_root, 'modopt'),
+]:
+    if os.path.exists(p) and p not in sys.path:
+        sys.path.insert(0, p)
+
+# Determine Target Optimization Output Directory & Cache Path
+if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
+    arg_target = os.path.abspath(sys.argv[1])
+    if os.path.isfile(arg_target) and arg_target.endswith('.npz'):
+        cache_file = arg_target
+        output_folder = os.path.dirname(arg_target)
+    else:
+        output_folder = arg_target
+        cache_file = os.path.join(output_folder, 'lift_and_moment_data.npz')
 else:
-    output_base_dir = '/home/andrew/optimization/lsdo_geo/rectangular_wing_to_bwb_aerostructural_optimization_outputs'
+    output_base_dir = os.path.join(repo_root, 'rectangular_wing_to_bwb_aerostructural_optimization_outputs')
     output_folders = glob.glob(os.path.join(output_base_dir, '*'))
+    if not output_folders:
+        raise FileNotFoundError(f"No optimization output runs found in {output_base_dir}")
     output_folder = max(output_folders, key=os.path.getmtime)
+    cache_file = os.path.join(output_folder, 'lift_and_moment_data.npz')
 
 print(f"Target optimization output directory: {output_folder}")
-cache_file = os.path.join(output_folder, 'lift_and_moment_data.npz')
-artifact_dir = '/home/andrew/.gemini/antigravity/brain/47a5c338-9be3-486f-abb2-1deefc5b2d19'
+artifact_dir = os.environ.get('ARTIFACT_DIR', '')
 
-force_rerun = False
+force_rerun = '--force' in sys.argv or '-f' in sys.argv
 
 if os.path.exists(cache_file) and not force_rerun:
     print(f"Loading cached panel telemetry from: {cache_file}")
@@ -219,14 +239,14 @@ c_ss = '#d62728'
 # ----------------- Subplot 1: Lift Distribution Curves -----------------
 # 1.0g Cruise
 ax_l.plot(y_fine, results['dL_c_smooth'], '-', color=c_cruise, linewidth=2.4,
-          label=f"Cruise 1.0g Curve ($L_{{\\text{{half}}}} = {results['tot_Lc']:.1f}$ N, $L_{{\\text{{total}}}} = {2*results['tot_Lc']:.1f}$ N)")
+          label=f"Cruise 1.0g Curve ($L_{{\\mathrm{{half}}}} = {results['tot_Lc']:.1f}$ N, $L_{{\\mathrm{{total}}}} = {2*results['tot_Lc']:.1f}$ N)")
 ax_l.scatter(y_centers, results['dL_c_raw'], color=c_cruise, s=38, zorder=5,
              edgecolors='white', linewidth=0.8, label="Cruise Strip Values")
 ax_l.fill_between(y_fine, results['dL_c_smooth'], alpha=0.15, color=c_cruise)
 
 # Structural Sizing Pull-Up Maneuver
 ax_l.plot(y_fine, results['dL_ss_smooth'], '-', color=c_ss, linewidth=2.4,
-          label=f"Structural Sizing (SS) Curve ($L_{{\\text{{half}}}} = {results['tot_Lss']:.1f}$ N, $L_{{\\text{{total}}}} = {2*results['tot_Lss']:.1f}$ N)")
+          label=f"Structural Sizing (SS) Curve ($L_{{\\mathrm{{half}}}} = {results['tot_Lss']:.1f}$ N, $L_{{\\mathrm{{total}}}} = {2*results['tot_Lss']:.1f}$ N)")
 ax_l.scatter(y_centers, results['dL_ss_raw'], color=c_ss, s=38, zorder=5,
              edgecolors='white', linewidth=0.8, label="Sizing Strip Values")
 ax_l.fill_between(y_fine, results['dL_ss_smooth'], alpha=0.15, color=c_ss)
@@ -284,7 +304,7 @@ plt.savefig(lift_fig_path, dpi=200, bbox_inches='tight')
 print(f"Updated lift/moment distribution figure saved to: {lift_fig_path}")
 
 # Also copy/save to artifact directory if available
-if os.path.exists(artifact_dir):
+if artifact_dir and os.path.exists(artifact_dir):
     artifact_fig_path = os.path.join(artifact_dir, 'lift_and_moment_combined_analysis.png')
     plt.savefig(artifact_fig_path, dpi=200, bbox_inches='tight')
     print(f"Figure also saved to artifact directory: {artifact_fig_path}")

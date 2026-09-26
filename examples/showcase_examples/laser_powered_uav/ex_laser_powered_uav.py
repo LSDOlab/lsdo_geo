@@ -123,9 +123,14 @@ right_propeller_sectional_parameterization = SectionalParameterization(name="rig
 
 # Parameterization States
 # Wing (symmetric chord stretch and span stretch across centerline)
-wing_root_chord_stretch = csdl.Variable(value=0., name="wing_root_chord_stretch")
-wing_tip_chord_stretch = csdl.Variable(value=0., name="wing_tip_chord_stretch")
+# wing_root_chord_stretch = csdl.Variable(value=0., name="wing_root_chord_stretch")
+# wing_tip_chord_stretch = csdl.Variable(value=0., name="wing_tip_chord_stretch")
+wing_chord_stretches = csdl.Variable(shape=(2,), value=0., name="wing_chord_stretches")
+wing_root_chord_stretch = wing_chord_stretches[0]
+wing_tip_chord_stretch = wing_chord_stretches[1]
 wing_span_stretch = csdl.Variable(value=0., name="wing_span_stretch")
+
+
 
 wing_mid_chord = 0.5 * (wing_tip_chord_stretch + wing_root_chord_stretch)
 wing_sectional_chord_stretches = csdl.concatenate((
@@ -144,8 +149,9 @@ wing_sectional_span_translations = csdl.concatenate((
 ))
 
 # Tail (symmetric chord stretch, span stretch, and longitudinal translation)
-tail_root_chord_stretch = csdl.Variable(value=0., name="tail_root_chord_stretch")
-tail_tip_chord_stretch = csdl.Variable(value=0., name="tail_tip_chord_stretch")
+tail_chord_stretches = csdl.Variable(shape=(2,), value=0., name="tail_chord_stretches")
+tail_root_chord_stretch = tail_chord_stretches[0]
+tail_tip_chord_stretch = tail_chord_stretches[1]
 tail_span_stretch = csdl.Variable(value=0., name="tail_span_stretch")
 tail_translation_x = csdl.Variable(value=0., name="tail_translation_x")
 
@@ -245,11 +251,12 @@ wing_tip_chord_l_comp = geometry.evaluate(wing_te_left)[0] - geometry.evaluate(w
 wing_tip_chord_r_comp = geometry.evaluate(wing_te_right)[0] - geometry.evaluate(wing_le_right)[0]
 wing_taper_comp = (wing_tip_chord_l_comp + wing_tip_chord_r_comp) / (2 * wing_root_chord_comp)
 
-wing_cs = csdl.linear_combination(geometry.evaluate(wing_le_line_para), geometry.evaluate(wing_te_line_para), 5)
-u_vw = wing_cs[1:, :] - wing_cs[:-1, :]
-v_vw = wing_cs[:, 1:] - wing_cs[:, :-1]
-pa_w = 0.5 * csdl.cross(u_vw[:, :-1], v_vw[:-1, :], axis=2) + 0.5 * csdl.cross(u_vw[:, 1:], v_vw[1:, :], axis=2)
-wing_area_comp = csdl.sum(csdl.norm(pa_w, axes=(2,)))
+wing_le_eval = geometry.evaluate(wing_le_line_para)
+wing_te_eval = geometry.evaluate(wing_te_line_para)
+chords_w = csdl.norm(wing_te_eval - wing_le_eval, axes=(1,))
+mid_w = 0.5 * (wing_le_eval + wing_te_eval)
+dl_w = csdl.norm(mid_w[1:] - mid_w[:-1], axes=(1,))
+wing_area_comp = csdl.sum(0.5 * (chords_w[:-1] + chords_w[1:]) * dl_w)
 wing_ar_comp = wing_span_comp**2 / wing_area_comp
 
 # Computed Tail Metrics
@@ -258,11 +265,12 @@ tail_root_chord_comp = geometry.evaluate(tail_te_center)[0] - geometry.evaluate(
 tail_tip_chord_l_comp = geometry.evaluate(tail_te_left)[0] - geometry.evaluate(tail_le_left)[0]
 tail_tip_chord_r_comp = geometry.evaluate(tail_te_right)[0] - geometry.evaluate(tail_le_right)[0]
 
-tail_cs = csdl.linear_combination(geometry.evaluate(tail_le_line_para), geometry.evaluate(tail_te_line_para), 4)
-u_vt = tail_cs[1:, :] - tail_cs[:-1, :]
-v_vt = tail_cs[:, 1:] - tail_cs[:, :-1]
-pa_t = 0.5 * csdl.cross(u_vt[:, :-1], v_vt[:-1, :], axis=2) + 0.5 * csdl.cross(u_vt[:, 1:], v_vt[1:, :], axis=2)
-tail_area_comp = csdl.sum(csdl.norm(pa_t, axes=(2,)))
+tail_le_eval = geometry.evaluate(tail_le_line_para)
+tail_te_eval = geometry.evaluate(tail_te_line_para)
+chords_t = csdl.norm(tail_te_eval - tail_le_eval, axes=(1,))
+mid_t = 0.5 * (tail_le_eval + tail_te_eval)
+dl_t = csdl.norm(mid_t[1:] - mid_t[:-1], axes=(1,))
+tail_area_comp = csdl.sum(0.5 * (chords_t[:-1] + chords_t[1:]) * dl_t)
 tail_ar_comp = tail_span_comp**2 / tail_area_comp
 tail_taper_comp = (tail_tip_chord_l_comp + tail_tip_chord_r_comp) / (2 * tail_root_chord_comp)
 
@@ -306,11 +314,9 @@ print()
 parameterization_solver = ParameterizationSolver()
 
 # Solver States
-parameterization_solver.add_state(wing_root_chord_stretch)
-parameterization_solver.add_state(wing_tip_chord_stretch)
+parameterization_solver.add_state(wing_chord_stretches)
 parameterization_solver.add_state(wing_span_stretch)
-parameterization_solver.add_state(tail_root_chord_stretch)
-parameterization_solver.add_state(tail_tip_chord_stretch)
+parameterization_solver.add_state(tail_chord_stretches)
 parameterization_solver.add_state(tail_span_stretch)
 parameterization_solver.add_state(tail_translation_x)
 parameterization_solver.add_state(fuselage_stretch)

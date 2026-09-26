@@ -878,14 +878,14 @@ num_constraints = np.sum([list_of_constraint_arrays[i].shape[0] for i in range(l
 print('Number of constraints: ', num_constraints)
 
 list_of_states_arrays = parameterization_solver.states
-num_states = np.sum([list_of_states_arrays[i].shape[0] for i in range(len(list_of_states_arrays))])
+num_states = np.sum([list_of_states_arrays[i].state.shape[0] for i in range(len(list_of_states_arrays))])
 print('Number of states: ', num_states)
 
 t1 = time.time()
 parameterization_solver.evaluate(parameterization_design_parameters)
 t2 = time.time()
 print('Time taken for parameterization evaluation: ', t2 - t1)
-geometry.plot()
+# geometry.plot()
 
 # endregion
 
@@ -918,8 +918,10 @@ jax_sim = csdl.experimental.JaxSimulator(
     gpu=False
 )
 
+t0 = time.time()
 jax_sim.run()
 t1 = time.time()
+print('Time taken for JAX compile + run simulation: ', t1 - t0)
 jax_sim.run()
 t2 = time.time()
 print('Time taken for JAX simulation: ', t2 - t1)
