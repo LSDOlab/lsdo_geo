@@ -1,7 +1,9 @@
 # region Imports and Setup
 
 from dataclasses import dataclass
-from typing import Union
+from typing import Union, Literal
+import sys
+import os
 import numpy.typing as npt
 import csdl_alpha as csdl
 import numpy as np
@@ -23,6 +25,29 @@ import modopt
 import meshio
 import pickle
 
+from physics_models.flight_conditions import (
+    compute_isa_troposphere,
+    get_nominal_flight_conditions,
+    CRUISE_ALTITUDE_M,
+    CRUISE_MACH,
+    SIZING_EQUIVALENT_SPEED_FACTOR,
+)
+from physics_models.wave_drag import (
+    setup_strip_projection_points,
+    compute_half_chord_sweep,
+    compute_strip_thickness_to_chord,
+    evaluate_wave_drag,
+)
+
+class CompatUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module.startswith('numpy._core'):
+            module = module.replace('numpy._core', 'numpy.core')
+        return super().find_class(module, name)
+
+_orig_pickle_load = pickle.load
+pickle.load = lambda f, **kwargs: CompatUnpickler(f, **kwargs).load()
+
 recorder = csdl.Recorder(inline=True)
 recorder.start()
 
@@ -31,8 +56,8 @@ geometry_directory = "examples/example_geometries/"
 file_name = "rectangular_wing_naca0012_10ar"
 
 # Resolution toggle: 'fast' (5 spanwise DVs, coarse mesh ~1,272 quads) vs 'full' (8 spanwise DVs, refined mesh 2,872 quads)
-resolution = 'fast'  # Options: 'fast' or 'full'
-# resolution = 'full'  # Options: 'fast' or 'full'
+# resolution = 'fast'  # Options: 'fast' or 'full'
+resolution = 'full'  # Options: 'fast' or 'full'
 
 if resolution == 'fast':
     num_stations = 5
@@ -45,6 +70,10 @@ elif resolution == 'full':
 else:
     raise ValueError(f"Unknown resolution: {resolution}. Must be 'fast' or 'full'.")
 
+# Diagnostic-only override: retain the active FFD parameterization while evaluating
+# the aerodynamic solver on a different surface/wake mesh in an isolated worker.
+aero_mesh_file_name = os.environ.get('BWB_AERO_MESH_FILE', mesh_file_name)
+
 num_chord_stations = num_stations
 num_thickness_stations = num_stations
 
@@ -53,8 +82,13 @@ num_thickness_stations = num_stations
 # and beam_neg1g FEA solve, accelerating optimization iterations by ~20-25%.
 include_neg1g_sizing = False
 
+# Induced drag objective formulation: 'fourier' (Prandtl lifting-line Fourier sine series, e <= 1.0)
+# vs 'trefftz' (VortexAD Trefftz-plane integration)
+# induced_drag_objective = 'mixed'  # Options: 'fourier' or 'trefftz' or 'mixed
+induced_drag_objective = 'trefftz'  # Options: 'fourier' or 'trefftz' or 'mixed
+
 # Geometric CAD control points are kept equivalent across resolutions (15 spanwise)
-num_spanwise_cp_target = 15
+num_spanwise_cp_target = 25     # was using 15 for the longest time, but I think this may help the geometry fit the desired profiles better
 
 geometry = import_geometry(
     geometry_directory + file_name + ".stp",
@@ -64,6 +98,8 @@ geometry = import_geometry(
 
 # Scale CAD geometry from baseline 10 m^2 wing to 1.0 m^2 tactical UAV wing
 # scale_factor = 1.0 / np.sqrt(10.0)  # = 0.31622776601683794
+
+# scale_factor = 1.0  # No scaling for initial testing
 
 # Scale CAD geometry from baseline 10 m span to 50 m span full-scale BWB size
 scale_factor = 7.5
@@ -154,6 +190,13 @@ for y_val in chord_station_y:
     chord_te_projections.append(geometry.project(np.array([1.0 * scale_factor, y_val, 0.0])))
     quarter_chord_projections.append(geometry.project(np.array([0.25 * scale_factor, y_val, 0.0])))
 
+# High-resolution quarter-chord sweep evaluation projections to strictly enforce sweep >= 0 across span
+num_sweep_eval_stations = 25
+sweep_eval_y = np.linspace(0.0, 5.0 * scale_factor, num_sweep_eval_stations)
+quarter_chord_sweep_projections = []
+for y_val in sweep_eval_y:
+    quarter_chord_sweep_projections.append(geometry.project(np.array([0.25 * scale_factor, y_val, 0.0])))
+
 # Project max thickness measurement points at x=0.3 for the 8 stations
 upper_thickness_projections = []
 lower_thickness_projections = []
@@ -168,18 +211,22 @@ for y_val in chord_station_y[1:]:  # skip root (index 0) since it's already at c
     chord_le_projections_left.append(geometry.project(np.array([0.0, -y_val, 0.0])))
     chord_te_projections_left.append(geometry.project(np.array([1.0 * scale_factor, -y_val, 0.0])))
 
-# Project wireframes along upper and lower wing skins to compute chord surface for planform area
-nx_area = 21  # chordwise grid resolution
-ny_area = 41  # spanwise grid resolution
-x_grid = np.linspace(0.0, 1.0 * scale_factor, nx_area)
-y_grid = np.linspace(-5.0 * scale_factor, 5.0 * scale_factor, ny_area)
-X_mesh, Y_mesh = np.meshgrid(x_grid, y_grid, indexing='ij')
+# Project dense spanwise leading and trailing edge lines to compute planform area via trapezoid rule
+ny_area = 31  # Dense spanwise resolution
+area_station_y = np.linspace(0.0, 5.0 * scale_factor, ny_area)
 
-upper_seed_pts = np.column_stack([X_mesh.ravel(), Y_mesh.ravel(), np.full(X_mesh.size, 0.05 * scale_factor)])
-lower_seed_pts = np.column_stack([X_mesh.ravel(), Y_mesh.ravel(), np.full(X_mesh.size, -0.05 * scale_factor)])
+area_le_physical = np.zeros((ny_area, 3))
+area_le_physical[:, 0] = 0.0
+area_le_physical[:, 1] = area_station_y
+area_le_physical[:, 2] = 0.0
 
-projected_upper_skin = geometry.project(upper_seed_pts, force_reprojection=False, direction=np.array([0, 0, -1]), plot=False)
-projected_lower_skin = geometry.project(lower_seed_pts, force_reprojection=False, direction=np.array([0, 0, 1]), plot=False)
+area_te_physical = np.zeros((ny_area, 3))
+area_te_physical[:, 0] = 1.0 * scale_factor
+area_te_physical[:, 1] = area_station_y
+area_te_physical[:, 2] = 0.0
+
+projected_area_le = geometry.project(area_le_physical, plot=False)
+projected_area_te = geometry.project(area_te_physical, plot=False)
 
 # Project line of beam nodes along the span at 25% chord for right half-span (y >= 0)
 num_beam_nodes = 15
@@ -208,10 +255,12 @@ lower_beam_seed = np.column_stack([np.full(num_beam_nodes, 0.25 * scale_factor),
 projected_upper_beam_mesh = geometry.project(upper_beam_seed, direction=np.array([0, 0, -1]), plot=False)
 projected_lower_beam_mesh = geometry.project(lower_beam_seed, direction=np.array([0, 0, 1]), plot=False)
 
-# Project 51 points along leading and trailing edges for 50-strip drag & geometry-based alpha
-num_drag_strips = 50
+# Project 101 points along leading and trailing edges for 100-strip refined drag & local Cl
+num_drag_strips = 100
 num_drag_nodes = num_drag_strips + 1
-y_drag_span = np.linspace(0.0, 4.99 * scale_factor, num_drag_nodes)
+b_tip_ref = 4.99 * scale_factor
+eta_drag = np.sin(0.5 * np.pi * np.linspace(0.0, 1.0, num_drag_nodes))
+y_drag_span = eta_drag * b_tip_ref
 
 le_drag_physical = np.zeros((num_drag_nodes, 3))
 le_drag_physical[:, 0] = 0.00
@@ -224,10 +273,34 @@ te_drag_physical[:, 0] = 1.00 * scale_factor
 te_drag_physical[:, 1] = y_drag_span
 te_drag_physical[:, 2] = 0.0
 projected_te_drag_mesh = geometry.project(te_drag_physical, plot=False)
+
+# Fixed paired upper/lower surface projection coordinates at 41 chordwise fractions
+# for every drag-strip center for live thickness-to-chord (t/c)_i evaluation:
+y_drag_centers_init = 0.5 * (y_drag_span[:-1] + y_drag_span[1:])
+strip_upper_seed, strip_lower_seed, strip_grid_shape = setup_strip_projection_points(
+    y_strip_centers=y_drag_centers_init,
+    scale_factor=scale_factor,
+    num_chord_fractions=41,
+    z_offset_ratio=0.05,
+)
+projected_strip_upper_skin = geometry.project(
+    strip_upper_seed,
+    force_reprojection=False,
+    direction=np.array([0, 0, -1]),
+    use_line_search=True,
+    plot=False,
+)
+projected_strip_lower_skin = geometry.project(
+    strip_lower_seed,
+    force_reprojection=False,
+    direction=np.array([0, 0, 1]),
+    use_line_search=True,
+    plot=False,
+)
 # endregion
 
 # region Mesh definitions
-mesh = meshio.read(geometry_directory + mesh_file_name + ".msh")
+mesh = meshio.read(geometry_directory + aero_mesh_file_name + ".msh")
 mesh.points = mesh.points * scale_factor
 
 points_orig = mesh.points
@@ -307,7 +380,91 @@ for i in range(num_right_panels):
         W_matrix[n, i] = (Y_beam[n+1] - y_p) / dy
         W_matrix[n+1, i] = (y_p - Y_beam[n]) / dy
 
+# Compute static panel-to-Fourier transformation matrix for lifting-line induced drag
+y_round = np.round(Y_panels_right, 4)
+y_unique = np.unique(y_round)
+main_stations = [y for y in y_unique if np.sum(y_round == y) == 40]
+num_strips = len(main_stations)
+
+W_strip = np.zeros((num_strips, num_right_panels))
+y_strip_centers = []
+for s_idx, y_val in enumerate(main_stations):
+    mask = (y_round == y_val)
+    W_strip[s_idx, mask] = 1.0
+    y_strip_centers.append(float(np.mean(Y_panels_right[mask])))
+
+# Merge tip cap panels into the final tip strip to guarantee complete vertical load accounting
+tip_mask = ~np.isin(y_round, main_stations)
+if np.any(tip_mask):
+    W_strip[-1, tip_mask] = 1.0
+
+y_strip_centers = np.array(y_strip_centers)
+b_tip_initial = float(np.max(Y_panels_right))
+eta_strips = y_strip_centers / b_tip_initial
+# Invariant polar angle theta in [pi/2, pi] corresponding to spanwise coordinate y in [0, b_tip]
+theta_strips = np.pi - np.arccos(eta_strips)
+
+num_fourier_terms = 16  if resolution == 'full' else 8
+# Odd harmonics n = 1, 3, 5, ..., 15
+n_fourier_odd = np.arange(1, 2 * num_fourier_terms, 2)
+K_fourier = np.sin(np.outer(n_fourier_odd, theta_strips)) / np.sin(theta_strips)
+T_fourier_panel = K_fourier @ W_strip  # shape (num_fourier_terms, num_right_panels)
+
+# Compute interpolation matrix from aero strip centers to refined drag strip centers
+y_aero_c = np.array(y_strip_centers)
+y_mid = 0.5 * (y_aero_c[:-1] + y_aero_c[1:])
+y_aero_bounds = np.concatenate([[0.0], y_mid, [b_tip_initial]])
+dy_aero_init = np.diff(y_aero_bounds)
+
+y_drag_centers_init = 0.5 * (y_drag_span[:-1] + y_drag_span[1:])
+num_aero_strips = len(y_aero_c)
+M_interp_drag = np.zeros((num_drag_strips, num_aero_strips))
+for i, yd in enumerate(y_drag_centers_init):
+    if yd <= y_aero_c[0]:
+        M_interp_drag[i, 0] = 1.0
+    elif yd >= y_aero_c[-1]:
+        M_interp_drag[i, -1] = 1.0
+    else:
+        k = np.searchsorted(y_aero_c, yd) - 1
+        t = (yd - y_aero_c[k]) / (y_aero_c[k+1] - y_aero_c[k])
+        M_interp_drag[i, k] = 1.0 - t
+        M_interp_drag[i, k+1] = t
+
+# Compute B-spline spaces and matrices for drag strip lift coefficient fitting
+# Exact 101-CP cubic B-spline fit with root symmetry S'(0)=0 for the 100 drag strip collocation points
+tau_drag_init = y_drag_centers_init / b_tip_ref
+tau_drag_colloc = np.concatenate([[0.0], tau_drag_init])
+int_knots_cl_101 = [np.mean(tau_drag_colloc[j:j+3]) for j in range(1, 98)]
+knots_cl_101 = np.concatenate([[0.0, 0.0, 0.0, 0.0], int_knots_cl_101, [1.0, 1.0, 1.0, 1.0]])
+
+cl_ss_fit_space = lfs.BSplineSpace(
+    num_parametric_dimensions=1,
+    degree=3,
+    coefficients_shape=(101,),
+    knots=(knots_cl_101,),
+)
+
+B100_cl_matrix = cl_ss_fit_space.compute_basis_matrix(tau_drag_init.reshape((-1, 1))).toarray()
+d_root_cl_row = np.zeros((1, 101))
+d_root_cl_row[0, 0] = -1.0
+d_root_cl_row[0, 1] = 1.0
+
+M_cl_ss_sys = np.vstack([B100_cl_matrix, d_root_cl_row])
+M_cl_ss_inv = np.linalg.inv(M_cl_ss_sys)
+
+# Evaluation points corresponding to the design variable stations (peaks) and intermediate points
+# exactly matching the stress fitting/evaluation/aggregation architecture
+station_cl_peaks = np.linspace(0.0, 1.0, num_stations)
+eval_cl_points_list = []
+for i in range(num_stations - 1):
+    eval_cl_points_list.append(station_cl_peaks[i])
+    pts = np.linspace(station_cl_peaks[i], station_cl_peaks[i+1], 4)[1:3]
+    eval_cl_points_list.extend(pts)
+eval_cl_points_list.append(station_cl_peaks[-1])
+eval_cl_points_arr = np.array(eval_cl_points_list).reshape((-1, 1))  # shape (3 * num_stations - 2, 1)
+
 # endregion
+
 
 # endregion
 
@@ -315,7 +472,7 @@ for i in range(num_right_panels):
 # Construct a Free Form Deformation (FFD) block around the geometry
 # region Create Parameterization Objects
 # Camber formulation option: adds 3x5 (fast) or 3x8 (full) FFD camber DVs
-include_camber = False  # Options: True or False
+include_camber = True  # Options: True or False
 
 # Elevator formulation option: default off when camber is on
 # include_elevator = False if include_camber else True  # Options: True or False
@@ -329,7 +486,8 @@ ffd_degree_chordwise = 2 if include_camber else 1
 # Note: This FFD block construction is one of a few helper functions that can be used to create a FFD block.
 #       The "manual" method is to use construct_ffd_block_from_corners, which allows for defining the coefficients directly.
 ffd_block = construct_ffd_block_around_entities(entities=geometry, 
-                                                num_coefficients=(num_ffd_coefficients_chordwise, num_ffd_sections, 2), degree=(ffd_degree_chordwise, 3, 1))
+                                                num_coefficients=(num_ffd_coefficients_chordwise, num_ffd_sections, 2),
+                                                degree=(ffd_degree_chordwise, 3, 1))
 # Define an axial sectional parameterization for the FFD volume. 
 # This views the FFD volume as a series of 2D sections (as defined by the control points) 
 # that can be allowed to stretch, translate, and rotate independently.
@@ -346,14 +504,17 @@ ffd_sectional_parameterization = SectionalParameterization(
 # # Formulation flag:
 # 'ar_area'   -> Design variables: chord DVs, Aspect Ratio (AR), and pitch (planform area fixed at 10)
 # 'chord_span' -> Design variables: chord stretch DVs, sweep DVs, span stretch DV, elevator angle, pitch, pitch_3g
-formulation = 'ar_area'  # Options: 'ar_area' or 'chord_span'
+ParamerizationType = Literal['ar_area', 'chord_span']
+# formulation = 'chord_span'  # Options: 'ar_area' or 'chord_span'
+# formulation = 'ar_area'  # Options: 'ar_area' or 'chord_span'
+formulation : ParamerizationType = 'ar_area'
 
 pitch = csdl.Variable(value=5.*np.pi/180) # pitch angle in radians
 elevator_angle = csdl.Variable(value=0.0) # elevator deflection angle in radians
 pitch_ss = csdl.Variable(value=10.0*np.pi/180) # pitch angle for pull-up structural sizing maneuver in radians
 if include_neg1g_sizing:
     pitch_neg1g = csdl.Variable(value=-5.0*np.pi/180) # pitch angle for -1.0g push-down sizing maneuver in radians
-payload_cg = csdl.Variable(value=0.40) # payload CG location as fraction of root chord (0.05 to 0.95)
+payload_cg = csdl.Variable(value=0.25) # payload CG location as fraction of root chord (0.05 to 0.95)
 
 @dataclass
 class DVInfo:
@@ -365,8 +526,8 @@ class DVInfo:
 init_file = 'rectangular_wing_to_bwb_aerostructural_optimization_outputs/2026-09-09_12.44.58.866121/x.out'
 
 thickness_space = lfs.BSplineSpace(num_parametric_dimensions=1, degree=2, coefficients_shape=(num_thickness_stations,))
-ttop_dvs = csdl.Variable(shape=(num_thickness_stations,), value=np.ones(num_thickness_stations) * 0.001)
-tweb_dvs = csdl.Variable(shape=(num_thickness_stations,), value=np.ones(num_thickness_stations) * 0.001)
+ttop_dvs = csdl.Variable(shape=(num_thickness_stations,), value=np.ones(num_thickness_stations) * 0.01)
+tweb_dvs = csdl.Variable(shape=(num_thickness_stations,), value=np.ones(num_thickness_stations) * 0.01)
 
 twist_lower = np.full(num_chord_stations, -15.0 * np.pi / 180.0)
 twist_lower[0] = 0.0  # fix root twist to 0
@@ -387,16 +548,16 @@ if formulation == 'ar_area':
     twist_dvs = csdl.Variable(shape=(num_chord_stations,), value=np.zeros(num_chord_stations))
 
     design_variables: dict[str, DVInfo] = {
-        'taper_dvs': DVInfo(variable=taper_dvs, lower=0.10, upper=5.0, scaler=2.0),
+        'taper_dvs': DVInfo(variable=taper_dvs, lower=0.15, upper=5.0, scaler=1.0),
         'aspect_ratio': DVInfo(variable=aspect_ratio, lower=2.0, upper=15.0, scaler=0.5),
         # 'sweep_angle_dvs': DVInfo(variable=sweep_angle_dvs, lower=-10.0*np.pi/180, upper=45.0*np.pi/180, scaler=1.e1),
-        'sweep_angle_dvs': DVInfo(variable=sweep_angle_dvs, lower=0.0*np.pi/180, upper=70.0*np.pi/180, scaler=1.e1),
+        'sweep_angle_dvs': DVInfo(variable=sweep_angle_dvs, lower=0.0*np.pi/180, upper=60.0*np.pi/180, scaler=1.e1),
         'twist_dvs': DVInfo(variable=twist_dvs, lower=twist_lower, upper=twist_upper, scaler=1.e1),
         'pitch': DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
-        # 'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
-        # 'payload_cg': DVInfo(variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1),
-        # 'ttop_dvs': DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.1, scaler=5.e3),
-        # 'tweb_dvs': DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.1, scaler=5.e3),
+        'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
+        'payload_cg': DVInfo(variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1),
+        'ttop_dvs': DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.5, scaler=5.e3),
+        'tweb_dvs': DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.5, scaler=5.e3),
     }
     if include_elevator:
         design_variables['elevator_angle'] = DVInfo(variable=elevator_angle, lower=-25.0*np.pi/180, upper=25.0*np.pi/180, scaler=1.e1)
@@ -445,8 +606,8 @@ elif formulation == 'chord_span':
     init_pitch_ss = 10.0 * np.pi / 180.0
     if include_neg1g_sizing:
         init_pitch_neg1g = -5.0 * np.pi / 180.0
-    init_ttop_val = np.ones(num_thickness_stations) * 0.001
-    init_tweb_val = np.ones(num_thickness_stations) * 0.001
+    init_ttop_val = np.ones(num_thickness_stations) * 0.02
+    init_tweb_val = np.ones(num_thickness_stations) * 0.02
 
     warm_start = False
 
@@ -464,14 +625,15 @@ elif formulation == 'chord_span':
     tweb_dvs.value = init_tweb_val
 
     initial_chord = 1.0 * scale_factor  # 0.3162 m baseline chord
-    chord_stretch_lower = -0.9 * initial_chord  # -0.3004 m (prevents chord collapsing below 5% of baseline)
-    chord_stretch_upper = 4.0 * initial_chord    # 1.2649 m
+    chord_stretch_lower = -0.85 * initial_chord  # (prevents chord collapsing below 15% of baseline)
+    chord_stretch_upper = 4.0 * initial_chord    
 
     initial_thickness = 0.12 * initial_chord  # 0.0379 m baseline NACA 0012 thickness
     thickness_stretch_lower = -0.95 * initial_thickness
     thickness_stretch_upper = 4.0 * initial_thickness    # 0.1518 m
 
-    sweep_lower = np.full(num_chord_stations, -0.5 * scale_factor)
+    # sweep_lower = np.full(num_chord_stations, -0.5 * scale_factor)
+    sweep_lower = np.full(num_chord_stations, -0. * scale_factor)
     sweep_lower[0] = 0.0
     sweep_upper = np.full(num_chord_stations, 4.0 * scale_factor)
     sweep_upper[0] = 0.0
@@ -488,8 +650,8 @@ elif formulation == 'chord_span':
         'pitch': DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
         'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
         'payload_cg': DVInfo(variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1),
-        'ttop_dvs': DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.05, scaler=5.e3),
-        'tweb_dvs': DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.05, scaler=5.e3),
+        'ttop_dvs': DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.5, scaler=5.e3),
+        'tweb_dvs': DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.5, scaler=5.e3),
     }
     if include_elevator:
         design_variables['elevator_angle'] = DVInfo(variable=elevator_angle, lower=-25.0*np.pi/180, upper=25.0*np.pi/180, scaler=1.e1)
@@ -568,27 +730,27 @@ if include_elevator:
 
 wingspan = geometry.evaluate(leading_edge_right)[1] - geometry.evaluate(leading_edge_left)[1] # type: ignore
 
-# Evaluate local sectional chords and thicknesses at the 5 spanwise stations
+# Evaluate local sectional chords, thicknesses, and spanwise coordinates at right half-span stations
+chord_le_pts = [geometry.evaluate(chord_le_projections[i]) for i in range(num_chord_stations)]
+chord_te_pts = [geometry.evaluate(chord_te_projections[i]) for i in range(num_chord_stations)]
 local_chords = [
-    geometry.evaluate(chord_te_projections[i])[0] - geometry.evaluate(chord_le_projections[i])[0]
+    chord_te_pts[i][0] - chord_le_pts[i][0]
     for i in range(num_chord_stations)
 ]
 local_thicknesses = [
     geometry.evaluate(upper_thickness_projections[i])[2] - geometry.evaluate(lower_thickness_projections[i])[2]
     for i in range(num_chord_stations)
 ]
+# Planform area computed via midpoint/trapezoid rule on dense spanwise stations matching wireframe grid (half-wing * 2 for symmetry):
+area_le_pts = geometry.evaluate(projected_area_le, plot=False)
+area_te_pts = geometry.evaluate(projected_area_te, plot=False)
+dense_chords = area_te_pts[:, 0] - area_le_pts[:, 0]
+dense_y = area_le_pts[:, 1]
 
-# Planform area computed from upper and lower skin surface grid projections:
-upper_skin_pts = geometry.evaluate(projected_upper_skin, plot=False)
-lower_skin_pts = geometry.evaluate(projected_lower_skin, plot=False)
-chord_surface_pts = 0.5 * (upper_skin_pts + lower_skin_pts)
-chord_surface_grid = csdl.reshape(chord_surface_pts, (nx_area, ny_area, 3))
-
-v_x = chord_surface_grid[1:, :-1, :] - chord_surface_grid[:-1, :-1, :]
-v_y = chord_surface_grid[:-1, 1:, :] - chord_surface_grid[:-1, :-1, :]
-area_vectors = csdl.cross(v_x, v_y, axis=2)
-element_areas = csdl.norm(area_vectors, axes=(2,))
-planform_area = csdl.sum(element_areas)
+c_mid = 0.5 * (dense_chords[:-1] + dense_chords[1:])
+dy = dense_y[1:] - dense_y[:-1]
+half_planform_area = csdl.sum(c_mid * dy)
+planform_area = 2.0 * half_planform_area
 
 aspect_ratio_calc = (wingspan**2) / planform_area
 
@@ -603,9 +765,12 @@ if formulation == 'ar_area':
     geometric_variables = GeometricVariables()
     # Enforce normalized chord profile (taper ratios) at stations 1 to 7
     for i in range(1, num_chord_stations):
-        normalized_chord = local_chords[i] / local_chords[0]
-        geometric_variables.add_variable(normalized_chord, taper_dvs[i - 1], penalty_value=None)
-    
+        # normalized_chord = local_chords[i] / local_chords[0]
+        # geometric_variables.add_variable(normalized_chord, taper_dvs[i - 1], penalty_value=None)
+
+        # Apply operation inversion to remove some nonlinearity in the solve
+        geometric_variables.add_variable(local_chords[i]/local_chords[0].value, local_chords[0]*taper_dvs[i - 1]/local_chords[0].value, penalty_value=None)
+
     # Enforce constant thickness-to-chord ratio = 0.12 at all stations (normalized by 0.12)
     for i in range(num_chord_stations):
         tc_ratio = local_thicknesses[i] / local_chords[i]
@@ -613,17 +778,37 @@ if formulation == 'ar_area':
     
     # Enforce planform area and aspect ratio simultaneously (AR normalized by reference 10.0)
     geometric_variables.add_variable(planform_area / (10*scale_factor**2), planform_area.value / (10*scale_factor**2), penalty_value=None)
-    geometric_variables.add_variable(aspect_ratio_calc / 10.0, aspect_ratio / 10.0, penalty_value=None)
+    # geometric_variables.add_variable(aspect_ratio_calc / 10.0, aspect_ratio / 10.0, penalty_value=None)
+
+    # Apply operation inversion to remove some nonlinearity in the solve
+    geometric_variables.add_variable(wingspan**2 / (10.0 * 10*scale_factor**2),
+                                     aspect_ratio * planform_area.value / (10.0 * 10*scale_factor**2), penalty_value=None)
 
     # Enforce sectional sweep angles between adjacent quarter chord stations
     qc_pts = [geometry.evaluate(quarter_chord_projections[i]) for i in range(num_chord_stations)]
     for i in range(num_chord_stations - 1):
         dx = qc_pts[i + 1][0] - qc_pts[i][0]
         dy = qc_pts[i + 1][1] - qc_pts[i][1]
-        sectional_sweep = csdl.arctan(dx / dy)
-        geometric_variables.add_variable(sectional_sweep, sweep_angle_dvs[i], penalty_value=None)
+        # Calculate the sectional sweep angle using arctan2 to get the correct quadrant
+        # sectional_sweep = csdl.arctan2(dx, dy)
+        geometric_variables.add_variable(dx, dy*csdl.tan(sweep_angle_dvs[i]), penalty_value=None)
 
     geometry_solver.evaluate(geometric_variables)
+
+# Right-half sectional quarter-chord sweep between successive evaluated quarter-chord stations:
+# Lambda_qc[i] = atan2(x_qc[i+1]-x_qc[i], y_qc[i+1]-y_qc[i])
+qc_pts_right = [geometry.evaluate(quarter_chord_projections[i]) for i in range(num_chord_stations)]
+qc_pts_sweep = [geometry.evaluate(quarter_chord_sweep_projections[i]) for i in range(num_sweep_eval_stations)]
+lambda_qc_list = []
+for i in range(num_sweep_eval_stations - 1):
+    dx_qc = qc_pts_sweep[i + 1][0] - qc_pts_sweep[i][0]
+    dy_qc = qc_pts_sweep[i + 1][1] - qc_pts_sweep[i][1]
+    sw_qc = csdl.arctan2(dx_qc, dy_qc)
+    lambda_qc_list.append(csdl.reshape(sw_qc, (1,)))
+
+lambda_qc_vec = csdl.concatenate(lambda_qc_list)  # shape (num_sweep_eval_stations - 1,)
+max_quarter_chord_sweep = csdl.maximum(lambda_qc_vec, axes=(0,), rho=50.0)
+quarter_chord_sweep_margin = (60.0 * np.pi / 180.0) - max_quarter_chord_sweep
 
 geometry.rotate(rotation_origin=geometry.evaluate(quarter_chord_center), axis_vector=np.array([0., 1., 0.]), angles=pitch, units='radians')
 
@@ -642,19 +827,37 @@ if scale_factor == 1.0 or scale_factor == 1.0/np.sqrt(10.0):
 elif scale_factor == 7.5:
     cruise_speed = csdl.Variable(value=140.)    # This is matching normal dynamic pressure without going to altitude
     sizing_speed = 1.2 * cruise_speed  # (1.2x cruise speed) structural sizing maneuver speed
-    payload_weight = csdl.Variable(value=160000.*4.44822)  # 711,86 kN = 160,000 lbf (4.44822 N/lbf) payload weight
-    load_factor = csdl.Variable(value=3.0)  # 3.0g load factor for sizing maneuver
+    payload_weight = csdl.Variable(value=160000.*4.44822)  # 711.86 kN = 160,000 lbf (4.44822 N/lbf) payload weight
+    # misc_weight scaled with (q_M0.70 / q_M0.75) = (0.70/0.75)^2 to keep cruise CL consistent:
+    # Total fixed weight: 500,000 lbf * (0.70/0.75)^2 = 574,933.33 lbf -> misc = 414,933.33 lbf
+    misc_weight = csdl.Variable(value=(500000. * (0.70 / 0.75)**2 - 160000.) * 4.44822)
+    # for now, just add misc weight to payload weight cause it's easier, but separate these out later
+    payload_weight = payload_weight + misc_weight
+    load_factor = csdl.Variable(value=2.5)  # 2.5g load factor for sizing maneuver
 else:
     raise Exception("Cruise speed not defined for scale factor = {}. Set the cruise speed for this scale factor.".format(scale_factor))
 
 load_factor_val = float(np.asarray(load_factor.value).flatten()[0]) if hasattr(load_factor, 'value') else float(load_factor)
 
-# region Aerodynamic solver (panel method)
 # Flight conditions:
-# Node 0 = cruise condition (20 m/s)
-# Node 1 = stability condition (+1.0 deg alpha perturbation, 20 m/s)
-# Node 2 = structural sizing pull-up condition (sizing_speed, pitch angle = pitch_ss)
-# Node 3 = -1.0g push-down structural sizing condition (optional, pitch angle = pitch_neg1g)
+# Node 0 = cruise condition (ISA 30,000 ft, Mach 0.70)
+# Node 1 = stability condition (+1.0 deg alpha perturbation, ISA 30,000 ft, Mach 0.70)
+# Node 2 = structural sizing pull-up condition (sea level, q_sizing = 1.25^2 * q_cruise, pitch angle = pitch_ss)
+# Node 3 = -1.0g push-down structural sizing condition (optional, sea level, pitch angle = pitch_neg1g)
+flight_cond_dict = get_nominal_flight_conditions()
+cruise_cond = flight_cond_dict['cruise']
+sizing_cond = flight_cond_dict['sizing']
+
+V_cruise_val = cruise_cond['speed_m_s']
+V_sizing_val = sizing_cond['speed_m_s']
+q_cruise_val = cruise_cond['dynamic_pressure_Pa']
+q_sizing_val = sizing_cond['dynamic_pressure_Pa']
+
+cruise_speed = csdl.Variable(value=V_cruise_val)
+sizing_speed = csdl.Variable(value=V_sizing_val)
+
+# Atmospheric state vectors for all nodes
+# Node 0: cruise, Node 1: stability (+1 deg), Node 2: pull-up, Node 3: optional -1.0g
 if include_neg1g_sizing:
     num_nodes = 4
     dalpha_rad = 1.0 * np.pi / 180.0
@@ -665,8 +868,19 @@ if include_neg1g_sizing:
     v2 = csdl.concatenate([sizing_speed * csdl.cos(dalpha_ss), csdl.Variable(value=0.0), sizing_speed * csdl.sin(dalpha_ss)])
     v3 = csdl.concatenate([sizing_speed * csdl.cos(dalpha_neg1g), csdl.Variable(value=0.0), sizing_speed * csdl.sin(dalpha_neg1g)])
     v_stacked = csdl.reshape(csdl.concatenate([v0, v1, v2, v3]), (4, 3))
-    rho_array = csdl.Variable(shape=(num_nodes,), value=np.array([1.225, 1.225, 1.225, 1.225]))
-    sos_array = csdl.Variable(shape=(num_nodes,), value=np.array([343.0, 343.0, 343.0, 343.0]))
+    
+    node_altitudes = np.array([CRUISE_ALTITUDE_M, CRUISE_ALTITUDE_M, 0.0, 0.0])
+    node_rho = np.array([cruise_cond['density_kg_m3'], cruise_cond['density_kg_m3'], sizing_cond['density_kg_m3'], sizing_cond['density_kg_m3']])
+    node_sos = np.array([cruise_cond['speed_of_sound_m_s'], cruise_cond['speed_of_sound_m_s'], sizing_cond['speed_of_sound_m_s'], sizing_cond['speed_of_sound_m_s']])
+    node_mach = np.array([cruise_cond['mach'], cruise_cond['mach'], sizing_cond['mach'], sizing_cond['mach']])
+    node_temp = np.array([cruise_cond['temperature_K'], cruise_cond['temperature_K'], sizing_cond['temperature_K'], sizing_cond['temperature_K']])
+    node_pressure = np.array([cruise_cond['pressure_Pa'], cruise_cond['pressure_Pa'], sizing_cond['pressure_Pa'], sizing_cond['pressure_Pa']])
+    node_viscosity = np.array([cruise_cond['viscosity_Pa_s'], cruise_cond['viscosity_Pa_s'], sizing_cond['viscosity_Pa_s'], sizing_cond['viscosity_Pa_s']])
+    node_q = np.array([q_cruise_val, q_cruise_val, q_sizing_val, q_sizing_val])
+    node_speeds = np.array([V_cruise_val, V_cruise_val, V_sizing_val, V_sizing_val])
+    
+    rho_array = csdl.Variable(shape=(num_nodes,), value=node_rho)
+    sos_array = csdl.Variable(shape=(num_nodes,), value=node_sos)
 else:
     num_nodes = 3
     dalpha_rad = 1.0 * np.pi / 180.0
@@ -675,8 +889,31 @@ else:
     v1 = csdl.concatenate([cruise_speed * np.cos(dalpha_rad), csdl.Variable(value=0.0), cruise_speed * np.sin(dalpha_rad)])
     v2 = csdl.concatenate([sizing_speed * csdl.cos(dalpha_ss), csdl.Variable(value=0.0), sizing_speed * csdl.sin(dalpha_ss)])
     v_stacked = csdl.reshape(csdl.concatenate([v0, v1, v2]), (3, 3))
-    rho_array = csdl.Variable(shape=(num_nodes,), value=np.array([1.225, 1.225, 1.225]))
-    sos_array = csdl.Variable(shape=(num_nodes,), value=np.array([343.0, 343.0, 343.0]))
+    
+    node_altitudes = np.array([CRUISE_ALTITUDE_M, CRUISE_ALTITUDE_M, 0.0])
+    node_rho = np.array([cruise_cond['density_kg_m3'], cruise_cond['density_kg_m3'], sizing_cond['density_kg_m3']])
+    node_sos = np.array([cruise_cond['speed_of_sound_m_s'], cruise_cond['speed_of_sound_m_s'], sizing_cond['speed_of_sound_m_s']])
+    node_mach = np.array([cruise_cond['mach'], cruise_cond['mach'], sizing_cond['mach']])
+    node_temp = np.array([cruise_cond['temperature_K'], cruise_cond['temperature_K'], sizing_cond['temperature_K']])
+    node_pressure = np.array([cruise_cond['pressure_Pa'], cruise_cond['pressure_Pa'], sizing_cond['pressure_Pa']])
+    node_viscosity = np.array([cruise_cond['viscosity_Pa_s'], cruise_cond['viscosity_Pa_s'], sizing_cond['viscosity_Pa_s']])
+    node_q = np.array([q_cruise_val, q_cruise_val, q_sizing_val])
+    node_speeds = np.array([V_cruise_val, V_cruise_val, V_sizing_val])
+    
+    rho_array = csdl.Variable(shape=(num_nodes,), value=node_rho)
+    sos_array = csdl.Variable(shape=(num_nodes,), value=node_sos)
+
+# CSDL variables for atmospheric node diagnostics
+atm_altitudes = csdl.Variable(shape=(num_nodes,), value=node_altitudes)
+atm_densities = rho_array
+atm_sound_speeds = sos_array
+atm_mach_numbers = csdl.Variable(shape=(num_nodes,), value=node_mach)
+atm_temperatures = csdl.Variable(shape=(num_nodes,), value=node_temp)
+atm_pressures = csdl.Variable(shape=(num_nodes,), value=node_pressure)
+atm_viscosities = csdl.Variable(shape=(num_nodes,), value=node_viscosity)
+atm_dynamic_pressures = csdl.Variable(shape=(num_nodes,), value=node_q)
+atm_speeds = csdl.Variable(shape=(num_nodes,), value=node_speeds)
+atm_reynolds_per_unit_chord = csdl.Variable(shape=(num_nodes,), value=node_rho * node_speeds / node_viscosity)
 
 panel_mesh = geometry.evaluate(projected_panel_mesh, plot=False)
 panel_mesh = panel_mesh.expand((1,) + panel_mesh.shape, 'ij->aij')
@@ -690,6 +927,8 @@ upper_beam_mesh = geometry.evaluate(projected_upper_beam_mesh, plot=False)
 lower_beam_mesh = geometry.evaluate(projected_lower_beam_mesh, plot=False)
 le_drag_mesh = geometry.evaluate(projected_le_drag_mesh, plot=False)
 te_drag_mesh = geometry.evaluate(projected_te_drag_mesh, plot=False)
+strip_upper_mesh = geometry.evaluate(projected_strip_upper_skin, plot=False)
+strip_lower_mesh = geometry.evaluate(projected_strip_lower_skin, plot=False)
 
 # Compute local chord from projected mesh (leading edge to trailing edge distance)
 node_chords = te_mesh[:,0] - le_mesh[:,0]
@@ -723,6 +962,7 @@ beam_cs = aframe.CSBox(
 
 # Beam material (Aluminum: E = 69 GPa, G = 26 GPa, density = 2700 kg/m^3)
 beam = aframe.Beam(name='wing_spar', mesh=beam_mesh, E=69e9, G=26e9, density=2700, cs=beam_cs)
+# beam = aframe.Beam(name='wing_spar', mesh=beam_mesh, E=69e9, G=26e9, density=1., cs=beam_cs)
 
 # Fix root node at y=0 (clamped cantilever symmetry boundary condition)
 beam.fix(node=0)
@@ -762,6 +1002,8 @@ pm_solver_inputs = {
     # 'mesh_path': file_path+file_name, # already done externally
     'ref_area': planform_area, # does not matter bc we don't use the coefficients,
     'moment_reference': r_cg,
+    'drag_type' : 'Trefftz_2D_consistent',
+    'nwpcl': 200,
 }
 # we leave out the mesh path because we need FFD to move the mesh
 
@@ -782,10 +1024,13 @@ panel_method.declare_outputs([
     'Di',
     'M',
     'panel_forces',
+    'L_panel',
     'CL',
     'CDi',
     'CDi_Trefftz',
+    'lift_ratio',
     'CM',
+    'mu_w',
 ])
 
 recorder.inline = False
@@ -800,6 +1045,8 @@ Di = outputs['Di']
 M = outputs['M']
 CM = outputs['CM']
 Cp = outputs['Cp']
+mu_w = outputs['mu_w']
+trefftz_lift_ratio = outputs['lift_ratio']
 
 # endregion Aerodynamic solver (panel method)
 
@@ -808,9 +1055,23 @@ Cp = outputs['Cp']
 dynamic_panel_centers = geometry.evaluate(projected_panel_centers, plot=False)
 dynamic_panel_centers_right = dynamic_panel_centers[:num_right_panels, :]
 panel_forces_right_cruise = outputs['panel_forces'][0, :num_right_panels, :] # shape (num_right_panels, 3) from Node 0 (cruise)
+panel_lift_right_cruise = outputs['L_panel'][0, :num_right_panels]
 panel_forces_right_ss = outputs['panel_forces'][2, :num_right_panels, :] # shape (num_right_panels, 3) from Node 2 (structural sizing pull-up)
 if include_neg1g_sizing:
     panel_forces_right_neg1g = outputs['panel_forces'][3, :num_right_panels, :] # shape (num_right_panels, 3) from Node 3 (-1.0g push-down)
+
+# Lifting-line Fourier induced drag calculation from cruise vertical panel forces
+F_z_cruise = panel_forces_right_cruise[:, 2]
+T_fourier_var = csdl.Variable(value=T_fourier_panel)
+A_fourier_raw = csdl.matvec(T_fourier_var, F_z_cruise)  # Harmonic expansion coefficients (odd n = 1, 3, ..., 15)
+A_fourier_ratios = A_fourier_raw[1:] / A_fourier_raw[0]
+
+n_fourier_weights = csdl.Variable(value=n_fourier_odd[1:])
+delta_fourier = csdl.sum(n_fourier_weights * (A_fourier_ratios ** 2))
+e_fourier = 1.0 / (1.0 + delta_fourier)
+
+CDi_Fourier = (CL[0] ** 2 / (np.pi * aspect_ratio_calc)) * (1.0 + delta_fourier)
+Di_Fourier = CDi_Fourier * 0.5 * rho_array[0] * (cruise_speed ** 2) * planform_area
 
 W_var = csdl.Variable(value=W_matrix)
 
@@ -862,60 +1123,39 @@ if include_neg1g_sizing:
     beam_stress_neg1g = frame_neg1g.compute_stress()['wing_spar_neg1g'] # shape (num_beam_elements, 5)
     elem_max_stress_neg1g = csdl.maximum(beam_stress_neg1g, axes=(1,), rho=1.0) # shape (num_beam_elements,)
 
-# Fit B-spline stress functions (Fast: 15-CP cubic with S'(0)=0; Full: 8-CP quadratic via space.fit)
-if resolution == 'fast':
-    tau_colloc = np.concatenate([[0.0], y_norm_elem.flatten()])
-    int_knots = [np.mean(tau_colloc[j:j+3]) for j in range(1, 12)]
-    knots_stress_15 = np.concatenate([[0.0, 0.0, 0.0, 0.0], int_knots, [1.0, 1.0, 1.0, 1.0]])
+# Fit B-spline stress functions: exact 15-CP cubic B-spline with root symmetry S'(0)=0 for both fast and full resolutions
+tau_colloc = np.concatenate([[0.0], y_norm_elem.flatten()])
+int_knots = [np.mean(tau_colloc[j:j+3]) for j in range(1, 12)]
+knots_stress_15 = np.concatenate([[0.0, 0.0, 0.0, 0.0], int_knots, [1.0, 1.0, 1.0, 1.0]])
 
-    stress_space = lfs.BSplineSpace(
-        num_parametric_dimensions=1,
-        degree=3,
-        coefficients_shape=(15,),
-        knots=(knots_stress_15,),
-    )
+stress_space = lfs.BSplineSpace(
+    num_parametric_dimensions=1,
+    degree=3,
+    coefficients_shape=(15,),
+    knots=(knots_stress_15,),
+)
 
-    B14_matrix = stress_space.compute_basis_matrix(y_norm_elem).toarray()
-    # Root symmetry condition: S'(0) = 0 <=> c_1 - c_0 = 0 (since clamped cubic has S'(0) = 3/t_4 * (c_1 - c_0))
-    d_root_row = np.zeros((1, 15))
-    d_root_row[0, 0] = -1.0
-    d_root_row[0, 1] = 1.0
+B14_matrix = stress_space.compute_basis_matrix(y_norm_elem).toarray()
+# Root symmetry condition: S'(0) = 0 <=> c_1 - c_0 = 0 (since clamped cubic has S'(0) = 3/t_4 * (c_1 - c_0))
+d_root_row = np.zeros((1, 15))
+d_root_row[0, 0] = -1.0
+d_root_row[0, 1] = 1.0
 
-    M_stress_sys = np.vstack([B14_matrix, d_root_row])
-    M_stress_inv = np.linalg.inv(M_stress_sys)
+M_stress_sys = np.vstack([B14_matrix, d_root_row])
+M_stress_inv = np.linalg.inv(M_stress_sys)
 
-    # Solve for 15 B-spline coefficients via exact linear system solve in CSDL (3.0g)
-    stress_rhs = csdl.concatenate([elem_max_stress, csdl.Variable(value=np.array([0.0]))])
-    stress_coeffs_flat = csdl.matvec(csdl.Variable(value=M_stress_inv), stress_rhs)
-    stress_coeffs = csdl.reshape(stress_coeffs_flat, (15, 1))
-    stress_func = lfs.Function(space=stress_space, coefficients=stress_coeffs)
+# Solve for 15 B-spline coefficients via exact linear system solve in CSDL (3.0g)
+stress_rhs = csdl.concatenate([elem_max_stress, csdl.Variable(value=np.array([0.0]))])
+stress_coeffs_flat = csdl.matvec(csdl.Variable(value=M_stress_inv), stress_rhs)
+stress_coeffs = csdl.reshape(stress_coeffs_flat, (15, 1))
+stress_func = lfs.Function(space=stress_space, coefficients=stress_coeffs)
 
-    if include_neg1g_sizing:
-        # Solve for 15 B-spline coefficients via exact linear system solve in CSDL (-1.0g)
-        stress_rhs_neg1g = csdl.concatenate([elem_max_stress_neg1g, csdl.Variable(value=np.array([0.0]))])
-        stress_coeffs_flat_neg1g = csdl.matvec(csdl.Variable(value=M_stress_inv), stress_rhs_neg1g)
-        stress_coeffs_neg1g = csdl.reshape(stress_coeffs_flat_neg1g, (15, 1))
-        stress_func_neg1g = lfs.Function(space=stress_space, coefficients=stress_coeffs_neg1g)
-
-elif resolution == 'full':
-    # Fit 8-CP B-spline matching the 8 spanwise thickness stations
-    stress_space = lfs.BSplineSpace(
-        num_parametric_dimensions=1,
-        degree=2,
-        coefficients_shape=(8,),
-    )
-    stress_coeffs = stress_space.fit(
-        values=csdl.reshape(elem_max_stress, (num_beam_elements, 1)),
-        parametric_coordinates=y_norm_elem,
-    )
-    stress_func = lfs.Function(space=stress_space, coefficients=stress_coeffs)
-
-    if include_neg1g_sizing:
-        stress_coeffs_neg1g = stress_space.fit(
-            values=csdl.reshape(elem_max_stress_neg1g, (num_beam_elements, 1)),
-            parametric_coordinates=y_norm_elem,
-        )
-        stress_func_neg1g = lfs.Function(space=stress_space, coefficients=stress_coeffs_neg1g)
+if include_neg1g_sizing:
+    # Solve for 15 B-spline coefficients via exact linear system solve in CSDL (-1.0g)
+    stress_rhs_neg1g = csdl.concatenate([elem_max_stress_neg1g, csdl.Variable(value=np.array([0.0]))])
+    stress_coeffs_flat_neg1g = csdl.matvec(csdl.Variable(value=M_stress_inv), stress_rhs_neg1g)
+    stress_coeffs_neg1g = csdl.reshape(stress_coeffs_flat_neg1g, (15, 1))
+    stress_func_neg1g = lfs.Function(space=stress_space, coefficients=stress_coeffs_neg1g)
 
 # 1. Parametric locations corresponding to the peaks of the thickness control (Greville abscissae of thickness_space)
 knots_thick = thickness_space.knots[0]
@@ -958,7 +1198,7 @@ safety_factor = 1.5
 yield_stress = 276.0e6
 allowable_stress = yield_stress / safety_factor  # 69.0 MPa
 # dv_stresses.set_as_constraint(upper=allowable_stress, scaler=1.0 / allowable_stress)
-# stresses_to_enforce.set_as_constraint(upper=allowable_stress, scaler=1.0 / allowable_stress)
+stresses_to_enforce.set_as_constraint(upper=allowable_stress, scaler=1.0 / allowable_stress)
 
 if include_neg1g_sizing:
     # Root stress constraint for -1.0g sizing condition
@@ -972,7 +1212,7 @@ if include_neg1g_sizing:
 # 1. Induced Drag (Node 0: cruise condition from Trefftz plane)
 Di_Trefftz = CDi[0] * 0.5 * rho_array[0] * (cruise_speed**2) * planform_area
 
-# 2. Strip-Wise Sectional Profile & Stall Drag Model (50 strips, geometry-derived alpha via arctan2)
+# 2. Strip-Wise Sectional Profile & Stall Drag Model (100 strips, aerodynamic Cl & polar model)
 # Evaluate strip center leading and trailing edge points from evaluated geometry:
 le_strip_center = 0.5 * (le_drag_mesh[:-1, :] + le_drag_mesh[1:, :])
 te_strip_center = 0.5 * (te_drag_mesh[:-1, :] + te_drag_mesh[1:, :])
@@ -982,7 +1222,7 @@ dx_strip = te_strip_center[:, 0] - le_strip_center[:, 0]
 dz_strip = le_strip_center[:, 2] - te_strip_center[:, 2]
 
 # Exact local angle of attack from geometry using arctan2:
-alpha_local_elem = csdl.arctan2(dz_strip, dx_strip)  # shape (50,)
+alpha_local_elem = csdl.arctan2(dz_strip, dx_strip)  # shape (num_drag_strips,)
 
 # Geometric local chord length and spanwise strip width dy:
 local_chord_drag = csdl.sqrt(dx_strip**2 + dz_strip**2)
@@ -991,41 +1231,117 @@ dy_strip = le_drag_mesh[1:, 1] - le_drag_mesh[:-1, 1]
 
 # Strip planform area across full wingspan (factor of 2.0 for both wings):
 strip_area = 2.0 * local_chord_drag * dy_strip
+total_strip_area = csdl.sum(strip_area)
+
+# Live geometric strip thickness-to-chord ratio (t/c)_i evaluated from paired surface projections:
+strip_tc = compute_strip_thickness_to_chord(
+    upper_surface_pts=strip_upper_mesh,
+    lower_surface_pts=strip_lower_mesh,
+    grid_shape=strip_grid_shape,
+    chord_lengths=local_chord_drag,
+    rho=50.0,
+)
+
+# Strip mid-chord points and aerodynamic half-chord sweep angle Lambda_0.5:
+mid_chord_drag_pts = 0.5 * (le_strip_center + te_strip_center)  # shape (num_drag_strips, 3)
+strip_sweep_halfchord = compute_half_chord_sweep(mid_chord_drag_pts)  # shape (num_drag_strips,)
+max_half_chord_sweep = csdl.maximum(strip_sweep_halfchord, axes=(0,), rho=50.0)
+half_chord_sweep_excess = max_half_chord_sweep - (60.0 * np.pi / 180.0)
+
+# Dynamic spanwise scaling: dy scales with wingspan stretch
+span_scale = wingspan / (10.0 * scale_factor)
+dy_aero_dyn = csdl.Variable(value=dy_aero_init) * span_scale
+
+# Map VortexAD's L_panel for local section lift coefficient cl across nodes:
+# Lprime_i = L_strip_i / dy_aero_dyn
+# cl_i = Lprime_i / (q_node * c_i)
+q_inf = 0.5 * rho_array[0] * (cruise_speed ** 2)
+lift_aero_strips = csdl.matvec(csdl.Variable(value=W_strip), outputs['L_panel'][0, :num_right_panels])
+lift_prime_aero = lift_aero_strips / dy_aero_dyn
+lift_prime_drag = csdl.matvec(csdl.Variable(value=M_interp_drag), lift_prime_aero)
+cl_local_elem = lift_prime_drag / (q_inf * local_chord_drag)
+
+# Evaluate wave drag across all flight nodes (computed for every node, cruise added to objective):
+wave_drag_results = []
+CD_wave_nodes = []
+D_wave_nodes = []
+for node_idx in range(num_nodes):
+    q_node_val = 0.5 * rho_array[node_idx] * (atm_speeds[node_idx] ** 2)
+    l_strip_node = csdl.matvec(csdl.Variable(value=W_strip), outputs['L_panel'][node_idx, :num_right_panels])
+    lp_aero_node = l_strip_node / dy_aero_dyn
+    lp_drag_node = csdl.matvec(csdl.Variable(value=M_interp_drag), lp_aero_node)
+    cl_strip_node = lp_drag_node / (q_node_val * local_chord_drag)
+    
+    node_wave = evaluate_wave_drag(
+        strip_tc=strip_tc,
+        strip_sweep_halfchord=strip_sweep_halfchord,
+        strip_cl=cl_strip_node,
+        strip_area=strip_area,
+        total_strip_area=total_strip_area,
+        mach_node=atm_mach_numbers[node_idx],
+        q_node=q_node_val,
+        planform_area=planform_area,
+    )
+    wave_drag_results.append(node_wave)
+    CD_wave_nodes.append(csdl.reshape(node_wave['CD_wave'], (1,)))
+    D_wave_nodes.append(csdl.reshape(node_wave['D_wave'], (1,)))
+
+CD_wave_array = csdl.concatenate(CD_wave_nodes)
+D_wave_array = csdl.concatenate(D_wave_nodes)
+
+# Cruise node wave drag outputs:
+CD_wave_cruise = CD_wave_array[0]
+D_wave_cruise = D_wave_array[0]
+strip_wave_cd_cruise = wave_drag_results[0]['cd_wave_strip']
+strip_M_dd_cruise = wave_drag_results[0]['M_dd']
+strip_M_crit_cruise = wave_drag_results[0]['M_crit']
+strip_delta_M_cruise = wave_drag_results[0]['delta_M']
+strip_delta_M_eff_cruise = wave_drag_results[0]['delta_M_eff']
+min_strip_mach_margin_cruise = -csdl.maximum(strip_delta_M_cruise, axes=(0,), rho=50.0)  # min(Mcrit - M)
 
 # Base parasite drag coefficient (NACA 0012 base skin friction + form drag: CD0 = 0.0080)
 CD0_base = 0.0080
 
-# Smooth stall drag and lift deficit penalty parameters (NACA 0012 attached flow up to ~10 deg, soft stall onset)
-alpha_crit = 10.0 * np.pi / 180.0     # critical angle of attack: 10 degrees
-delta_alpha_ref = 4.0 * np.pi / 180.0 # scaling width for post-stall drag rise
-beta_stall = 20.0                     # softplus transition sharpness
-k_stall = 0.20                        # stall drag scaling factor
-k_stall_lift = 0.35                   # stall lift deficit scaling factor
+# Options for profile drag polar and stall penalty:
+include_cl_polar = False      # Apply quadratic drag polar bucket k_polar * (Cl - Cl_ideal)^2
+include_stall_drag = True   # Apply smooth aerodynamic stall penalty when Cl > Cl_crit
 
-# Penalize stall for both positive and negative angles of attack (Cruise):
-alpha_abs = csdl.absolute(alpha_local_elem)
-delta_alpha = alpha_abs - alpha_crit
+# 1. Sectional Cl drag polar bucket: regularizes planform by penalizing extreme section Cl
+k_polar = 0.010              # Curvature of polar bucket
+cl_ideal = 0.50              # Design cruise lift coefficient
+cd_polar_elem = k_polar * ((cl_local_elem - cl_ideal) ** 2) if include_cl_polar else 0.0
 
-# Numerically stabilized native csdl.softplus:
-softplus_val = (1.0 / beta_stall) * csdl.softplus(beta_stall * delta_alpha)
-cd_stall_elem = k_stall * ((softplus_val / delta_alpha_ref) ** 2)
+# 2. Unified aerodynamic section stall parameters (applicable to all flight conditions)
+cl_crit = 1.40               # Critical section lift coefficient before stall onset
+delta_cl_ref = 0.25          # Scaling width for post-stall transition
+beta_cl_stall = 40.0         # Softplus transition sharpness
+k_stall_drag = 0.20          # Stall drag scaling factor (cruise)
+k_stall_lift = 0.35          # Stall lift deficit scaling factor (cruise & maneuver)
 
-# Total profile and stall drag coefficient per strip
-cd_profile_elem = CD0_base + cd_stall_elem
+cl_abs = csdl.absolute(cl_local_elem)
+delta_cl = cl_abs - cl_crit
+softplus_cl_val = (1.0 / beta_cl_stall) * csdl.softplus(beta_cl_stall * delta_cl)
+cd_stall_elem = k_stall_drag * ((softplus_cl_val / delta_cl_ref) ** 2) if include_stall_drag else 0.0
+
+# Total profile drag coefficient per strip
+cd_profile_elem = CD0_base + cd_polar_elem + cd_stall_elem
 
 # Sectional and total profile drag [N]
-q_inf = 0.5 * rho_array[0] * (cruise_speed ** 2)
+# Normalized strictly by total_strip_area to prevent area-shrinkage numerical loopholes
+CD_profile = csdl.sum(cd_profile_elem * strip_area) / total_strip_area
 D_profile_elem = cd_profile_elem * q_inf * strip_area
 D_profile = csdl.sum(D_profile_elem)
 
 # Sectional lift deficit penalty for cruise
-sign_alpha = alpha_local_elem / (alpha_abs + 1.e-6)
-cl_stall_loss_elem = k_stall_lift * (softplus_val / delta_alpha_ref)
-L_loss_cruise = csdl.sum(cl_stall_loss_elem * sign_alpha * q_inf * strip_area)
+sign_cl = cl_local_elem / (cl_abs + 1.e-6)
+cl_stall_loss_elem = k_stall_lift * (softplus_cl_val / delta_cl_ref) if include_stall_drag else 0.0 * cl_local_elem
+CL_loss_cruise = csdl.sum(cl_stall_loss_elem * sign_cl * strip_area) / total_strip_area
+L_loss_cruise = csdl.sum(cl_stall_loss_elem * sign_cl * q_inf * strip_area)
 lift_effective_cruise = L[0] - L_loss_cruise
 
-# Total aircraft drag objective: Induced Drag + Strip-Wise Profile & Stall Drag
-D_total = Di_Trefftz + D_profile
+# Total aircraft drag: Induced Drag + Strip-Wise Profile & Stall Drag + Transonic Wave Drag
+Di_chosen = Di_Fourier if induced_drag_objective == 'fourier' else Di_Trefftz
+D_total = Di_chosen + D_profile + D_wave_cruise
 
 # Reference values for scaling constraints and objective function
 payload_weight_val = float(np.asarray(payload_weight.value).flatten()[0]) if hasattr(payload_weight, 'value') else float(payload_weight)
@@ -1033,33 +1349,55 @@ W_ref = 2.0 * payload_weight_val  # reference cruise weight [N] (~1.15x payload 
 D_ref = W_ref / 20. # reference drag [N] (~1/20 of payload weight if we assume L/D ~ 20)
 c_ref = scale_factor * 1.0 # Initial chord length
 
-objective = D_total
-# objective.set_as_objective(scaler=1.e1)
-objective.set_as_objective(scaler=1.e1 / D_ref)
+# Set active optimization objective based on induced_drag_objective toggle:
+# CD_total = CDi_chosen + CD_profile + CD_wave[0]
+if induced_drag_objective == 'fourier':
+    objective = CDi_Fourier + CD_profile + CD_wave_cruise
+elif induced_drag_objective == 'mixed':
+    objective = csdl.maximum(CDi_Fourier, CDi[0], rho=2.*1.e3) + CD_profile + CD_wave_cruise
+else:
+    objective = CDi[0] + CD_profile + CD_wave_cruise
+objective.set_as_objective(scaler=1.e3)
 
 # L = W constraint (Node 0: cruise condition)
 lift_trim = lift_effective_cruise - W_total
 lift_trim.set_as_constraint(equals=0.0, scaler=1.0 / (5*W_ref))
+# lift_trim = CL[0]# - CL_loss_cruise
+# lift_trim.set_as_constraint(equals=0.5, scaler=2.)
 
 # Pitch / Moment trim constraint: My = 0 about dynamic center of mass (x_cg)
 
 pitch_moment = M[0, 1]
 pitch_trim = pitch_moment
-# pitch_trim.set_as_constraint(equals=0.0, scaler=1.0 / (W_ref * c_ref))
+pitch_trim.set_as_constraint(equals=0.0, scaler=1.0 / (W_ref * c_ref))
 
 # Sizing Lift constraint: L = load_factor * W (Node 2: structural sizing pull-up condition)
-alpha_local_ss = alpha_local_elem + dalpha_ss
-alpha_abs_ss = csdl.absolute(alpha_local_ss)
-delta_alpha_ss = alpha_abs_ss - alpha_crit
-softplus_val_ss = (1.0 / beta_stall) * csdl.softplus(beta_stall * delta_alpha_ss)
-cl_stall_loss_ss = k_stall_lift * (softplus_val_ss / delta_alpha_ref)
-sign_alpha_ss = alpha_local_ss / (alpha_abs_ss + 1.e-6)
+# Extract aerodynamic strip lift from panel vertical forces at Node 2 (sizing pull-up maneuver):
+F_z_ss = panel_forces_right_ss[:, 2]
+lift_aero_strips_ss = csdl.matvec(csdl.Variable(value=W_strip), F_z_ss)
+lift_prime_aero_ss = lift_aero_strips_ss / dy_aero_dyn
+lift_prime_drag_ss = csdl.matvec(csdl.Variable(value=M_interp_drag), lift_prime_aero_ss)
+
+# Sectional lift coefficient during sizing maneuver on each drag strip: Cl_ss = L'_ss / (q_inf_ss * c)
 q_inf_ss = 0.5 * rho_array[2] * (sizing_speed ** 2)
-L_loss_ss = csdl.sum(cl_stall_loss_ss * sign_alpha_ss * q_inf_ss * strip_area)
+cl_local_elem_ss = lift_prime_drag_ss / (q_inf_ss * local_chord_drag)
+
+# Aerodynamic stall lift loss penalty during sizing maneuver (unified parameters):
+cl_abs_ss = csdl.absolute(cl_local_elem_ss)
+delta_cl_ss = cl_abs_ss - cl_crit
+softplus_cl_val_ss = (1.0 / beta_cl_stall) * csdl.softplus(beta_cl_stall * delta_cl_ss)
+cl_stall_loss_ss = k_stall_lift * (softplus_cl_val_ss / delta_cl_ref)
+sign_cl_ss = cl_local_elem_ss / (cl_abs_ss + 1.e-6)
+
+# Preserve geometric alpha_local_ss for reference / inspection
+alpha_local_ss = alpha_local_elem + dalpha_ss
+
+# Total lift deficit across both wings during sizing maneuver:
+L_loss_ss = csdl.sum(cl_stall_loss_ss * sign_cl_ss * q_inf_ss * strip_area)
 lift_effective_ss = L[2] - L_loss_ss
 
 lift_ss = lift_effective_ss - load_factor * W_total
-# lift_ss.set_as_constraint(equals=0.0, scaler=1.0 / (load_factor_val * W_ref))
+lift_ss.set_as_constraint(equals=0.0, scaler=1.0 / (load_factor_val * W_ref))
 
 if include_neg1g_sizing:
     # Sizing Lift constraint: L = -1.0 * W (Node 3: -1.0g push-down sizing condition)
@@ -1074,7 +1412,8 @@ dMy_stab = M[1, 1] - M[0, 1]
 neutral_point_x = x_cg - dMy_stab / dL_stab
 static_margin = (neutral_point_x - x_cg) / mean_chord
 # static_margin.set_as_constraint(lower=0.1, scaler=1.e1)
-# static_margin.set_as_constraint(lower=0.05, scaler=2.e1)
+# static_margin.set_as_constraint(lower=0.00, scaler=2.e1)
+static_margin.set_as_constraint(lower=0.05, scaler=2.e1)
 # static_margin.set_as_constraint(equals=0.05, scaler=2.e1)
 
 # # 16-CP Cubic B-spline Fit to Beam Twist under 4.0g Maneuver Load
@@ -1113,15 +1452,62 @@ static_margin = (neutral_point_x - x_cg) / mean_chord
 # # Sign convention: theta_y < 0 corresponds to pitch-down / twist-down about spanwise Y-axis (washout)
 # outboard_station_twists.set_as_constraint(upper=0.0, scaler=180.0 / np.pi)
 
+# =========================================================================
+# 4B: Stall Progression & Maneuver Tip Margin Constraint via B-Spline Fit
+# =========================================================================
+# Fit 101-CP cubic B-spline to the 100 drag strip maneuver lift coefficients (Cl_ss)
+# with root symmetry S'(0)=0, matching the stress fitting/evaluation/aggregation architecture.
+cl_ss_rhs = csdl.concatenate([cl_local_elem_ss, csdl.Variable(value=np.array([0.0]))])
+cl_ss_coeffs_flat = csdl.matvec(csdl.Variable(value=M_cl_ss_inv), cl_ss_rhs)
+cl_ss_coeffs = csdl.reshape(cl_ss_coeffs_flat, (101, 1))
+cl_ss_func = lfs.Function(space=cl_ss_fit_space, coefficients=cl_ss_coeffs)
+
+# Evaluate at the peak design variable stations and intermediate points (shape: 3*num_stations - 2)
+all_eval_cl_ss = cl_ss_func.evaluate(eval_cl_points_arr)
+
+# Aggregate each peak station with its neighboring intermediate points using smooth maximum
+aggregated_cl_ss_list = []
+for i in range(num_stations):
+    if i == 0:
+        grp = [0, 1]
+    elif i == num_stations - 1:
+        grp = [3*i - 1, 3*i]
+    else:
+        grp = [3*i - 1, 3*i, 3*i + 1]
+    sub_cl_ss = csdl.concatenate([all_eval_cl_ss[idx] for idx in grp])
+    grp_cl_max = csdl.maximum(sub_cl_ss, axes=(0,), rho=50.0)
+    aggregated_cl_ss_list.append(csdl.reshape(grp_cl_max, (1,)))
+
+# dv_cl_ss has shape (num_stations,) -> exactly 5 constraints in fast, 8 in full
+dv_cl_ss = csdl.concatenate(aggregated_cl_ss_list)
+
+# Stall progression ceiling: decreases monotonically from root to tip
+# Root allowable = 1.30, Tip allowable = 0.80
+cl_root_max = 1.30
+cl_tip_max = 0.80
+cl_ss_ceiling = np.linspace(cl_root_max, cl_tip_max, num_stations)
+
+# for i in range(num_stations):
+    # dv_cl_ss[i].set_as_constraint(upper=cl_ss_ceiling[i], scaler=1.0 / cl_ss_ceiling[i])
+cl_constraints_to_enforce = dv_cl_ss[-3:] if resolution == 'fast' else dv_cl_ss[-4:]
+cl_ceiling_to_enforce = cl_ss_ceiling[-3:] if resolution == 'fast' else cl_ss_ceiling[-4:]
+cl_constraints_to_enforce.set_as_constraint(upper=cl_ceiling_to_enforce, scaler=1.0 / cl_ceiling_to_enforce)
+
 if formulation == 'chord_span':
     # For chord and span stretch formulation (no ParameterizationSolver),
     # keep planform area constraint (10.0 m^2) and aspect ratio inequality constraint AR <= 15.0
     planform_area.set_as_constraint(equals=10.0 * scale_factor**2, scaler=1.0 / (10*scale_factor**2))
     aspect_ratio_calc.set_as_constraint(upper=15.0, scaler=1.e-1)
-    # Enforce constant thickness-to-chord ratio = 0.12 at all stations
-    for i in range(num_chord_stations):
-        tc_ratio = local_thicknesses[i] / local_chords[i]
-        tc_ratio.set_as_constraint(equals=0.12, scaler=10.0)
+    # Enforce constant thickness-to-chord ratio = 0.12 at all stations only if thickness or chord DVs are active
+    if 'thickness_stretch_dvs' in design_variables and 'chord_stretch_dvs' in design_variables:
+        for i in range(num_chord_stations):
+            tc_ratio = local_thicknesses[i] / local_chords[i]
+            tc_ratio.set_as_constraint(equals=0.12, scaler=10.0)
+
+    # Enforce evaluated Lambda_qc in [0, 60 deg] at every adjacent evaluation section:
+    sweep_max_rad = 60.0 * np.pi / 180.0
+    for i in range(num_sweep_eval_stations - 1):
+        lambda_qc_vec[i].set_as_constraint(lower=0.0, upper=sweep_max_rad, scaler=1.0 / sweep_max_rad)
 else:
     # For AR and Area formulation, ParameterizationSolver explicitly enforces
     # taper ratios, planform area, and aspect ratio.
@@ -1132,7 +1518,30 @@ for dv_info in design_variables.values():
 
 geometry_coefficients = [geometry_function.coefficients for geometry_function in geometry.functions.values()]
 
-additional_outs = [Di, L, CL, CDi, Cp, panel_mesh, planform_area, aspect_ratio_calc, structural_mass, beam_displacement, beam_rotation, tip_twist_ss, beam_stress, elem_max_stress, dv_stresses, stress_coeffs, ttop_elem, tweb_elem, ttop_dvs, tweb_dvs, twist_dvs, Di_Trefftz, D_profile, D_total, alpha_local_elem, y_strip_pts, W_total, M, CM, pitch_trim, lift_ss, static_margin, neutral_point_x, x_cg, x_payload, payload_cg, x_struct, r_cg, local_chord, local_height, box_width, beam_mesh, F_node, pitch_ss, dynamic_panel_centers_right, panel_forces_right_cruise, panel_forces_right_ss, lift_effective_cruise, lift_effective_ss, L_loss_cruise, L_loss_ss]
+additional_outs = [
+    Di, L, CL, CDi, Cp, panel_mesh, planform_area, aspect_ratio_calc, structural_mass,
+    beam_displacement, beam_rotation, tip_twist_ss, beam_stress, elem_max_stress,
+    dv_stresses, stress_coeffs, ttop_elem, tweb_elem, ttop_dvs, tweb_dvs, twist_dvs,
+    Di_Trefftz, CD_profile, D_profile, D_total, alpha_local_elem, cl_local_elem,
+    cl_local_elem_ss, dv_cl_ss, cl_ss_coeffs, y_strip_pts, W_total, M, CM, pitch_trim, lift_ss, static_margin,
+    neutral_point_x, x_cg, x_payload, payload_cg, x_struct, r_cg, local_chord, local_height,
+    box_width, beam_mesh, F_node, pitch_ss, dynamic_panel_centers_right,
+    panel_forces_right_cruise, panel_lift_right_cruise, panel_forces_right_ss,
+    lift_effective_cruise, lift_effective_ss, L_loss_cruise, L_loss_ss,
+    CDi_Fourier, Di_Fourier, delta_fourier, e_fourier, A_fourier_raw, mu_w, trefftz_lift_ratio,
+    # Atmospheric condition outputs:
+    atm_altitudes, atm_densities, atm_sound_speeds, atm_mach_numbers,
+    atm_temperatures, atm_pressures, atm_viscosities, atm_dynamic_pressures,
+    atm_speeds, atm_reynolds_per_unit_chord,
+    # Quarter-chord and half-chord sweep outputs:
+    lambda_qc_vec, max_quarter_chord_sweep, quarter_chord_sweep_margin,
+    strip_sweep_halfchord, max_half_chord_sweep, half_chord_sweep_excess,
+    # Wave-drag outputs:
+    strip_tc, CD_wave_array, D_wave_array, CD_wave_cruise, D_wave_cruise,
+    strip_wave_cd_cruise, strip_M_dd_cruise, strip_M_crit_cruise,
+    strip_delta_M_cruise, strip_delta_M_eff_cruise, min_strip_mach_margin_cruise,
+    local_chord_drag, dy_strip, strip_area,
+]
 if include_camber:
     additional_outs += [camber_dvs]
 if include_elevator:
@@ -1169,7 +1578,10 @@ if run_pre_diagnostics:
     #     print(f"Root Stress (-1.0g Sizing): {float(np.asarray(jax_sim[root_stress_neg1g]).flatten()[0])/1e6:.2f} MPa (Allowable: {allowable_stress/1e6:.1f} MPa)")
     # print(f"Final Pitching Moment (about CG): {float(np.asarray(jax_sim[M][0, 1]).flatten()[0]):.4f} N*m")
     # print(f"Final Center of Mass (x_cg): {float(np.asarray(jax_sim[x_cg]).flatten()[0]):.4f} m (Struct CG: {float(np.asarray(jax_sim[x_struct]).flatten()[0]):.4f} m, Payload: {float(np.asarray(jax_sim[x_payload]).flatten()[0]):.4f} m [{float(np.asarray(jax_sim[payload_cg]).flatten()[0])*100:.1f}% root chord])")
-    # print(f"Total Drag (Objective): {float(np.asarray(jax_sim[D_total]).flatten()[0]):.2f} N (Induced: {float(np.asarray(jax_sim[Di_Trefftz]).flatten()[0]):.2f} N, Profile+Stall: {float(np.asarray(jax_sim[D_profile]).flatten()[0]):.2f} N)")
+    # print(f"Total Drag (Objective): {float(np.asarray(jax_sim[D_total]).flatten()[0]):.2f} N (Induced: {float(np.asarray(jax_sim[Di_Trefftz]).flatten()[0]):.2f} N, Profile: {float(np.asarray(jax_sim[D_profile]).flatten()[0]):.2f} N, Wave: {float(np.asarray(jax_sim[D_wave_cruise]).flatten()[0]):.2f} N)")
+    # print(f"Wave Drag CD_wave: {float(np.asarray(jax_sim[CD_wave_cruise]).flatten()[0])*1e4:.2f} counts | min(Mcrit - M): {float(np.asarray(jax_sim[min_strip_mach_margin_cruise]).flatten()[0]):+.4f}")
+    # print(f"Quarter-Chord Sweep: Max = {np.degrees(float(np.asarray(jax_sim[max_quarter_chord_sweep]).flatten()[0])):.2f}° (Margin to 60°: {np.degrees(float(np.asarray(jax_sim[quarter_chord_sweep_margin]).flatten()[0])):.2f}°)")
+    # print(f"Half-Chord Sweep: Max = {np.degrees(float(np.asarray(jax_sim[max_half_chord_sweep]).flatten()[0])):.2f}° (Excess above 60°: {np.degrees(float(np.asarray(jax_sim[half_chord_sweep_excess]).flatten()[0])):.2f}°)")
     # alpha_local_deg_all = np.degrees(np.asarray(jax_sim[alpha_local_elem]).flatten())
     # print(f"Local Strip Alpha (Cruise): Min = {np.min(alpha_local_deg_all):.2f} deg, Max = {np.max(alpha_local_deg_all):.2f} deg")
     # print(f"Half-Beam Mass: {float(np.asarray(jax_sim[structural_mass]).flatten()[0])/2.0:.2f} kg (Full Structural Mass: {float(np.asarray(jax_sim[structural_mass]).flatten()[0]):.2f} kg)")
@@ -1218,391 +1630,686 @@ if run_pre_diagnostics:
         print(f"{j:7d} | {thickness_peaks[j]:8.4f} | {y_p_span:10.3f} | {st_val:24.2f} | {allowable_stress/1e6:16.1f} | {status:8s}")
 
     stress_coeffs_arr = np.asarray(jax_sim[stress_coeffs]).flatten()
-    if resolution == 'fast':
-        root_deriv_val = (stress_coeffs_arr[1] - stress_coeffs_arr[0]) * 3.0 / knots_stress_15[4]
-        print(f"\n================ 15-CP CUBIC STRESS SPLINE DIAGNOSTIC ================")
-        print(f"Root symmetry check: c0 = {stress_coeffs_arr[0]/1e6:.4f} MPa, c1 = {stress_coeffs_arr[1]/1e6:.4f} MPa, dS/du(0) = {root_deriv_val/1e6:.6f} MPa/unit")
-        print(f"Stress control points (MPa): {np.round(stress_coeffs_arr/1e6, 2)}")
-    elif resolution == 'full':
-        print(f"\n================ 8-CP B-SPLINE STRESS DIAGNOSTIC ================")
-        print(f"Stress control points (MPa): {np.round(stress_coeffs_arr/1e6, 2)}")
+    root_deriv_val = (stress_coeffs_arr[1] - stress_coeffs_arr[0]) * 3.0 / knots_stress_15[4]
+    print(f"\n================ 15-CP CUBIC STRESS SPLINE DIAGNOSTIC ({resolution.upper()}) ================")
+    print(f"Root symmetry check: c0 = {stress_coeffs_arr[0]/1e6:.4f} MPa, c1 = {stress_coeffs_arr[1]/1e6:.4f} MPa, dS/du(0) = {root_deriv_val/1e6:.6f} MPa/unit")
+    print(f"Stress control points (MPa): {np.round(stress_coeffs_arr/1e6, 2)}")
 
-optimization_problem = modopt.CSDLAlphaProblem(
-    problem_name='rectangular_wing_to_bwb_aerostructural_optimization',
-    simulator=jax_sim,
-)
-optimizer = modopt.PySLSQP(
-    optimization_problem,
-    # solver_options={'maxiter': 100, 'acc': 1.e-7},
-    solver_options={'maxiter': 200, 'acc': 1.e-5},
-    readable_outputs=['x'],
-)
-optimizer.solve()
-optimizer.print_results()
-# endregion Optimization
+    dv_cl_ss_arr = np.asarray(jax_sim[dv_cl_ss]).flatten()
+    print(f"\n================ {num_stations} STATION 4B MANEUVER LIFT COEFFICIENT CONSTRAINTS ({load_factor_val:.1f}g Pull-Up) ================")
+    print(f"{'Station':7s} | {'eta_peak':8s} | {'Cl_ss (aggregated)':20s} | {'Allowable Ceiling':18s} | {'Status':8s}")
+    print("-" * 80)
+    for j in range(num_stations):
+        cl_val_st = dv_cl_ss_arr[j]
+        ceil_val = cl_ss_ceiling[j]
+        st_status = "FEASIBLE" if cl_val_st <= ceil_val else "VIOLATED"
+        print(f"{j:7d} | {station_cl_peaks[j]:8.4f} | {cl_val_st:20.4f} | {ceil_val:18.4f} | {st_status:8s}")
 
 
-# region Plot Optimization History
-import pyvista as pv
-import os, glob
-
-# Find the latest output folder
-output_base_dir = 'rectangular_wing_to_bwb_aerostructural_optimization_outputs'
-output_folders = glob.glob(os.path.join(output_base_dir, '*'))
-latest_folder = max(output_folders, key=os.path.getmtime)
-print(f"Reading optimization history from: {latest_folder}")
-
-# Read design variable history from x.out (preferred) or record.hdf5
-x_out_path = os.path.join(latest_folder, 'x.out')
-if os.path.exists(x_out_path):
-    x_history = np.loadtxt(x_out_path)
-    if len(x_history.shape) == 1:
-        x_history = x_history.reshape(1, -1)
-    print(f"Loaded {x_history.shape[0]} iterations from current run x.out")
-
-    # If warm-started from prior file, prepend all previous iterations so video & summary show the full trajectory
-    if warm_start and os.path.exists(init_file):
-        x_prior = np.loadtxt(init_file)
-        if len(x_prior.shape) > 1 and x_prior.shape[0] > 0:
-            x_history = np.vstack([x_prior[:-1], x_history])
-            print(f"Combined total: {x_history.shape[0]} iterations from initial rectangular wing to converged optimum")
-else:
-    import h5py
-    hdf5_path = os.path.join(latest_folder, 'record.hdf5')
-    x_history_list = []
-    if os.path.exists(hdf5_path):
-        with h5py.File(hdf5_path, 'r') as f:
-            valid_keys = [k for k in f.keys() if k.isdigit() or (k.startswith('callback_') and k.split('_')[1].isdigit())]
-            cbs = sorted(valid_keys, key=lambda k: int(k.split('_')[1]) if '_' in k else int(k))
-            for cb in cbs:
-                if 'inputs' in f[cb]:
-                    inp_grp = f[cb]['inputs']
-                    if 'pitch' in inp_grp:
-                        pitch_val = inp_grp['pitch'][:]
-                        if 'aspect_ratio' in inp_grp and 'planform_area_dv' in inp_grp:
-                            ar_val = inp_grp['aspect_ratio'][:]
-                            s_val = inp_grp['planform_area_dv'][:]
-                            x_vec = np.concatenate([ar_val, s_val, pitch_val])
-                            x_history_list.append(x_vec)
-                        elif 'chord_stretch_dv' in inp_grp and 'span_stretch_dv' in inp_grp:
-                            cs_val = inp_grp['chord_stretch_dv'][:]
-                            ss_val = inp_grp['span_stretch_dv'][:]
-                            x_vec = np.concatenate([cs_val, ss_val, pitch_val])
-                            x_history_list.append(x_vec)
-                        elif 'taper_dvs' in inp_grp:
-                            taper = inp_grp['taper_dvs'][:]
-                            ar_val = inp_grp['aspect_ratio'][:] if 'aspect_ratio' in inp_grp else np.array([10.0])
-                            x_vec = np.concatenate([taper, ar_val, pitch_val])
-                            x_history_list.append(x_vec)
-                        elif 'chord_stretch_dvs' in inp_grp:
-                            stretches = inp_grp['chord_stretch_dvs'][:]
-                            x_vec = np.concatenate([stretches, pitch_val])
-                            x_history_list.append(x_vec)
-                    elif 'x' in inp_grp:
-                        x_history_list.append(inp_grp['x'][:])
-            
-            if len(x_history_list) > 0:
-                unique_x = [x_history_list[0]]
-                for i in range(1, len(x_history_list)):
-                    if not np.allclose(x_history_list[i], x_history_list[i-1]):
-                        unique_x.append(x_history_list[i])
-                x_history = np.array(unique_x)
-                print(f"Loaded {x_history.shape[0]} unique iterations from record.hdf5")
-            else:
-                x_history = np.array([])
-    else:
-        x_history = np.array([])
-
-num_iterations = x_history.shape[0]
-if num_iterations == 0:
-    print(f"No optimization history found in {latest_folder}. Skipping post-processing plot rendering.")
-    exit()
-
-# Set up pyvista offscreen rendering and video
-pv.OFF_SCREEN = True
-video_path = os.path.join(latest_folder, 'optimization_history.mp4')
-plotter = pv.Plotter(off_screen=True, window_size=[1920, 1080])
-
-plotter.open_movie(video_path, framerate=4)
-
-camera = {
-    'position': (-20.0 * scale_factor, -15.0 * scale_factor, 10.0 * scale_factor),
-    'focal_point': (0.0, 0.0, 0.0),
-    'viewup': (0, 0, 1),
-}
-
-cd_history = []
-cl_history = []
-sref_history = []
-wing_img_path = os.path.join(latest_folder, 'final_wing.png')
-
-for iteration in range(num_iterations):
-    x_scaled = x_history[iteration]
-
-    # Undo scaling for each design variable to set physical (unscaled) values on jax_sim
-    # Use slicing to handle vector-valued design variables
-    unscaled_values = {}
-    curr_idx = 0
-    for name, dv_info in design_variables.items():
-        var_size = int(np.prod(dv_info.variable.shape))
-        slc = slice(curr_idx, curr_idx + var_size)
-        unscaled_val = (x_scaled[slc] / dv_info.scaler).reshape(dv_info.variable.shape)
-        jax_sim[dv_info.variable] = unscaled_val
-        unscaled_values[name] = unscaled_val
-        curr_idx += var_size
-
-    # Run the simulator to update geometry coefficients
-    jax_sim.run()
-
-    # Record history metrics
-    cl_val = float(np.asarray(jax_sim[CL]).flatten()[0])
-    cd_val = float(np.asarray(jax_sim[CDi]).flatten()[0])
-    sref_val = float(np.asarray(jax_sim[planform_area]).flatten()[0])
-
-    cd_history.append(cd_val * 1e4)  # CD in drag counts (x 1e4)
-    cl_history.append(cl_val)
-    sref_history.append(sref_val)
-
-    # Get plotting elements from geometry.plot (returns list of pyvista objects)
-    plotting_elements = geometry.plot(show=False)
-
-    # Clear previous frame and add new geometry
-    plotter.clear()
-
-    # Add each plotting element to the plotter
-    for element in plotting_elements:
-        if isinstance(element, dict) and 'mesh' in element:
-            mesh = element['mesh']
-            kwargs = element.get('kwargs', {})
-            plotter.add_mesh(mesh, **kwargs)
-        elif isinstance(element, tuple) and len(element) == 2:
-            mesh, kwargs = element
-            plotter.add_mesh(mesh, **kwargs)
-        elif isinstance(element, pv.Actor):
-            plotter.add_actor(element)
-        elif isinstance(element, pv.DataSet):
-            plotter.add_mesh(element)
-
-    # Build parameter info string depending on active formulation
-    if formulation == 'ar_area':
-        ar_val = float(np.asarray(unscaled_values['aspect_ratio']).flatten()[0]) if 'aspect_ratio' in unscaled_values else 10.0
-        t_vals = unscaled_values['taper_dvs'] if 'taper_dvs' in unscaled_values else np.ones(num_chord_stations - 1)
-        c_vals = [1.0] + list(t_vals)
-        c_str = " ".join([f"t{i}={c_vals[i]:.2f}" for i in range(len(c_vals))])
-        sw_vals = unscaled_values['sweep_angle_dvs'] if 'sweep_angle_dvs' in unscaled_values else np.zeros(num_chord_stations - 1)
-        sw_str = " ".join([f"sw{i}={np.degrees(sw_vals[i]):.1f}°" for i in range(len(sw_vals))])
-        if 'twist_dvs' in unscaled_values:
-            tw_vals = unscaled_values['twist_dvs']
-            tw_str = " ".join([f"tw{i}={np.degrees(tw_vals[i]):.1f}°" for i in range(len(tw_vals))])
-            dv_str = f"AR={ar_val:.2f}  {c_str}\n{sw_str}\n{tw_str}"
-        else:
-            dv_str = f"AR={ar_val:.2f}  {c_str}\n{sw_str}"
-    elif formulation == 'chord_span':
-        ss_val = float(np.asarray(unscaled_values['span_stretch_dv']).flatten()[0]) if 'span_stretch_dv' in unscaled_values else 0.0
-        cs_vals = unscaled_values['chord_stretch_dvs'] if 'chord_stretch_dvs' in unscaled_values else np.zeros(num_chord_stations)
-        c_str = " ".join([f"c{i}={initial_chord+cs_vals[i]:.3f}m" for i in range(len(cs_vals))])
-        sw_vals = unscaled_values['sweep_dvs'] if 'sweep_dvs' in unscaled_values else np.zeros(num_chord_stations)
-        sw_str = " ".join([f"sw{i}={sw_vals[i]:.2f}" for i in range(len(sw_vals))])
-        if 'tip_twist' in unscaled_values:
-            tw_tip_val = float(np.asarray(unscaled_values['tip_twist']).flatten()[0])
-            tw_str = f"tw_tip={np.degrees(tw_tip_val):.1f}° (linear)"
-        elif 'twist_dvs' in unscaled_values:
-            tw_vals = unscaled_values['twist_dvs']
-            tw_str = " ".join([f"tw{i}={np.degrees(tw_vals[i]):.1f}°" for i in range(len(tw_vals))])
-        else:
-            tw_str = ""
-    if 'camber_dvs' in unscaled_values:
-        cam_vals = unscaled_values['camber_dvs']
-        max_cam_pct = np.max(np.abs(cam_vals))
-        dv_str += f"\nmax|camber|={max_cam_pct:.2f}% chord"
-
-    pitch_val = float(np.asarray(unscaled_values['pitch']).flatten()[0]) if 'pitch' in unscaled_values else 0.0
-    pitch_ss_val = float(np.asarray(unscaled_values['pitch_ss']).flatten()[0]) if 'pitch_ss' in unscaled_values else 0.0
-    pitch_neg1g_val = float(np.asarray(unscaled_values['pitch_neg1g']).flatten()[0]) if 'pitch_neg1g' in unscaled_values else 0.0
-    pitch_neg1g_str = f"  Pitch_-1g={np.degrees(pitch_neg1g_val):.1f}°" if 'pitch_neg1g' in unscaled_values else ""
-    elev_val = float(np.asarray(unscaled_values['elevator_angle']).flatten()[0]) if 'elevator_angle' in unscaled_values else 0.0
-    elev_str = f"Elevator={np.degrees(elev_val):.1f}°  " if include_elevator else ""
-    pay_cg_val = float(np.asarray(unscaled_values['payload_cg']).flatten()[0]) if 'payload_cg' in unscaled_values else 0.40
-    sm_val = float(np.asarray(jax_sim[static_margin]).flatten()[0])
-    xnp_val = float(np.asarray(jax_sim[neutral_point_x]).flatten()[0])
-    xcg_val = float(np.asarray(jax_sim[x_cg]).flatten()[0])
-    xpay_val = float(np.asarray(jax_sim[x_payload]).flatten()[0])
-
-    # Add iteration counter label using unscaled physical values
-    plotter.add_text(
-        f"Iteration {iteration}/{num_iterations - 1}\n"
-        f"Formulation: {formulation} | Res: {resolution}\n"
-        f"{dv_str}\n"
-        f"{elev_str}Pitch={np.degrees(pitch_val):.1f}°  Pitch_ss={np.degrees(pitch_ss_val):.1f}°{pitch_neg1g_str}\n"
-        f"SM={sm_val:.4f} (x_cg={xcg_val:.3f}m, x_np={xnp_val:.3f}m, x_pay={xpay_val:.3f}m [{pay_cg_val*100:.1f}%])",
-        position='upper_left',
-        font_size=12,
-        color='white',
-        shadow=True,
+if __name__ == '__main__':
+    optimization_problem = modopt.CSDLAlphaProblem(
+        problem_name='rectangular_wing_to_bwb_aerostructural_optimization',
+        simulator=jax_sim,
     )
+    optimizer = modopt.PySLSQP(
+        optimization_problem,
+        # solver_options={'maxiter': 100, 'acc': 1.e-7},
+        solver_options={'maxiter': 500, 'acc': 1.e-5},
+        readable_outputs=['x'],
+    )
+    if os.environ.get('SKIP_OPTIMIZATION', '0') != '1':
+        optimizer.solve()
+        optimizer.print_results()
+    else:
+        print("SKIP_OPTIMIZATION=1 detected: Skipping solve and running post-processing on latest folder.")
+    # endregion Optimization
+    
+    
+    # region Plot Optimization History
+    import pyvista as pv
+    import os, glob
+    
+    # Find the latest output folder (or TARGET_OUTPUT_FOLDER if provided)
+    output_base_dir = 'rectangular_wing_to_bwb_aerostructural_optimization_outputs'
+    output_folders = glob.glob(os.path.join(output_base_dir, '*'))
+    target_folder = os.environ.get('TARGET_OUTPUT_FOLDER', None)
+    if target_folder and os.path.exists(target_folder):
+        latest_folder = target_folder
+    else:
+        valid_folders = [f for f in output_folders if os.path.isfile(os.path.join(f, 'x.out')) and os.path.getsize(os.path.join(f, 'x.out')) > 0]
+        latest_folder = max(valid_folders, key=os.path.getmtime) if valid_folders else max(output_folders, key=os.path.getmtime)
+    print(f"Reading optimization history from: {latest_folder}")
+    
+    # Read design variable history from x.out (preferred) or record.hdf5
+    x_out_path = os.path.join(latest_folder, 'x.out')
+    if os.path.exists(x_out_path):
+        x_history = np.loadtxt(x_out_path)
+        if len(x_history.shape) == 1:
+            x_history = x_history.reshape(1, -1)
+        print(f"Loaded {x_history.shape[0]} iterations from current run x.out")
+    
+        # If warm-started from prior file, prepend all previous iterations so video & summary show the full trajectory
+        if warm_start and os.path.exists(init_file):
+            x_prior = np.loadtxt(init_file)
+            if len(x_prior.shape) > 1 and x_prior.shape[0] > 0:
+                x_history = np.vstack([x_prior[:-1], x_history])
+                print(f"Combined total: {x_history.shape[0]} iterations from initial rectangular wing to converged optimum")
+    else:
+        import h5py
+        hdf5_path = os.path.join(latest_folder, 'record.hdf5')
+        x_history_list = []
+        if os.path.exists(hdf5_path):
+            with h5py.File(hdf5_path, 'r') as f:
+                valid_keys = [k for k in f.keys() if k.isdigit() or (k.startswith('callback_') and k.split('_')[1].isdigit())]
+                cbs = sorted(valid_keys, key=lambda k: int(k.split('_')[1]) if '_' in k else int(k))
+                for cb in cbs:
+                    if 'inputs' in f[cb]:
+                        inp_grp = f[cb]['inputs']
+                        if 'pitch' in inp_grp:
+                            pitch_val = inp_grp['pitch'][:]
+                            if 'aspect_ratio' in inp_grp and 'planform_area_dv' in inp_grp:
+                                ar_val = inp_grp['aspect_ratio'][:]
+                                s_val = inp_grp['planform_area_dv'][:]
+                                x_vec = np.concatenate([ar_val, s_val, pitch_val])
+                                x_history_list.append(x_vec)
+                            elif 'chord_stretch_dv' in inp_grp and 'span_stretch_dv' in inp_grp:
+                                cs_val = inp_grp['chord_stretch_dv'][:]
+                                ss_val = inp_grp['span_stretch_dv'][:]
+                                x_vec = np.concatenate([cs_val, ss_val, pitch_val])
+                                x_history_list.append(x_vec)
+                            elif 'taper_dvs' in inp_grp:
+                                taper = inp_grp['taper_dvs'][:]
+                                ar_val = inp_grp['aspect_ratio'][:] if 'aspect_ratio' in inp_grp else np.array([10.0])
+                                x_vec = np.concatenate([taper, ar_val, pitch_val])
+                                x_history_list.append(x_vec)
+                            elif 'chord_stretch_dvs' in inp_grp:
+                                stretches = inp_grp['chord_stretch_dvs'][:]
+                                x_vec = np.concatenate([stretches, pitch_val])
+                                x_history_list.append(x_vec)
+                        elif 'x' in inp_grp:
+                            x_history_list.append(inp_grp['x'][:])
+                
+                if len(x_history_list) > 0:
+                    unique_x = [x_history_list[0]]
+                    for i in range(1, len(x_history_list)):
+                        if not np.allclose(x_history_list[i], x_history_list[i-1]):
+                            unique_x.append(x_history_list[i])
+                    x_history = np.array(unique_x)
+                    print(f"Loaded {x_history.shape[0]} unique iterations from record.hdf5")
+                else:
+                    x_history = np.array([])
+        else:
+            x_history = np.array([])
+    
+    num_iterations = x_history.shape[0]
+    if num_iterations == 0:
+        print(f"No optimization history found in {latest_folder}. Skipping post-processing plot rendering.")
+        exit()
+    
+    # Set up pyvista offscreen rendering and video frames directory
+    pv.OFF_SCREEN = True
+    video_path = os.path.join(latest_folder, 'optimization_history.mp4')
+    frames_dir = os.path.join(latest_folder, 'temp_video_frames')
+    os.makedirs(frames_dir, exist_ok=True)
+    plotter = pv.Plotter(off_screen=True, window_size=[1920, 1080])
+    
+    camera = {
+        'position': (-20.0 * scale_factor, -15.0 * scale_factor, 10.0 * scale_factor),
+        'focal_point': (0.0, 0.0, 0.0),
+        'viewup': (0, 0, 1),
+    }
+    
+    cd_history = []
+    cl_history = []
+    sref_history = []
+    from optimization_analyses.wake_load_consistency import (
+        WakeCirculationClosureHistory,
+        WakeLoadConsistencyHistory,
+    )
+    wake_load_diagnostic = WakeLoadConsistencyHistory()
+    wake_closure_diagnostic = WakeCirculationClosureHistory()
+    wing_img_path = os.path.join(latest_folder, 'final_wing.png')
+    
+    for iteration in range(num_iterations):
+        x_scaled = x_history[iteration]
+    
+        # Undo scaling for each design variable to set physical (unscaled) values on jax_sim
+        # Use slicing to handle vector-valued design variables
+        unscaled_values = {}
+        curr_idx = 0
+        for name, dv_info in design_variables.items():
+            var_size = int(np.prod(dv_info.variable.shape))
+            slc = slice(curr_idx, curr_idx + var_size)
+            unscaled_val = (x_scaled[slc] / dv_info.scaler).reshape(dv_info.variable.shape)
+            jax_sim[dv_info.variable] = unscaled_val
+            unscaled_values[name] = unscaled_val
+            curr_idx += var_size
+    
+        # Run the simulator to update geometry coefficients
+        jax_sim.run()
 
-    # Set camera
-    plotter.camera.position = camera['position']
-    plotter.camera.focal_point = camera['focal_point']
-    plotter.camera.up = camera['viewup']
-    plotter.set_background('black')
+        wake_load_diagnostic.record(
+            iteration=iteration,
+            panel_centers=np.asarray(jax_sim[dynamic_panel_centers_right]),
+            panel_forces=np.asarray(jax_sim[panel_forces_right_cruise]),
+            panel_mesh=np.asarray(jax_sim[panel_mesh]),
+            mu_w=np.asarray(jax_sim[mu_w]),
+            te_edges=np.asarray(TE_properties[2]),
+            rho_inf=float(np.asarray(rho_array.value).reshape(-1)[0]),
+            velocity_inf=float(np.asarray(cruise_speed.value).reshape(-1)[0]),
+            sound_speed=float(np.asarray(sos_array.value).reshape(-1)[0]),
+            cl=float(np.asarray(jax_sim[CL]).reshape(-1)[0]),
+            cdi_fourier=float(np.asarray(jax_sim[CDi_Fourier]).reshape(-1)[0]),
+            cdi_trefftz=float(np.asarray(jax_sim[CDi]).reshape(-1)[0]),
+            trefftz_lift_ratio=float(np.asarray(jax_sim[trefftz_lift_ratio]).reshape(-1)[0]),
+        )
+        wake_closure_diagnostic.record(
+            iteration=iteration,
+            panel_centers=np.asarray(jax_sim[dynamic_panel_centers_right]),
+            panel_forces=np.asarray(jax_sim[panel_forces_right_cruise]),
+            panel_lift=np.asarray(jax_sim[panel_lift_right_cruise]),
+            panel_mesh=np.asarray(jax_sim[panel_mesh]),
+            mu_w=np.asarray(jax_sim[mu_w]),
+            te_edges=np.asarray(TE_properties[2]),
+            rho_inf=float(np.asarray(rho_array.value).reshape(-1)[0]),
+            velocity_inf=float(np.asarray(cruise_speed.value).reshape(-1)[0]),
+            sound_speed=float(np.asarray(sos_array.value).reshape(-1)[0]),
+            cl=float(np.asarray(jax_sim[CL]).reshape(-1)[0]),
+            cdi_fourier=float(np.asarray(jax_sim[CDi_Fourier]).reshape(-1)[0]),
+            cdi_trefftz=float(np.asarray(jax_sim[CDi]).reshape(-1)[0]),
+            trefftz_lift_ratio=float(np.asarray(jax_sim[trefftz_lift_ratio]).reshape(-1)[0]),
+        )
+    
+        # Record history metrics
+        cl_val = float(np.asarray(jax_sim[CL]).flatten()[0])
+        cd_trefftz_val = float(np.asarray(jax_sim[CDi]).flatten()[0])
+        cdi_fourier_val = float(np.asarray(jax_sim[CDi_Fourier]).flatten()[0])
+        e_fourier_val = float(np.asarray(jax_sim[e_fourier]).flatten()[0])
+        sref_val = float(np.asarray(jax_sim[planform_area]).flatten()[0])
+        cd_wave_val = float(np.asarray(jax_sim[CD_wave_cruise]).flatten()[0])
+        d_wave_val = float(np.asarray(jax_sim[D_wave_cruise]).flatten()[0])
+        cd_profile_val = float(np.asarray(jax_sim[CD_profile]).flatten()[0])
+        d_profile_val = float(np.asarray(jax_sim[D_profile]).flatten()[0])
+        d_total_val = float(np.asarray(jax_sim[D_total]).flatten()[0])
+        max_qc_sw_deg = np.degrees(float(np.asarray(jax_sim[max_quarter_chord_sweep]).flatten()[0]))
+        max_hc_sw_deg = np.degrees(float(np.asarray(jax_sim[max_half_chord_sweep]).flatten()[0]))
+        min_mach_margin = float(np.asarray(jax_sim[min_strip_mach_margin_cruise]).flatten()[0])
 
-    plotter.write_frame()
-    print(f"  Frame {iteration}/{num_iterations - 1} written")
-
-    # Save final wing render on light gray background for the summary plot
-    if iteration == num_iterations - 1:
-        pv_temp = pv.Plotter(off_screen=True, window_size=[1000, 1000])
-        pv_temp.set_background('#f4f4f4')
+        cd_active_val = (cdi_fourier_val if induced_drag_objective == 'fourier' else cd_trefftz_val) + cd_profile_val + cd_wave_val
+        cd_history.append(cd_active_val * 1e4)  # Active total CD in drag counts (x 1e4)
+        cl_history.append(cl_val)
+        sref_history.append(sref_val)
+    
+        # Get plotting elements from geometry.plot (returns list of pyvista objects)
+        plotting_elements = geometry.plot(show=False)
+    
+        # Clear previous frame and add new geometry
+        plotter.clear()
+    
+        # Add each plotting element to the plotter
         for element in plotting_elements:
             if isinstance(element, dict) and 'mesh' in element:
-                pv_temp.add_mesh(element['mesh'], **element.get('kwargs', {}))
+                mesh = element['mesh']
+                kwargs = element.get('kwargs', {})
+                plotter.add_mesh(mesh, **kwargs)
             elif isinstance(element, tuple) and len(element) == 2:
-                pv_temp.add_mesh(element[0], **element[1])
+                mesh, kwargs = element
+                plotter.add_mesh(mesh, **kwargs)
             elif isinstance(element, pv.Actor):
-                pv_temp.add_actor(element)
+                plotter.add_actor(element)
             elif isinstance(element, pv.DataSet):
-                pv_temp.add_mesh(element)
-        pv_temp.camera.position = camera['position']
-        pv_temp.camera.focal_point = camera['focal_point']
-        pv_temp.camera.up = camera['viewup']
-        pv_temp.add_axes()
-        pv_temp.screenshot(wing_img_path)
-        pv_temp.close()
+                plotter.add_mesh(element)
+    
+        # Build parameter info string depending on active formulation
+        dv_str = ""
+        if formulation == 'ar_area':
+            ar_val = float(np.asarray(unscaled_values['aspect_ratio']).flatten()[0]) if 'aspect_ratio' in unscaled_values else 10.0
+            t_vals = unscaled_values['taper_dvs'] if 'taper_dvs' in unscaled_values else np.ones(num_chord_stations - 1)
+            c_vals = [1.0] + list(t_vals)
+            c_str = " ".join([f"t{i}={c_vals[i]:.2f}" for i in range(len(c_vals))])
+            sw_vals = unscaled_values['sweep_angle_dvs'] if 'sweep_angle_dvs' in unscaled_values else np.zeros(num_chord_stations - 1)
+            sw_str = " ".join([f"sw{i}={np.degrees(sw_vals[i]):.1f}°" for i in range(len(sw_vals))])
+            if 'twist_dvs' in unscaled_values:
+                tw_vals = unscaled_values['twist_dvs']
+                tw_str = " ".join([f"tw{i}={np.degrees(tw_vals[i]):.1f}°" for i in range(len(tw_vals))])
+                dv_str = f"AR={ar_val:.2f}  {c_str}\n{sw_str}\n{tw_str}"
+            else:
+                dv_str = f"AR={ar_val:.2f}  {c_str}\n{sw_str}"
+        elif formulation == 'chord_span':
+            ss_val = float(np.asarray(unscaled_values['span_stretch_dv']).flatten()[0]) if 'span_stretch_dv' in unscaled_values else 0.0
+            cs_vals = unscaled_values['chord_stretch_dvs'] if 'chord_stretch_dvs' in unscaled_values else np.zeros(num_chord_stations)
+            c_str = " ".join([f"c{i}={initial_chord+cs_vals[i]:.3f}m" for i in range(len(cs_vals))])
+            sw_vals = unscaled_values['sweep_dvs'] if 'sweep_dvs' in unscaled_values else np.zeros(num_chord_stations)
+            sw_str = " ".join([f"sw{i}={sw_vals[i]:.2f}" for i in range(len(sw_vals))])
+            if 'tip_twist' in unscaled_values:
+                tw_tip_val = float(np.asarray(unscaled_values['tip_twist']).flatten()[0])
+                tw_str = f"tw_tip={np.degrees(tw_tip_val):.1f}° (linear)"
+            elif 'twist_dvs' in unscaled_values:
+                tw_vals = unscaled_values['twist_dvs']
+                tw_str = " ".join([f"tw{i}={np.degrees(tw_vals[i]):.1f}°" for i in range(len(tw_vals))])
+            else:
+                tw_str = ""
+            dv_str = f"b_stretch={ss_val:.2f}  {c_str}\n{sw_str}" + (f"\n{tw_str}" if tw_str else "")
+        if 'camber_dvs' in unscaled_values:
+            cam_vals = unscaled_values['camber_dvs']
+            max_cam_pct = np.max(np.abs(cam_vals))
+            dv_str += (f"\nmax|camber|={max_cam_pct:.2f}% chord" if dv_str else f"max|camber|={max_cam_pct:.2f}% chord")
+    
+        pitch_val = float(np.asarray(unscaled_values['pitch']).flatten()[0]) if 'pitch' in unscaled_values else 0.0
+        pitch_ss_val = float(np.asarray(unscaled_values['pitch_ss']).flatten()[0]) if 'pitch_ss' in unscaled_values else 0.0
+        pitch_neg1g_val = float(np.asarray(unscaled_values['pitch_neg1g']).flatten()[0]) if 'pitch_neg1g' in unscaled_values else 0.0
+        pitch_neg1g_str = f"  Pitch_-1g={np.degrees(pitch_neg1g_val):.1f}°" if 'pitch_neg1g' in unscaled_values else ""
+        elev_val = float(np.asarray(unscaled_values['elevator_angle']).flatten()[0]) if 'elevator_angle' in unscaled_values else 0.0
+        elev_str = f"Elevator={np.degrees(elev_val):.1f}°  " if include_elevator else ""
+        pay_cg_val = float(np.asarray(unscaled_values['payload_cg']).flatten()[0]) if 'payload_cg' in unscaled_values else 0.40
+        sm_val = float(np.asarray(jax_sim[static_margin]).flatten()[0])
+        xnp_val = float(np.asarray(jax_sim[neutral_point_x]).flatten()[0])
+        xcg_val = float(np.asarray(jax_sim[x_cg]).flatten()[0])
+        xpay_val = float(np.asarray(jax_sim[x_payload]).flatten()[0])
+    
+        # Add iteration counter label using unscaled physical values
+        plotter.add_text(
+            f"Iteration {iteration}/{num_iterations - 1}\n"
+            f"Formulation: {formulation} | Res: {resolution} | Obj: {induced_drag_objective}\n"
+            f"CD_tot={cd_active_val*1e4:.1f} cts (CDi={(cdi_fourier_val if induced_drag_objective=='fourier' else cd_trefftz_val)*1e4:.1f}, CDprof={cd_profile_val*1e4:.1f}, CDwave={cd_wave_val*1e4:.1f})\n"
+            f"D_tot={d_total_val:.1f} N | Λ_qc_max={max_qc_sw_deg:.1f}° | Λ_0.5_max={max_hc_sw_deg:.1f}° | min(Mcrit-M)={min_mach_margin:+.4f}\n"
+            f"{dv_str}\n"
+            f"{elev_str}Pitch={np.degrees(pitch_val):.1f}°  Pitch_ss={np.degrees(pitch_ss_val):.1f}°{pitch_neg1g_str}\n"
+            f"SM={sm_val:.4f} (x_cg={xcg_val:.3f}m, x_np={xnp_val:.3f}m, x_pay={xpay_val:.3f}m [{pay_cg_val*100:.1f}%])",
+            position='upper_left',
+            font_size=11,
+            color='white',
+            shadow=True,
+        )
+    
+        # Set camera
+        plotter.camera.position = camera['position']
+        plotter.camera.focal_point = camera['focal_point']
+        plotter.camera.up = camera['viewup']
+        plotter.set_background('black')
+    
+        frame_file = os.path.join(frames_dir, f"frame_{iteration:04d}.png")
+        plotter.screenshot(frame_file)
+        print(f"  Frame {iteration}/{num_iterations - 1} rendered")
+    
+        # Save final wing render for the summary plot
+        if iteration == num_iterations - 1:
+            try:
+                import shutil
+                shutil.copyfile(frame_file, wing_img_path)
+            except Exception as e:
+                print(f"Warning: could not save wing image: {e}")
+    
+            # Cache panel telemetry for extract_lift_and_moment_distributions.py and extract_lift_distribution.py
+            cache_file_opt = os.path.join(latest_folder, 'lift_and_moment_data.npz')
+            try:
+                xcg_val_opt = float(np.asarray(jax_sim[x_cg]).flatten()[0])
+                zcg_val_opt = float(np.asarray(jax_sim[r_cg]).flatten()[2]) if 'r_cg' in globals() else 0.0
+                panel_centers_right_opt = np.asarray(jax_sim[dynamic_panel_centers_right])
+                f_cruise_opt = np.asarray(jax_sim[panel_forces_right_cruise])
+                f_ss_opt = np.asarray(jax_sim[panel_forces_right_ss])
+                cl_val_opt = float(np.asarray(jax_sim[CL]).flatten()[0])
+                cdi_val_opt = float(np.asarray(jax_sim[CDi]).flatten()[0])
+                lift_ratio_val_opt = float(np.asarray(jax_sim[trefftz_lift_ratio]).flatten()[0])
+                cdi_fourier_val_opt = float(np.asarray(jax_sim[CDi_Fourier]).flatten()[0])
+                delta_fourier_val_opt = float(np.asarray(jax_sim[delta_fourier]).flatten()[0])
+                e_fourier_val_opt = float(np.asarray(jax_sim[e_fourier]).flatten()[0])
+                A_fourier_raw_opt = np.asarray(jax_sim[A_fourier_raw]).flatten()
+                sref_val_opt = float(np.asarray(jax_sim[planform_area]).flatten()[0])
+                ar_val_opt = float(np.asarray(jax_sim[aspect_ratio_calc]).flatten()[0])
+                cd_wave_val_opt = float(np.asarray(jax_sim[CD_wave_cruise]).flatten()[0])
+                d_wave_val_opt = float(np.asarray(jax_sim[D_wave_cruise]).flatten()[0])
+                cd_profile_val_opt = float(np.asarray(jax_sim[CD_profile]).flatten()[0])
+                d_profile_val_opt = float(np.asarray(jax_sim[D_profile]).flatten()[0])
+                d_total_val_opt = float(np.asarray(jax_sim[D_total]).flatten()[0])
+                strip_tc_opt = np.asarray(jax_sim[strip_tc]).flatten()
+                strip_sweep_opt = np.asarray(jax_sim[strip_sweep_halfchord]).flatten()
+                y_strip_pts_opt = np.asarray(jax_sim[y_strip_pts]).flatten()
+                strip_wave_cd_opt = np.asarray(jax_sim[strip_wave_cd_cruise]).flatten()
+                strip_M_crit_opt = np.asarray(jax_sim[strip_M_crit_cruise]).flatten()
+                strip_M_dd_opt = np.asarray(jax_sim[strip_M_dd_cruise]).flatten()
+                strip_delta_M_opt = np.asarray(jax_sim[strip_delta_M_cruise]).flatten()
+                cl_local_elem_opt = np.asarray(jax_sim[cl_local_elem]).flatten()
+                local_chord_drag_opt = np.asarray(jax_sim[local_chord_drag]).flatten()
+                dy_strip_opt = np.asarray(jax_sim[dy_strip]).flatten()
+                strip_area_opt = np.asarray(jax_sim[strip_area]).flatten()
 
-        # Cache panel telemetry for extract_lift_and_moment_distributions.py
-        cache_file_opt = os.path.join(latest_folder, 'lift_and_moment_data.npz')
-        try:
-            xcg_val_opt = float(np.asarray(jax_sim[x_cg]).flatten()[0])
-            zcg_val_opt = float(np.asarray(jax_sim[r_cg]).flatten()[2]) if 'r_cg' in globals() else 0.0
-            panel_centers_right_opt = np.asarray(jax_sim[dynamic_panel_centers_right])
-            f_cruise_opt = np.asarray(jax_sim[panel_forces_right_cruise])
-            f_ss_opt = np.asarray(jax_sim[panel_forces_right_ss])
-            np.savez_compressed(
-                cache_file_opt,
-                panel_centers_right=panel_centers_right_opt,
-                f_cruise=f_cruise_opt,
-                f_ss=f_ss_opt,
-                xcg_val=xcg_val_opt,
-                zcg_val=zcg_val_opt
-            )
-            print(f"Cached panel telemetry saved to: {cache_file_opt}")
-        except Exception as e:
-            print(f"Warning: could not save panel telemetry cache: {e}")
+                np.savez_compressed(
+                    cache_file_opt,
+                    panel_centers_right=panel_centers_right_opt,
+                    f_cruise=f_cruise_opt,
+                    f_ss=f_ss_opt,
+                    xcg_val=xcg_val_opt,
+                    zcg_val=zcg_val_opt,
+                    cl_val=cl_val_opt,
+                    cdi_val=cdi_val_opt,
+                    lift_ratio=lift_ratio_val_opt,
+                    cdi_fourier_val=cdi_fourier_val_opt,
+                    delta_fourier_val=delta_fourier_val_opt,
+                    e_fourier_val=e_fourier_val_opt,
+                    A_fourier_raw=A_fourier_raw_opt,
+                    cd_wave_val=cd_wave_val_opt,
+                    d_wave_val=d_wave_val_opt,
+                    cd_profile_val=cd_profile_val_opt,
+                    d_profile_val=d_profile_val_opt,
+                    d_total_val=d_total_val_opt,
+                    strip_tc=strip_tc_opt,
+                    strip_sweep_halfchord=strip_sweep_opt,
+                    y_strip_pts=y_strip_pts_opt,
+                    strip_wave_cd=strip_wave_cd_opt,
+                    strip_M_crit=strip_M_crit_opt,
+                    strip_M_dd=strip_M_dd_opt,
+                    cl_local_elem=cl_local_elem_opt,
+                    cl_local_elem_ss=np.asarray(jax_sim[cl_local_elem_ss]).flatten(),
+                    cl_ss_coeffs=np.asarray(jax_sim[cl_ss_coeffs]).flatten(),
+                    eval_cl_points=eval_cl_points_arr.flatten(),
+                    station_cl_peaks=np.asarray(station_cl_peaks).flatten(),
+                    dv_cl_ss=np.asarray(jax_sim[dv_cl_ss]).flatten(),
+                    cl_ss_ceiling=cl_ss_ceiling,
+                    local_chord_drag=local_chord_drag_opt,
+                    dy_strip=dy_strip_opt,
+                    strip_area=strip_area_opt,
+                    induced_drag_objective=str(induced_drag_objective),
+                    sref_val=sref_val_opt,
+                    ar_val=ar_val_opt,
+                    formulation=str(formulation),
+                    resolution=str(resolution),
+                    include_camber=bool(include_camber),
+                    include_elevator=bool(include_elevator),
+                    scale_factor=float(scale_factor),
+                    dv_names=np.array(list(design_variables.keys()), dtype=object),
+                )
+                print(f"Cached panel telemetry saved to: {cache_file_opt}")
 
-        # Cache structural telemetry for generate_structural_plots.py
-        struct_cache_opt = os.path.join(latest_folder, 'structural_data.npz')
-        try:
-            np.savez_compressed(
-                struct_cache_opt,
-                beam_pts_opt=np.asarray(jax_sim[beam_mesh]),
-                scale_factor=float(scale_factor),
-                allowable_stress=float(allowable_stress),
-                chords_opt=np.asarray(jax_sim[local_chord]).flatten(),
-                heights_opt=np.asarray(jax_sim[local_height]).flatten(),
-                widths_opt=np.asarray(jax_sim[box_width]).flatten(),
-                ttop_elem_opt=np.asarray(jax_sim[ttop_elem]).flatten(),
-                tweb_elem_opt=np.asarray(jax_sim[tweb_elem]).flatten(),
-                elem_stress_ss=np.asarray(jax_sim[elem_max_stress]).flatten(),
-                dv_stress_ss=np.asarray(jax_sim[dv_stresses]).flatten(),
-                stress_coeffs_ss=np.asarray(jax_sim[stress_coeffs]).flatten(),
-                ttop_dvs_opt=np.asarray(jax_sim[ttop_dvs]).flatten(),
-                tweb_dvs_opt=np.asarray(jax_sim[tweb_dvs]).flatten(),
-                thickness_peaks=np.asarray(thickness_peaks),
-                knots_stress_15=np.asarray(knots_stress_15) if 'knots_stress_15' in globals() else np.array([]),
-                resolution=str(resolution),
-                load_factor_val=float(load_factor_val) if 'load_factor_val' in globals() else 2.5,
-            )
-            print(f"Cached structural telemetry saved to: {struct_cache_opt}")
-        except Exception as e:
-            print(f"Warning: could not save structural telemetry cache: {e}")
-
-plotter.close()
-print(f"Video saved to: {video_path}")
-
-# region Plot Summary Figure (Wing geometry vs Theory)
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
-
-# Compute theoretical Cd = Cl^2 / (pi * AR) in drag counts (x 1e4)
-span_b = 10.0 * scale_factor
-target_cl = 0.5
-target_sref = 1.0
-target_ar = 20
-cd_theory_counts = (target_cl ** 2) / (np.pi * target_ar) * 1e4
-
-fig = plt.figure(figsize=(14, 6), dpi=150)
-gs = fig.add_gridspec(3, 2, width_ratios=[1.1, 1.5], wspace=0.25, hspace=0.2)
-
-# Left panel: 3D Render of final optimized wing geometry
-ax_img = fig.add_subplot(gs[:, 0])
-if os.path.exists(wing_img_path):
-    img = mpimg.imread(wing_img_path)
-    ax_img.imshow(img)
-ax_img.axis('off')
-
-# Right panels: Optimization history plots
-subplot_bg = '#eaeaf2'
-grid_color = '#ffffff'
-iters = np.arange(num_iterations)
-
-# 1. Top Subplot: CD
-ax_cd = fig.add_subplot(gs[0, 1])
-ax_cd.set_facecolor(subplot_bg)
-ax_cd.grid(True, color=grid_color, linewidth=1.2)
-ax_cd.plot(iters, cd_history, 'o-', color='#3b6998', linewidth=2, markersize=5)
-ax_cd.axhline(cd_theory_counts, color='#7a9bbd', linestyle='--', linewidth=1.8)
-ax_cd.text(1.02, cd_theory_counts, 'theory', color='#7a9bbd', transform=ax_cd.get_yaxis_transform(),
-            va='center', fontsize=11, fontweight='bold')
-ax_cd.set_ylabel('CD', fontsize=11)
-plt.setp(ax_cd.get_xticklabels(), visible=False)
-for spine in ax_cd.spines.values():
-    spine.set_visible(False)
-
-# 2. Middle Subplot: CL
-ax_cl = fig.add_subplot(gs[1, 1], sharex=ax_cd)
-ax_cl.set_facecolor(subplot_bg)
-ax_cl.grid(True, color=grid_color, linewidth=1.2)
-ax_cl.plot(iters, cl_history, 'o-', color='#4fa86c', linewidth=2, markersize=5)
-ax_cl.axhline(target_cl, color='#87c79d', linestyle='--', linewidth=1.8)
-ax_cl.text(1.02, target_cl, 'con', color='#87c79d', transform=ax_cl.get_yaxis_transform(),
-            va='center', fontsize=11, fontweight='bold')
-ax_cl.set_ylabel('CL', fontsize=11)
-plt.setp(ax_cl.get_xticklabels(), visible=False)
-for spine in ax_cl.spines.values():
-    spine.set_visible(False)
-
-# 3. Bottom Subplot: S_ref
-ax_sref = fig.add_subplot(gs[2, 1], sharex=ax_cd)
-ax_sref.set_facecolor(subplot_bg)
-ax_sref.grid(True, color=grid_color, linewidth=1.2)
-ax_sref.plot(iters, sref_history, 'o-', color='#c54b4b', linewidth=2, markersize=5)
-ax_sref.axhline(target_sref, color='#e08585', linestyle='--', linewidth=1.8)
-ax_sref.text(1.02, target_sref, 'con', color='#e08585', transform=ax_sref.get_yaxis_transform(),
-            va='center', fontsize=11, fontweight='bold')
-ax_sref.set_ylabel('S_ref', fontsize=11)
-ax_sref.set_xlabel('Iterations', fontsize=11)
-for spine in ax_sref.spines.values():
-    spine.set_visible(False)
-
-fig.suptitle("Optimal wing geometry vs theory", y=0.03, fontsize=15, fontweight='bold')
-
-summary_fig_path = os.path.join(latest_folder, 'optimization_summary.png')
-plt.savefig(summary_fig_path, bbox_inches='tight', dpi=200)
-plt.close()
-print(f"Summary figure saved to: {summary_fig_path}")
-
-import shutil
-artifact_dir = '/home/andrew/.gemini/antigravity/brain/47a5c338-9be3-486f-abb2-1deefc5b2d19'
-if os.path.exists(artifact_dir):
-    if os.path.exists(video_path):
-        shutil.copy2(video_path, os.path.join(artifact_dir, 'optimization_history.mp4'))
-    if os.path.exists(summary_fig_path):
-        shutil.copy2(summary_fig_path, os.path.join(artifact_dir, 'optimization_summary.png'))
+                # Dedicated cache for extract_wave_drag_distribution.py
+                wave_cache_opt = os.path.join(latest_folder, 'wave_drag_distribution_data.npz')
+                np.savez_compressed(
+                    wave_cache_opt,
+                    y_strip=y_strip_pts_opt,
+                    strip_wave_cd=strip_wave_cd_opt,
+                    strip_M_crit=strip_M_crit_opt,
+                    strip_M_dd=strip_M_dd_opt,
+                    strip_delta_M=strip_delta_M_opt,
+                    strip_tc=strip_tc_opt,
+                    strip_sweep=strip_sweep_opt,
+                    strip_cl=cl_local_elem_opt,
+                    local_chord_drag=local_chord_drag_opt,
+                    dy_strip=dy_strip_opt,
+                    strip_area=strip_area_opt,
+                    sref_val=sref_val_opt,
+                    ar_val=ar_val_opt,
+                    cd_wave_val=cd_wave_val_opt,
+                    d_wave_val=d_wave_val_opt,
+                    mach_cruise=0.70,
+                    q_cruise=0.5 * rho_array[0] * (cruise_speed ** 2),
+                )
+                print(f"Cached wave drag telemetry saved to: {wave_cache_opt}")
+            except Exception as e:
+                print(f"Warning: could not save panel telemetry cache: {e}")
+    
+            # Cache structural telemetry for generate_structural_plots.py
+            struct_cache_opt = os.path.join(latest_folder, 'structural_data.npz')
+            try:
+                np.savez_compressed(
+                    struct_cache_opt,
+                    beam_pts_opt=np.asarray(jax_sim[beam_mesh]),
+                    scale_factor=float(scale_factor),
+                    allowable_stress=float(allowable_stress),
+                    chords_opt=np.asarray(jax_sim[local_chord]).flatten(),
+                    heights_opt=np.asarray(jax_sim[local_height]).flatten(),
+                    widths_opt=np.asarray(jax_sim[box_width]).flatten(),
+                    ttop_elem_opt=np.asarray(jax_sim[ttop_elem]).flatten(),
+                    tweb_elem_opt=np.asarray(jax_sim[tweb_elem]).flatten(),
+                    elem_stress_ss=np.asarray(jax_sim[elem_max_stress]).flatten(),
+                    dv_stress_ss=np.asarray(jax_sim[dv_stresses]).flatten(),
+                    stress_coeffs_ss=np.asarray(jax_sim[stress_coeffs]).flatten(),
+                    ttop_dvs_opt=np.asarray(jax_sim[ttop_dvs]).flatten(),
+                    tweb_dvs_opt=np.asarray(jax_sim[tweb_dvs]).flatten(),
+                    thickness_peaks=np.asarray(thickness_peaks),
+                    knots_stress_15=np.asarray(knots_stress_15) if 'knots_stress_15' in globals() else np.array([]),
+                    resolution=str(resolution),
+                    formulation=str(formulation),
+                    load_factor_val=float(load_factor_val) if 'load_factor_val' in globals() else 2.5,
+                )
+                print(f"Cached structural telemetry saved to: {struct_cache_opt}")
+            except Exception as e:
+                print(f"Warning: could not save structural telemetry cache: {e}")
+    
+    plotter.close()
+    
+    # Compile rendered frames into MP4 video using bundled imageio_ffmpeg binary
+    try:
+        import imageio_ffmpeg, subprocess, shutil
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        cmd = [
+            ffmpeg_exe, '-y',
+            '-framerate', '4',
+            '-i', os.path.join(frames_dir, 'frame_%04d.png'),
+            '-c:v', 'libx264',
+            '-pix_fmt', 'yuv420p',
+            video_path
+        ]
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        if res.returncode == 0:
+            print(f"Video successfully saved to: {video_path}")
+            shutil.rmtree(frames_dir, ignore_errors=True)
+        else:
+            print(f"Warning: ffmpeg video encoding failed: {res.stderr.decode('utf-8', errors='ignore')}")
+    except Exception as e:
+        print(f"Warning: video compilation encountered an error: {e}")
+    
+    # region Plot Summary Figure (Wing geometry vs Theory)
+    import matplotlib.pyplot as plt
+    import matplotlib.image as mpimg
+    
+    # Compute theoretical Cd = Cl^2 / (pi * AR) in drag counts (x 1e4)
+    span_b = 15.0 * scale_factor
+    target_cl = 0.5
+    target_sref = 10.0 * scale_factor ** 2
+    target_ar = 15
+    cd_theory_counts = (target_cl ** 2) / (np.pi * target_ar) * 1e4
+    
+    fig = plt.figure(figsize=(14, 6), dpi=150)
+    gs = fig.add_gridspec(3, 2, width_ratios=[1.1, 1.5], wspace=0.25, hspace=0.2)
+    
+    # Left panel: 3D Render of final optimized wing geometry
+    ax_img = fig.add_subplot(gs[:, 0])
     if os.path.exists(wing_img_path):
-        shutil.copy2(wing_img_path, os.path.join(artifact_dir, 'final_wing.png'))
-    print("Artifacts successfully copied to brain artifact directory!")
+        img = mpimg.imread(wing_img_path)
+        ax_img.imshow(img)
+    ax_img.axis('off')
+    
+    # Right panels: Optimization history plots
+    subplot_bg = '#eaeaf2'
+    grid_color = '#ffffff'
+    iters = np.arange(num_iterations)
+    
+    # 1. Top Subplot: CD
+    ax_cd = fig.add_subplot(gs[0, 1])
+    ax_cd.set_facecolor(subplot_bg)
+    ax_cd.grid(True, color=grid_color, linewidth=1.2)
+    ax_cd.plot(iters, cd_history, 'o-', color='#3b6998', linewidth=2, markersize=5)
+    ax_cd.axhline(cd_theory_counts, color='#7a9bbd', linestyle='--', linewidth=1.8)
+    ax_cd.text(1.02, cd_theory_counts, 'theory', color='#7a9bbd', transform=ax_cd.get_yaxis_transform(),
+                va='center', fontsize=11, fontweight='bold')
+    ax_cd.set_ylabel(f'CD ({induced_drag_objective})', fontsize=11)
+    plt.setp(ax_cd.get_xticklabels(), visible=False)
+    for spine in ax_cd.spines.values():
+        spine.set_visible(False)
+    
+    # 2. Middle Subplot: CL
+    ax_cl = fig.add_subplot(gs[1, 1], sharex=ax_cd)
+    ax_cl.set_facecolor(subplot_bg)
+    ax_cl.grid(True, color=grid_color, linewidth=1.2)
+    ax_cl.plot(iters, cl_history, 'o-', color='#4fa86c', linewidth=2, markersize=5)
+    ax_cl.axhline(target_cl, color='#87c79d', linestyle='--', linewidth=1.8)
+    ax_cl.text(1.02, target_cl, 'con', color='#87c79d', transform=ax_cl.get_yaxis_transform(),
+                va='center', fontsize=11, fontweight='bold')
+    ax_cl.set_ylabel('CL', fontsize=11)
+    plt.setp(ax_cl.get_xticklabels(), visible=False)
+    for spine in ax_cl.spines.values():
+        spine.set_visible(False)
+    
+    # 3. Bottom Subplot: S_ref
+    ax_sref = fig.add_subplot(gs[2, 1], sharex=ax_cd)
+    ax_sref.set_facecolor(subplot_bg)
+    ax_sref.grid(True, color=grid_color, linewidth=1.2)
+    ax_sref.plot(iters, sref_history, 'o-', color='#c54b4b', linewidth=2, markersize=5)
+    ax_sref.axhline(target_sref, color='#e08585', linestyle='--', linewidth=1.8)
+    ax_sref.text(1.02, target_sref, 'con', color='#e08585', transform=ax_sref.get_yaxis_transform(),
+                va='center', fontsize=11, fontweight='bold')
+    ax_sref.set_ylabel('S_ref', fontsize=11)
+    ax_sref.set_xlabel('Iterations', fontsize=11)
+    for spine in ax_sref.spines.values():
+        spine.set_visible(False)
+    
+    fig.suptitle("Optimal wing geometry vs theory", y=0.03, fontsize=15, fontweight='bold')
+    
+    summary_fig_path = os.path.join(latest_folder, 'optimization_summary.png')
+    plt.savefig(summary_fig_path, bbox_inches='tight', dpi=200)
+    plt.close()
+    print(f"Summary figure saved to: {summary_fig_path}")
 
-# endregion Plot Summary Figure
-# endregion Plot Optimization History
+    try:
+        diagnostic_data_path, diagnostic_figure_path = wake_load_diagnostic.save_and_plot(latest_folder)
+        print(f"Wake-load consistency diagnostic saved to: {diagnostic_data_path}")
+        print(f"Wake-load consistency figure saved to: {diagnostic_figure_path}")
+    except Exception as exc:
+        print(f"Warning: unable to save wake-load consistency diagnostic: {exc}")
+    try:
+        closure_data_path, closure_figure_path = wake_closure_diagnostic.save_and_plot(latest_folder)
+        print(f"Wake-circulation closure diagnostic saved to: {closure_data_path}")
+        print(f"Wake-circulation closure figure saved to: {closure_figure_path}")
+    except Exception as exc:
+        print(f"Warning: unable to save wake-circulation closure diagnostic: {exc}")
+    
+    import shutil
+    current_conv_id = '0c0a47e5-2e16-41bb-9139-10357c23c5ee'
+    candidate_ids = [
+        current_conv_id,
+        '3256dd7c-d4c8-4c73-887d-131361f9d0c3',
+        '680209fd-293d-4fa0-9f6c-ae59a72a6987',
+    ]
+    artifact_dir = os.environ.get('ARTIFACT_DIR', None)
+    if not artifact_dir or not os.path.exists(artifact_dir):
+        for c_id in candidate_ids:
+            cand_path = f'/home/andrew/.gemini/antigravity/brain/{c_id}'
+            if os.path.exists(cand_path):
+                artifact_dir = cand_path
+                break
 
+    if os.path.exists(artifact_dir):
+        if os.path.exists(video_path):
+            shutil.copy2(video_path, os.path.join(artifact_dir, 'optimization_history.mp4'))
+        if os.path.exists(summary_fig_path):
+            shutil.copy2(summary_fig_path, os.path.join(artifact_dir, 'optimization_summary.png'))
+        if os.path.exists(wing_img_path):
+            shutil.copy2(wing_img_path, os.path.join(artifact_dir, 'final_wing.png'))
+        if 'diagnostic_figure_path' in locals() and os.path.exists(diagnostic_figure_path):
+            shutil.copy2(diagnostic_figure_path, os.path.join(artifact_dir, 'wake_load_consistency.png'))
+        if 'closure_figure_path' in locals() and os.path.exists(closure_figure_path):
+            shutil.copy2(closure_figure_path, os.path.join(artifact_dir, 'wake_circulation_closure.png'))
+        print("Base artifacts successfully copied to brain artifact directory!")
+
+    import sys
+
+    # region Automatic Lift Distribution Analysis
+    try:
+        from optimization_analyses.extract_lift_distribution import extract_and_plot_lift_distribution
+        extract_and_plot_lift_distribution(
+            output_folder=latest_folder,
+            jax_sim=jax_sim,
+            main_script=sys.modules[__name__],
+        )
+        print("Automatic lift distribution analysis completed successfully.")
+    except Exception as exc:
+        print(f"Warning: automatic lift distribution analysis failed: {exc}")
+    # endregion
+
+    # region Automatic Lift and Pitching Moment Distribution Analysis
+    try:
+        from optimization_analyses.extract_lift_and_moment_distributions import extract_and_plot_lift_and_moment
+        extract_and_plot_lift_and_moment(
+            output_folder=latest_folder,
+            artifact_dir=artifact_dir,
+            jax_sim=jax_sim,
+            main_script=sys.modules[__name__],
+        )
+        print("Automatic lift and moment distribution analysis completed successfully.")
+    except Exception as exc:
+        print(f"Warning: automatic lift and moment distribution analysis failed: {exc}")
+    # endregion
+
+    # region Automatic Section Cl & Stall Margin Analysis
+    try:
+        from optimization_analyses.extract_cl_distribution import extract_and_plot_cl_distribution
+        extract_and_plot_cl_distribution(
+            output_folder=latest_folder,
+            artifact_dir=artifact_dir,
+        )
+        print("Automatic section cl & stall margin analysis completed successfully.")
+    except Exception as exc:
+        print(f"Warning: automatic section cl distribution analysis failed: {exc}")
+    # endregion
+
+    # region Automatic Transonic Wave Drag Distribution Analysis
+    try:
+        from optimization_analyses.extract_wave_drag_distribution import extract_and_plot_wave_drag_distribution
+        extract_and_plot_wave_drag_distribution(
+            output_folder=latest_folder,
+            jax_sim=jax_sim,
+            main_script=sys.modules[__name__],
+            artifact_dir=artifact_dir,
+        )
+        print("Automatic wave drag distribution analysis completed successfully.")
+    except Exception as exc:
+        print(f"Warning: automatic wave drag distribution analysis failed: {exc}")
+    # endregion
+
+    # region Automatic Structural Thickness & Stress Analysis
+    try:
+        from optimization_analyses.generate_structural_plots import generate_structural_plots
+        generate_structural_plots(
+            output_folder=latest_folder,
+            artifact_dir=artifact_dir,
+        )
+        print("Automatic structural analysis completed successfully.")
+    except Exception as exc:
+        print(f"Warning: automatic structural analysis failed: {exc}")
+    # endregion
+
+    # region Automatic Airfoil Cross-Section Analysis
+    try:
+        from optimization_analyses.plot_airfoil_cross_sections import (
+            parse_design_variables,
+            build_and_evaluate_geometry,
+            extract_station_airfoils,
+            generate_airfoil_gallery_plot,
+            generate_shape_evolution_plot,
+            save_airfoil_telemetry,
+        )
+        x_out_file = os.path.join(latest_folder, "x.out")
+        if os.path.exists(x_out_file):
+            x_hist = np.loadtxt(x_out_file)
+            x_opt_last = x_hist[-1] if x_hist.ndim > 1 else x_hist
+            p_dvs = parse_design_variables(x_opt_last, scale_factor=float(scale_factor), target_dir=latest_folder)
+            repo_root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+            geom_eval, wingspan_m, half_span_m, l_chords, c_stretches, cad_prof = build_and_evaluate_geometry(p_dvs, repo_root_dir)
+            stn_data = extract_station_airfoils(geom_eval, half_span_m, num_stations=p_dvs['num_stations'])
+            gal_path = os.path.join(latest_folder, "airfoil_cross_sections_gallery.png")
+            evo_path = os.path.join(latest_folder, "airfoil_shape_evolution.png")
+            tel_path = os.path.join(latest_folder, "airfoil_cross_sections_data.npz")
+            generate_airfoil_gallery_plot(stn_data, gal_path, half_span_m)
+            generate_shape_evolution_plot(stn_data, evo_path, half_span_m, p_dvs, l_chords, c_stretches, cad_prof)
+            save_airfoil_telemetry(stn_data, tel_path, half_span_m)
+            if os.path.exists(artifact_dir):
+                shutil.copy2(gal_path, os.path.join(artifact_dir, "airfoil_cross_sections_gallery.png"))
+                shutil.copy2(evo_path, os.path.join(artifact_dir, "airfoil_shape_evolution.png"))
+            print("Airfoil cross-section analysis completed automatically.")
+    except Exception as e:
+        print(f"Warning: automatic airfoil cross-section analysis skipped: {e}")
+    # endregion
+    
+    # endregion Plot Summary Figure
+    # endregion Plot Optimization History
+    
