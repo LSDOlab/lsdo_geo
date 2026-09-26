@@ -105,7 +105,7 @@ panel_centers = np.zeros((len(combined_cells), 3))
 for i, cell in enumerate(combined_cells):
     panel_centers[i] = np.mean(points_orig[cell], axis=0)
 
-panel_centers = geometry.project(panel_centers, 
+projected_panel_centers = geometry.project(panel_centers, 
                             grid_search_density_parameter=1,
                             newton_tolerance=1.e-10,
                             grid_search_density_cutoff=30,
@@ -113,6 +113,8 @@ panel_centers = geometry.project(panel_centers,
                             force_reprojection=False, 
                             plot=False,
                             )
+right_panel_indices = np.where(panel_centers[:, 1] > 0.0)[0]
+num_right_panels = len(right_panel_indices)
 
 # Project line of beam nodes along the span at 50% chord
 num_beam_nodes = 11
@@ -358,6 +360,11 @@ L = outputs['L']
 Di = outputs['Di']
 Cp = outputs['Cp']
 
+dynamic_panel_centers = geometry.evaluate(projected_panel_centers, plot=False)
+dynamic_panel_centers_right = dynamic_panel_centers[:num_right_panels, :]
+panel_forces_right = outputs['panel_forces'][0, :num_right_panels, :]
+aspect_ratio_calc = (wingspan_outer_dv**2) / planform_area
+
 # endregion Aerodynamic solver (panel method)
 
 # region Structural solver (beam model)
@@ -463,7 +470,7 @@ geometry_coefficients = [geometry_function.coefficients for geometry_function in
 jax_sim = csdl.experimental.JaxSimulator(
     recorder=recorder,
     additional_inputs=[dv_info.variable for dv_info in design_variables.values()],
-    additional_outputs=[CL, CDi, L, Di, Cp, panel_mesh, structural_mass, beam_displacement] + geometry_coefficients,
+    additional_outputs=[CL, CDi, L, Di, Cp, panel_mesh, planform_area, aspect_ratio_calc, structural_mass, beam_displacement, dynamic_panel_centers_right, panel_forces_right] + geometry_coefficients,
     gpu=False
 )
 
@@ -475,138 +482,148 @@ jax_sim = csdl.experimental.JaxSimulator(
 # # endregion Run Model
 
 
-# region Optimization
-optimization_problem = modopt.CSDLAlphaProblem(problem_name='rectangular_wing_aerostructural_optimization', simulator=jax_sim)
-optimizer = modopt.PySLSQP(optimization_problem, solver_options={'maxiter': 1000, 'acc': 1.e-10}, readable_outputs=['x'])
-optimizer.solve()
-optimizer.print_results()
+if __name__ == '__main__':
+    # region Optimization
+    optimization_problem = modopt.CSDLAlphaProblem(problem_name='rectangular_wing_aerostructural_optimization', simulator=jax_sim)
+    optimizer = modopt.PySLSQP(optimization_problem, solver_options={'maxiter': 1000, 'acc': 1.e-10}, readable_outputs=['x'])
+    optimizer.solve()
+    optimizer.print_results()
 
-# endregion Optimization
+    # endregion Optimization
 
 
-# region Plot Optimization History
-import pyvista as pv
-import os, glob
+    # region Plot Optimization History
+    import pyvista as pv
+    import os, glob
 
-# Find the latest output folder
-output_base_dir = 'rectangular_wing_aerostructural_optimization_outputs'
-output_folders = sorted(glob.glob(os.path.join(output_base_dir, '*')))
-latest_folder = output_folders[-1]
-print(f"Reading optimization history from: {latest_folder}")
+    # Find the latest output folder
+    output_base_dir = 'rectangular_wing_aerostructural_optimization_outputs'
+    output_folders = sorted(glob.glob(os.path.join(output_base_dir, '*')))
+    latest_folder = output_folders[-1]
+    print(f"Reading optimization history from: {latest_folder}")
 
-# Read design variable history from x.out (preferred) or record.hdf5
-x_out_path = os.path.join(latest_folder, 'x.out')
-if os.path.exists(x_out_path):
-    x_history = np.loadtxt(x_out_path)
-    print(f"Loaded {x_history.shape[0]} iterations from x.out")
-else:
-    import h5py
-    hdf5_path = os.path.join(latest_folder, 'record.hdf5')
-    with h5py.File(hdf5_path, 'r') as f:
-        obj_callbacks = sorted(
-            [k for k in f.keys() if k.startswith('callback_') and 'obj' in f[k]['outputs']],
-            key=lambda k: int(k.split('_')[1])
+    # Read design variable history from x.out (preferred) or record.hdf5
+    x_out_path = os.path.join(latest_folder, 'x.out')
+    if os.path.exists(x_out_path):
+        x_history = np.loadtxt(x_out_path)
+        print(f"Loaded {x_history.shape[0]} iterations from x.out")
+    else:
+        import h5py
+        hdf5_path = os.path.join(latest_folder, 'record.hdf5')
+        with h5py.File(hdf5_path, 'r') as f:
+            obj_callbacks = sorted(
+                [k for k in f.keys() if k.startswith('callback_') and 'obj' in f[k]['outputs']],
+                key=lambda k: int(k.split('_')[1])
+            )
+            x_history_list = []
+            for cb in obj_callbacks:
+                x = f[cb]['inputs']['x'][:]
+                x_history_list.append(x)
+            # Deduplicate consecutive identical x vectors
+            unique_x = [x_history_list[0]]
+            for i in range(1, len(x_history_list)):
+                if not np.allclose(x_history_list[i], x_history_list[i-1]):
+                    unique_x.append(x_history_list[i])
+            x_history = np.array(unique_x)
+        print(f"Loaded {x_history.shape[0]} unique iterations from record.hdf5")
+
+    num_iterations = x_history.shape[0]
+    if num_iterations == 0:
+        print(f"No optimization history found in {latest_folder}. Skipping post-processing plot rendering.")
+        exit()
+
+    # Set up pyvista offscreen rendering and video
+    pv.OFF_SCREEN = True
+    video_path = os.path.join(latest_folder, 'optimization_history.mp4')
+    plotter = pv.Plotter(off_screen=True, window_size=[1920, 1080])
+
+    plotter.open_movie(video_path, framerate=4)
+
+    camera = {
+        'position': (-20.0, -15.0, 10.0),
+        'focal_point': (0.0, 0.0, 0.0),
+        'viewup': (0, 0, 1),
+    }
+
+    for iteration in range(num_iterations):
+        x_scaled = x_history[iteration]
+
+        # Undo scaling for each design variable to set physical (unscaled) values on jax_sim
+        # Use slicing to handle vector-valued design variables
+        unscaled_values = {}
+        curr_idx = 0
+        for name, dv_info in design_variables.items():
+            var_size = dv_info.variable.shape[0] if len(dv_info.variable.shape) > 0 else 1
+            slc = slice(curr_idx, curr_idx + var_size)
+            unscaled_val = x_scaled[slc] / dv_info.scaler
+            jax_sim[dv_info.variable] = unscaled_val
+            unscaled_values[name] = unscaled_val
+            curr_idx += var_size
+
+        # Run the simulator to update geometry coefficients
+        jax_sim.run()
+
+        # Get plotting elements from geometry.plot (returns list of pyvista objects)
+        plotting_elements = geometry.plot(show=False)
+
+        # Clear previous frame and add new geometry
+        plotter.clear()
+
+        # Add each plotting element to the plotter
+        for element in plotting_elements:
+            if isinstance(element, dict) and 'mesh' in element:
+                mesh = element['mesh']
+                kwargs = element.get('kwargs', {})
+                plotter.add_mesh(mesh, **kwargs)
+            elif isinstance(element, tuple) and len(element) == 2:
+                mesh, kwargs = element
+                plotter.add_mesh(mesh, **kwargs)
+            elif isinstance(element, pv.Actor):
+                plotter.add_actor(element)
+            elif isinstance(element, pv.DataSet):
+                plotter.add_mesh(element)
+
+        span_val = float(unscaled_values['wingspan'].item() if hasattr(unscaled_values['wingspan'], 'item') else unscaled_values['wingspan'][0])
+        root_val = float(unscaled_values['root_chord'].item() if hasattr(unscaled_values['root_chord'], 'item') else unscaled_values['root_chord'][0])
+        tip_val = float(unscaled_values['tip_chord'].item() if hasattr(unscaled_values['tip_chord'], 'item') else unscaled_values['tip_chord'][0])
+        sweep_val = float(unscaled_values['sweep_angle'].item() if hasattr(unscaled_values['sweep_angle'], 'item') else unscaled_values['sweep_angle'][0])
+        pitch_val = float(unscaled_values['pitch'].item() if hasattr(unscaled_values['pitch'], 'item') else unscaled_values['pitch'][0])
+        drag_val = float(np.asarray(jax_sim[Di]).flatten()[0])
+        lift_val = float(np.asarray(jax_sim[L]).flatten()[0])
+        mass_val = float(np.asarray(jax_sim[structural_mass]).flatten()[0])
+
+        # Add iteration counter label using unscaled physical values
+        plotter.add_text(
+            f"Iteration {iteration}/{num_iterations - 1}\n"
+            f"Span={span_val:.2f} m  Root={root_val:.3f} m  Tip={tip_val:.3f} m\n"
+            f"Sweep={np.degrees(sweep_val):.1f}°  Pitch={np.degrees(pitch_val):.1f}°\n"
+            f"Lift={lift_val:.1f} N  Drag={drag_val:.3f} N  Struct Mass={mass_val:.2f} kg",
+            position='upper_left',
+            font_size=12,
+            color='white',
+            shadow=True,
         )
-        x_history_list = []
-        for cb in obj_callbacks:
-            x = f[cb]['inputs']['x'][:]
-            x_history_list.append(x)
-        # Deduplicate consecutive identical x vectors
-        unique_x = [x_history_list[0]]
-        for i in range(1, len(x_history_list)):
-            if not np.allclose(x_history_list[i], x_history_list[i-1]):
-                unique_x.append(x_history_list[i])
-        x_history = np.array(unique_x)
-    print(f"Loaded {x_history.shape[0]} unique iterations from record.hdf5")
 
-num_iterations = x_history.shape[0]
+        # Set camera
+        plotter.camera.position = camera['position']
+        plotter.camera.focal_point = camera['focal_point']
+        plotter.camera.up = camera['viewup']
+        plotter.set_background('black')
 
-# Set up pyvista offscreen rendering and video
-pv.OFF_SCREEN = True
-video_path = os.path.join(latest_folder, 'optimization_history.mp4')
-plotter = pv.Plotter(off_screen=True, window_size=[1920, 1080])
+        plotter.write_frame()
+        print(f"  Frame {iteration}/{num_iterations - 1} written")
 
-plotter.open_movie(video_path, framerate=4)
+    plotter.close()
+    print(f"Video saved to: {video_path}")
 
-camera = {
-    'position': (-20.0, -15.0, 10.0),
-    'focal_point': (0.0, 0.0, 0.0),
-    'viewup': (0, 0, 1),
-}
-
-# Calculate index slices for design variables
-dv_slices = {}
-curr_idx = 0
-for name, dv_info in design_variables.items():
-    var_size = dv_info.variable.shape[0] if len(dv_info.variable.shape) > 0 else 1
-    dv_slices[name] = slice(curr_idx, curr_idx + var_size)
-    curr_idx += var_size
-
-for iteration in range(num_iterations):
-    x_scaled = x_history[iteration]
-
-    # Undo scaling for each design variable to set physical (unscaled) values on jax_sim
-    unscaled_values = {}
-    for name, dv_info in design_variables.items():
-        slc = dv_slices[name]
-        unscaled_val = x_scaled[slc] / dv_info.scaler
-        jax_sim[dv_info.variable] = unscaled_val
-        unscaled_values[name] = unscaled_val
-
-    # Run the simulator to update geometry coefficients
-    jax_sim.run()
-
-    # Get plotting elements from geometry.plot (returns list of pyvista objects)
-    plotting_elements = geometry.plot(show=False)
-
-    # Clear previous frame and add new geometry
-    plotter.clear()
-
-    # Add each plotting element to the plotter
-    for element in plotting_elements:
-        if isinstance(element, dict) and 'mesh' in element:
-            mesh = element['mesh']
-            kwargs = element.get('kwargs', {})
-            plotter.add_mesh(mesh, **kwargs)
-        elif isinstance(element, tuple) and len(element) == 2:
-            mesh, kwargs = element
-            plotter.add_mesh(mesh, **kwargs)
-        elif isinstance(element, pv.Actor):
-            plotter.add_actor(element)
-        elif isinstance(element, pv.DataSet):
-            plotter.add_mesh(element)
-
-    span_val = float(unscaled_values['wingspan'].item() if hasattr(unscaled_values['wingspan'], 'item') else unscaled_values['wingspan'][0])
-    root_val = float(unscaled_values['root_chord'].item() if hasattr(unscaled_values['root_chord'], 'item') else unscaled_values['root_chord'][0])
-    tip_val = float(unscaled_values['tip_chord'].item() if hasattr(unscaled_values['tip_chord'], 'item') else unscaled_values['tip_chord'][0])
-    sweep_val = float(unscaled_values['sweep_angle'].item() if hasattr(unscaled_values['sweep_angle'], 'item') else unscaled_values['sweep_angle'][0])
-    pitch_val = float(unscaled_values['pitch'].item() if hasattr(unscaled_values['pitch'], 'item') else unscaled_values['pitch'][0])
-    drag_val = float(Di.value.item() if hasattr(Di.value, 'item') else Di.value[0])
-    lift_val = float(L.value.item() if hasattr(L.value, 'item') else L.value[0])
-    mass_val = float(structural_mass.value.item() if hasattr(structural_mass.value, 'item') else structural_mass.value[0])
-
-    # Add iteration counter label using unscaled physical values
-    plotter.add_text(
-        f"Iteration {iteration}/{num_iterations - 1}\n"
-        f"Span={span_val:.2f} m  Root={root_val:.3f} m  Tip={tip_val:.3f} m\n"
-        f"Sweep={np.degrees(sweep_val):.1f}°  Pitch={np.degrees(pitch_val):.1f}°\n"
-        f"Lift={lift_val:.1f} N  Drag={drag_val:.3f} N  Struct Mass={mass_val:.2f} kg",
-        position='upper_left',
-        font_size=12,
-        color='white',
-        shadow=True,
+    # region Automatic Lift Distribution Analysis
+    from optimization_analyses.extract_lift_distribution import extract_and_plot_lift_distribution
+    import sys
+    extract_and_plot_lift_distribution(
+        output_folder=latest_folder,
+        jax_sim=jax_sim,
+        main_script=sys.modules[__name__],
     )
+    # endregion
 
-    # Set camera
-    plotter.camera.position = camera['position']
-    plotter.camera.focal_point = camera['focal_point']
-    plotter.camera.up = camera['viewup']
-    plotter.set_background('black')
-
-    plotter.write_frame()
-    print(f"  Frame {iteration}/{num_iterations - 1} written")
-
-plotter.close()
-print(f"Video saved to: {video_path}")
-
-# endregion Plot Optimization History
+    # endregion Plot Optimization History

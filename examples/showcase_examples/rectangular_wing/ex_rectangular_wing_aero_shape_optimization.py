@@ -184,7 +184,7 @@ panel_centers = np.zeros((len(combined_cells), 3))
 for i, cell in enumerate(combined_cells):
     panel_centers[i] = np.mean(points_orig[cell], axis=0)
 
-panel_centers = geometry.project(panel_centers, 
+projected_panel_centers = geometry.project(panel_centers, 
                             grid_search_density_parameter=1,
                             newton_tolerance=1.e-10,
                             grid_search_density_cutoff=30,
@@ -192,6 +192,8 @@ panel_centers = geometry.project(panel_centers,
                             force_reprojection=False, 
                             plot=False,
                             )
+right_panel_indices = np.where(panel_centers[:, 1] > 0.0)[0]
+num_right_panels = len(right_panel_indices)
 
 # endregion
 
@@ -398,6 +400,10 @@ L = outputs['L']
 Di = outputs['Di']
 Cp = outputs['Cp']
 
+dynamic_panel_centers = geometry.evaluate(projected_panel_centers, plot=False)
+dynamic_panel_centers_right = dynamic_panel_centers[:num_right_panels, :]
+panel_forces_right = outputs['panel_forces'][0, :num_right_panels, :]
+
 # endregion Aerodynamic solver (panel method)
 
 # region Structural solver (beam model)
@@ -435,7 +441,7 @@ geometry_coefficients = [geometry_function.coefficients for geometry_function in
 jax_sim = csdl.experimental.JaxSimulator(
     recorder=recorder,
     additional_inputs=[dv_info.variable for dv_info in design_variables.values()],
-    additional_outputs=[Di, L, CL, CDi, Cp, panel_mesh, planform_area, aspect_ratio_calc] + geometry_coefficients,
+    additional_outputs=[Di, L, CL, CDi, Cp, panel_mesh, planform_area, aspect_ratio_calc, dynamic_panel_centers_right, panel_forces_right] + geometry_coefficients,
     gpu=False
 )
 
@@ -448,279 +454,295 @@ jax_sim = csdl.experimental.JaxSimulator(
 # panel_method.points_orig = panel_mesh.value
 # panel_method.plot(Cp.value, bounds=[-0.5,1])
 
-# region Optimization
-optimization_problem = modopt.CSDLAlphaProblem(problem_name='rectangular_wing_panel_optimization', simulator=jax_sim)
-# optimizer = modopt.IPOPT(optimization_problem, recording=True)
-optimizer = modopt.PySLSQP(optimization_problem, solver_options={'maxiter': 1000, 'acc': 1.e-7}, readable_outputs=['x'])
-optimizer.solve()
-optimizer.print_results()
+if __name__ == '__main__':
+    # region Optimization
+    optimization_problem = modopt.CSDLAlphaProblem(problem_name='rectangular_wing_panel_optimization', simulator=jax_sim)
+    # optimizer = modopt.IPOPT(optimization_problem, recording=True)
+    optimizer = modopt.PySLSQP(optimization_problem, solver_options={'maxiter': 1000, 'acc': 1.e-7}, readable_outputs=['x'])
+    optimizer.solve()
+    optimizer.print_results()
 
-# endregion Optimization
+    # endregion Optimization
 
 
-# region Plot Optimization History
-import pyvista as pv
-import os, glob
+    # region Plot Optimization History
+    import pyvista as pv
+    import os, glob
 
-# Find the latest output folder
-output_base_dir = 'rectangular_wing_panel_optimization_outputs'
-output_folders = sorted(glob.glob(os.path.join(output_base_dir, '*')))
-latest_folder = output_folders[-1]
-print(f"Reading optimization history from: {latest_folder}")
+    # Find the latest output folder
+    output_base_dir = 'rectangular_wing_panel_optimization_outputs'
+    output_folders = sorted(glob.glob(os.path.join(output_base_dir, '*')))
+    latest_folder = output_folders[-1]
+    print(f"Reading optimization history from: {latest_folder}")
 
-# Read design variable history from x.out (preferred) or record.hdf5
-x_out_path = os.path.join(latest_folder, 'x.out')
-if os.path.exists(x_out_path):
-    x_history = np.loadtxt(x_out_path)
-    print(f"Loaded {x_history.shape[0]} iterations from x.out")
-else:
-    import h5py
-    hdf5_path = os.path.join(latest_folder, 'record.hdf5')
-    x_history_list = []
-    if os.path.exists(hdf5_path):
-        with h5py.File(hdf5_path, 'r') as f:
-            valid_keys = [k for k in f.keys() if k.isdigit() or (k.startswith('callback_') and k.split('_')[1].isdigit())]
-            cbs = sorted(valid_keys, key=lambda k: int(k.split('_')[1]) if '_' in k else int(k))
-            for cb in cbs:
-                if 'inputs' in f[cb]:
-                    inp_grp = f[cb]['inputs']
-                    if 'pitch' in inp_grp:
-                        pitch_val = inp_grp['pitch'][:]
-                        if 'aspect_ratio' in inp_grp and 'planform_area_dv' in inp_grp:
-                            ar_val = inp_grp['aspect_ratio'][:]
-                            s_val = inp_grp['planform_area_dv'][:]
-                            x_vec = np.concatenate([ar_val, s_val, pitch_val])
-                            x_history_list.append(x_vec)
-                        elif 'chord_stretch_dv' in inp_grp and 'span_stretch_dv' in inp_grp:
-                            cs_val = inp_grp['chord_stretch_dv'][:]
-                            ss_val = inp_grp['span_stretch_dv'][:]
-                            x_vec = np.concatenate([cs_val, ss_val, pitch_val])
-                            x_history_list.append(x_vec)
-                        elif 'chord_dvs' in inp_grp:
-                            chords = inp_grp['chord_dvs'][:]
-                            x_vec = np.concatenate([chords, pitch_val])
-                            x_history_list.append(x_vec)
-                        elif 'chord_stretch_dvs' in inp_grp:
-                            stretches = inp_grp['chord_stretch_dvs'][:]
-                            x_vec = np.concatenate([stretches, pitch_val])
-                            x_history_list.append(x_vec)
-                    elif 'x' in inp_grp:
-                        x_history_list.append(inp_grp['x'][:])
-            
-            if len(x_history_list) > 0:
-                unique_x = [x_history_list[0]]
-                for i in range(1, len(x_history_list)):
-                    if not np.allclose(x_history_list[i], x_history_list[i-1]):
-                        unique_x.append(x_history_list[i])
-                x_history = np.array(unique_x)
-                print(f"Loaded {x_history.shape[0]} unique iterations from record.hdf5")
-            else:
-                x_history = np.array([])
+    # Read design variable history from x.out (preferred) or record.hdf5
+    x_out_path = os.path.join(latest_folder, 'x.out')
+    if os.path.exists(x_out_path):
+        x_history = np.loadtxt(x_out_path)
+        print(f"Loaded {x_history.shape[0]} iterations from x.out")
     else:
-        x_history = np.array([])
+        import h5py
+        hdf5_path = os.path.join(latest_folder, 'record.hdf5')
+        x_history_list = []
+        if os.path.exists(hdf5_path):
+            with h5py.File(hdf5_path, 'r') as f:
+                valid_keys = [k for k in f.keys() if k.isdigit() or (k.startswith('callback_') and k.split('_')[1].isdigit())]
+                cbs = sorted(valid_keys, key=lambda k: int(k.split('_')[1]) if '_' in k else int(k))
+                for cb in cbs:
+                    if 'inputs' in f[cb]:
+                        inp_grp = f[cb]['inputs']
+                        if 'pitch' in inp_grp:
+                            pitch_val = inp_grp['pitch'][:]
+                            if 'aspect_ratio' in inp_grp and 'planform_area_dv' in inp_grp:
+                                ar_val = inp_grp['aspect_ratio'][:]
+                                s_val = inp_grp['planform_area_dv'][:]
+                                x_vec = np.concatenate([ar_val, s_val, pitch_val])
+                                x_history_list.append(x_vec)
+                            elif 'chord_stretch_dv' in inp_grp and 'span_stretch_dv' in inp_grp:
+                                cs_val = inp_grp['chord_stretch_dv'][:]
+                                ss_val = inp_grp['span_stretch_dv'][:]
+                                x_vec = np.concatenate([cs_val, ss_val, pitch_val])
+                                x_history_list.append(x_vec)
+                            elif 'chord_dvs' in inp_grp:
+                                chords = inp_grp['chord_dvs'][:]
+                                x_vec = np.concatenate([chords, pitch_val])
+                                x_history_list.append(x_vec)
+                            elif 'chord_stretch_dvs' in inp_grp:
+                                stretches = inp_grp['chord_stretch_dvs'][:]
+                                x_vec = np.concatenate([stretches, pitch_val])
+                                x_history_list.append(x_vec)
+                        elif 'x' in inp_grp:
+                            x_history_list.append(inp_grp['x'][:])
+                
+                if len(x_history_list) > 0:
+                    unique_x = [x_history_list[0]]
+                    for i in range(1, len(x_history_list)):
+                        if not np.allclose(x_history_list[i], x_history_list[i-1]):
+                            unique_x.append(x_history_list[i])
+                    x_history = np.array(unique_x)
+                    print(f"Loaded {x_history.shape[0]} unique iterations from record.hdf5")
+                else:
+                    x_history = np.array([])
+        else:
+            x_history = np.array([])
 
-num_iterations = x_history.shape[0]
-if num_iterations == 0:
-    print(f"No optimization history found in {latest_folder}. Skipping post-processing plot rendering.")
-    exit()
+    num_iterations = x_history.shape[0]
+    if num_iterations == 0:
+        print(f"No optimization history found in {latest_folder}. Skipping post-processing plot rendering.")
+        exit()
 
-# Set up pyvista offscreen rendering and video
-pv.OFF_SCREEN = True
-video_path = os.path.join(latest_folder, 'optimization_history.mp4')
-plotter = pv.Plotter(off_screen=True, window_size=[1920, 1080])
+    # Set up pyvista offscreen rendering and video
+    pv.OFF_SCREEN = True
+    video_path = os.path.join(latest_folder, 'optimization_history.mp4')
+    plotter = pv.Plotter(off_screen=True, window_size=[1920, 1080])
 
-plotter.open_movie(video_path, framerate=4)
+    plotter.open_movie(video_path, framerate=4)
 
-camera = {
-    'position': (-20.0, -15.0, 10.0),
-    'focal_point': (0.0, 0.0, 0.0),
-    'viewup': (0, 0, 1),
-}
+    camera = {
+        'position': (-20.0, -15.0, 10.0),
+        'focal_point': (0.0, 0.0, 0.0),
+        'viewup': (0, 0, 1),
+    }
 
-cd_history = []
-cl_history = []
-sref_history = []
-wing_img_path = os.path.join(latest_folder, 'final_wing.png')
+    cd_history = []
+    cl_history = []
+    sref_history = []
+    wing_img_path = os.path.join(latest_folder, 'final_wing.png')
 
-for iteration in range(num_iterations):
-    x_scaled = x_history[iteration]
+    for iteration in range(num_iterations):
+        x_scaled = x_history[iteration]
 
-    # Undo scaling for each design variable to set physical (unscaled) values on jax_sim
-    # Use slicing to handle vector-valued design variables
-    unscaled_values = {}
-    curr_idx = 0
-    for name, dv_info in design_variables.items():
-        var_size = dv_info.variable.shape[0] if len(dv_info.variable.shape) > 0 else 1
-        slc = slice(curr_idx, curr_idx + var_size)
-        unscaled_val = x_scaled[slc] / dv_info.scaler
-        jax_sim[dv_info.variable] = unscaled_val
-        unscaled_values[name] = unscaled_val
-        curr_idx += var_size
+        # Undo scaling for each design variable to set physical (unscaled) values on jax_sim
+        # Use slicing to handle vector-valued design variables
+        unscaled_values = {}
+        curr_idx = 0
+        for name, dv_info in design_variables.items():
+            var_size = dv_info.variable.shape[0] if len(dv_info.variable.shape) > 0 else 1
+            slc = slice(curr_idx, curr_idx + var_size)
+            unscaled_val = x_scaled[slc] / dv_info.scaler
+            jax_sim[dv_info.variable] = unscaled_val
+            unscaled_values[name] = unscaled_val
+            curr_idx += var_size
 
-    # Run the simulator to update geometry coefficients
-    jax_sim.run()
+        # Run the simulator to update geometry coefficients
+        jax_sim.run()
 
-    # Record history metrics
-    cl_val = float(jax_sim[CL].item() if hasattr(jax_sim[CL], 'item') else jax_sim[CL][0])
-    cd_val = float(jax_sim[CDi].item() if hasattr(jax_sim[CDi], 'item') else jax_sim[CDi][0])
-    sref_val = float(jax_sim[planform_area].item() if hasattr(jax_sim[planform_area], 'item') else jax_sim[planform_area][0])
+        # Record history metrics
+        cl_val = float(jax_sim[CL].item() if hasattr(jax_sim[CL], 'item') else jax_sim[CL][0])
+        cd_val = float(jax_sim[CDi].item() if hasattr(jax_sim[CDi], 'item') else jax_sim[CDi][0])
+        sref_val = float(jax_sim[planform_area].item() if hasattr(jax_sim[planform_area], 'item') else jax_sim[planform_area][0])
 
-    cd_history.append(cd_val * 1e4)  # CD in drag counts (x 1e4)
-    cl_history.append(cl_val)
-    sref_history.append(sref_val)
+        cd_history.append(cd_val * 1e4)  # CD in drag counts (x 1e4)
+        cl_history.append(cl_val)
+        sref_history.append(sref_val)
 
-    # Get plotting elements from geometry.plot (returns list of pyvista objects)
-    plotting_elements = geometry.plot(show=False)
+        # Get plotting elements from geometry.plot (returns list of pyvista objects)
+        plotting_elements = geometry.plot(show=False)
 
-    # Clear previous frame and add new geometry
-    plotter.clear()
+        # Clear previous frame and add new geometry
+        plotter.clear()
 
-    # Add each plotting element to the plotter
-    for element in plotting_elements:
-        if isinstance(element, dict) and 'mesh' in element:
-            mesh = element['mesh']
-            kwargs = element.get('kwargs', {})
-            plotter.add_mesh(mesh, **kwargs)
-        elif isinstance(element, tuple) and len(element) == 2:
-            mesh, kwargs = element
-            plotter.add_mesh(mesh, **kwargs)
-        elif isinstance(element, pv.Actor):
-            plotter.add_actor(element)
-        elif isinstance(element, pv.DataSet):
-            plotter.add_mesh(element)
-
-    # Build parameter info string depending on active formulation
-    if formulation == 'ar_area':
-        ar_val = float(unscaled_values['aspect_ratio'].item() if hasattr(unscaled_values['aspect_ratio'], 'item') else unscaled_values['aspect_ratio'][0]) if 'aspect_ratio' in unscaled_values else 10.0
-        s_val = float(unscaled_values['planform_area_dv'].item() if hasattr(unscaled_values['planform_area_dv'], 'item') else unscaled_values['planform_area_dv'][0]) if 'planform_area_dv' in unscaled_values else 10.0
-        chord_val = np.sqrt(s_val / ar_val)
-        span_val = np.sqrt(s_val * ar_val)
-        dv_str = f"AR={ar_val:.2f}  S={s_val:.2f}"
-    elif formulation == 'chord_span':
-        cs_val = float(unscaled_values['chord_stretch_dv'].item() if hasattr(unscaled_values['chord_stretch_dv'], 'item') else unscaled_values['chord_stretch_dv'][0]) if 'chord_stretch_dv' in unscaled_values else 0.0
-        ss_val = float(unscaled_values['span_stretch_dv'].item() if hasattr(unscaled_values['span_stretch_dv'], 'item') else unscaled_values['span_stretch_dv'][0]) if 'span_stretch_dv' in unscaled_values else 0.0
-        chord_val = 1.0 + cs_val
-        span_val = 10.0 + 2.0 * ss_val
-        dv_str = f"c_stretch={cs_val:.3f}  b_stretch={ss_val:.2f}"
-
-    pitch_val = float(unscaled_values['pitch'].item() if hasattr(unscaled_values['pitch'], 'item') else unscaled_values['pitch'][0]) if 'pitch' in unscaled_values else 0.0
-
-    # Add iteration counter label using unscaled physical values
-    plotter.add_text(
-        f"Iteration {iteration}/{num_iterations - 1}\n"
-        f"Formulation: {formulation}\n"
-        f"{dv_str}  (c={chord_val:.3f}, b={span_val:.2f})\n"
-        f"Pitch={np.degrees(pitch_val):.1f}°",
-        position='upper_left',
-        font_size=12,
-        color='white',
-        shadow=True,
-    )
-
-    # Set camera
-    plotter.camera.position = camera['position']
-    plotter.camera.focal_point = camera['focal_point']
-    plotter.camera.up = camera['viewup']
-    plotter.set_background('black')
-
-    plotter.write_frame()
-    print(f"  Frame {iteration}/{num_iterations - 1} written")
-
-    # Save final wing render on light gray background for the summary plot
-    if iteration == num_iterations - 1:
-        pv_temp = pv.Plotter(off_screen=True, window_size=[1000, 1000])
-        pv_temp.set_background('#f4f4f4')
+        # Add each plotting element to the plotter
         for element in plotting_elements:
             if isinstance(element, dict) and 'mesh' in element:
-                pv_temp.add_mesh(element['mesh'], **element.get('kwargs', {}))
+                mesh = element['mesh']
+                kwargs = element.get('kwargs', {})
+                plotter.add_mesh(mesh, **kwargs)
             elif isinstance(element, tuple) and len(element) == 2:
-                pv_temp.add_mesh(element[0], **element[1])
+                mesh, kwargs = element
+                plotter.add_mesh(mesh, **kwargs)
             elif isinstance(element, pv.Actor):
-                pv_temp.add_actor(element)
+                plotter.add_actor(element)
             elif isinstance(element, pv.DataSet):
-                pv_temp.add_mesh(element)
-        pv_temp.camera.position = camera['position']
-        pv_temp.camera.focal_point = camera['focal_point']
-        pv_temp.camera.up = camera['viewup']
-        pv_temp.add_axes()
-        pv_temp.screenshot(wing_img_path)
-        pv_temp.close()
+                plotter.add_mesh(element)
 
-plotter.close()
-print(f"Video saved to: {video_path}")
+        # Build parameter info string depending on active formulation
+        if formulation == 'ar_area':
+            ar_val = float(unscaled_values['aspect_ratio'].item() if hasattr(unscaled_values['aspect_ratio'], 'item') else unscaled_values['aspect_ratio'][0]) if 'aspect_ratio' in unscaled_values else 10.0
+            s_val = float(unscaled_values['planform_area_dv'].item() if hasattr(unscaled_values['planform_area_dv'], 'item') else unscaled_values['planform_area_dv'][0]) if 'planform_area_dv' in unscaled_values else 10.0
+            dv_str = f"AR={ar_val:.2f}  S={s_val:.2f}"
+        elif formulation == 'chord_span':
+            ss_val = float(unscaled_values['span_stretch_dv'].item() if hasattr(unscaled_values['span_stretch_dv'], 'item') else unscaled_values['span_stretch_dv'][0]) if 'span_stretch_dv' in unscaled_values else 0.0
+            if 'chord_dvs' in unscaled_values:
+                c_vals = unscaled_values['chord_dvs']
+                c_str = " ".join([f"c{i}={c_vals[i]:.2f}" for i in range(len(c_vals))])
+                dv_str = f"b_stretch={ss_val:.2f}  {c_str}"
+            elif 'chord_stretch_dvs' in unscaled_values:
+                cs_vals = unscaled_values['chord_stretch_dvs']
+                c_str = " ".join([f"c{i}={1.0+cs_vals[i]:.2f}" for i in range(len(cs_vals))])
+                dv_str = f"b_stretch={ss_val:.2f}  {c_str}"
+            else:
+                cs_val = float(unscaled_values['chord_stretch_dv'].item() if hasattr(unscaled_values['chord_stretch_dv'], 'item') else unscaled_values['chord_stretch_dv'][0]) if 'chord_stretch_dv' in unscaled_values else 0.0
+                dv_str = f"b_stretch={ss_val:.2f}  c_stretch={cs_val:.2f}"
 
-# region Plot Summary Figure (Wing geometry vs Theory)
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
+        pitch_val = float(unscaled_values['pitch'].item() if hasattr(unscaled_values['pitch'], 'item') else unscaled_values['pitch'][0]) if 'pitch' in unscaled_values else 0.0
 
-# Compute theoretical Cd = Cl^2 / (pi * AR) in drag counts (x 1e4)
-# AR = b^2 / S_ref; with b = 10.0 and S_ref = 10.0 -> AR = 10
-span_b = 10.0
-target_cl = 0.5
-target_sref = 10.0
-ar = (span_b ** 2) / target_sref
-cd_theory_counts = (target_cl ** 2) / (np.pi * ar) * 1e4
+        # Add iteration counter label using unscaled physical values
+        plotter.add_text(
+            f"Iteration {iteration}/{num_iterations - 1}\n"
+            f"Formulation: {formulation}\n"
+            f"{dv_str}\n"
+            f"Pitch={np.degrees(pitch_val):.1f}°",
+            position='upper_left',
+            font_size=12,
+            color='white',
+            shadow=True,
+        )
 
-fig = plt.figure(figsize=(14, 6), dpi=150)
-gs = fig.add_gridspec(3, 2, width_ratios=[1.1, 1.5], wspace=0.25, hspace=0.2)
+        # Set camera
+        plotter.camera.position = camera['position']
+        plotter.camera.focal_point = camera['focal_point']
+        plotter.camera.up = camera['viewup']
+        plotter.set_background('black')
 
-# Left panel: 3D Render of final optimized wing geometry
-ax_img = fig.add_subplot(gs[:, 0])
-if os.path.exists(wing_img_path):
-    img = mpimg.imread(wing_img_path)
-    ax_img.imshow(img)
-ax_img.axis('off')
+        plotter.write_frame()
+        print(f"  Frame {iteration}/{num_iterations - 1} written")
 
-# Right panels: Optimization history plots
-subplot_bg = '#eaeaf2'
-grid_color = '#ffffff'
-iters = np.arange(num_iterations)
+        # Save final wing render on light gray background for the summary plot
+        if iteration == num_iterations - 1:
+            pv_temp = pv.Plotter(off_screen=True, window_size=[1000, 1000])
+            pv_temp.set_background('#f4f4f4')
+            for element in plotting_elements:
+                if isinstance(element, dict) and 'mesh' in element:
+                    pv_temp.add_mesh(element['mesh'], **element.get('kwargs', {}))
+                elif isinstance(element, tuple) and len(element) == 2:
+                    pv_temp.add_mesh(element[0], **element[1])
+                elif isinstance(element, pv.Actor):
+                    pv_temp.add_actor(element)
+                elif isinstance(element, pv.DataSet):
+                    pv_temp.add_mesh(element)
+            pv_temp.camera.position = camera['position']
+            pv_temp.camera.focal_point = camera['focal_point']
+            pv_temp.camera.up = camera['viewup']
+            pv_temp.add_axes()
+            pv_temp.screenshot(wing_img_path)
+            pv_temp.close()
 
-# 1. Top Subplot: CD
-ax_cd = fig.add_subplot(gs[0, 1])
-ax_cd.set_facecolor(subplot_bg)
-ax_cd.grid(True, color=grid_color, linewidth=1.2)
-ax_cd.plot(iters, cd_history, 'o-', color='#3b6998', linewidth=2, markersize=5)
-ax_cd.axhline(cd_theory_counts, color='#7a9bbd', linestyle='--', linewidth=1.8)
-ax_cd.text(1.02, cd_theory_counts, 'theory', color='#7a9bbd', transform=ax_cd.get_yaxis_transform(),
-            va='center', fontsize=11, fontweight='bold')
-ax_cd.set_ylabel('CD', fontsize=11)
-plt.setp(ax_cd.get_xticklabels(), visible=False)
-for spine in ax_cd.spines.values():
-    spine.set_visible(False)
+    plotter.close()
+    print(f"Video saved to: {video_path}")
 
-# 2. Middle Subplot: CL
-ax_cl = fig.add_subplot(gs[1, 1], sharex=ax_cd)
-ax_cl.set_facecolor(subplot_bg)
-ax_cl.grid(True, color=grid_color, linewidth=1.2)
-ax_cl.plot(iters, cl_history, 'o-', color='#4fa86c', linewidth=2, markersize=5)
-ax_cl.axhline(target_cl, color='#87c79d', linestyle='--', linewidth=1.8)
-ax_cl.text(1.02, target_cl, 'con', color='#87c79d', transform=ax_cl.get_yaxis_transform(),
-            va='center', fontsize=11, fontweight='bold')
-ax_cl.set_ylabel('CL', fontsize=11)
-plt.setp(ax_cl.get_xticklabels(), visible=False)
-for spine in ax_cl.spines.values():
-    spine.set_visible(False)
+    # region Plot Summary Figure (Wing geometry vs Theory)
+    import matplotlib.pyplot as plt
+    import matplotlib.image as mpimg
 
-# 3. Bottom Subplot: S_ref
-ax_sref = fig.add_subplot(gs[2, 1], sharex=ax_cd)
-ax_sref.set_facecolor(subplot_bg)
-ax_sref.grid(True, color=grid_color, linewidth=1.2)
-ax_sref.plot(iters, sref_history, 'o-', color='#c54b4b', linewidth=2, markersize=5)
-ax_sref.axhline(target_sref, color='#e08585', linestyle='--', linewidth=1.8)
-ax_sref.text(1.02, target_sref, 'con', color='#e08585', transform=ax_sref.get_yaxis_transform(),
-            va='center', fontsize=11, fontweight='bold')
-ax_sref.set_ylabel('S_ref', fontsize=11)
-ax_sref.set_xlabel('Iterations', fontsize=11)
-for spine in ax_sref.spines.values():
-    spine.set_visible(False)
+    # Compute theoretical Cd = Cl^2 / (pi * AR) in drag counts (x 1e4)
+    # AR = b^2 / S_ref; with b = 10.0 and S_ref = 10.0 -> AR = 10
+    span_b = 10.0
+    target_cl = 0.5
+    target_sref = 10.0
+    ar = (span_b ** 2) / target_sref
+    cd_theory_counts = (target_cl ** 2) / (np.pi * ar) * 1e4
 
-fig.suptitle("Optimal wing geometry vs theory", y=0.03, fontsize=15, fontweight='bold')
+    fig = plt.figure(figsize=(14, 6), dpi=150)
+    gs = fig.add_gridspec(3, 2, width_ratios=[1.1, 1.5], wspace=0.25, hspace=0.2)
 
-summary_fig_path = os.path.join(latest_folder, 'optimization_summary.png')
-plt.savefig(summary_fig_path, bbox_inches='tight', dpi=200)
-plt.close()
-print(f"Summary figure saved to: {summary_fig_path}")
+    # Left panel: 3D Render of final optimized wing geometry
+    ax_img = fig.add_subplot(gs[:, 0])
+    if os.path.exists(wing_img_path):
+        img = mpimg.imread(wing_img_path)
+        ax_img.imshow(img)
+    ax_img.axis('off')
 
-# endregion Plot Summary Figure
-# endregion Plot Optimization History
+    # Right panels: Optimization history plots
+    subplot_bg = '#eaeaf2'
+    grid_color = '#ffffff'
+    iters = np.arange(num_iterations)
+
+    # 1. Top Subplot: CD
+    ax_cd = fig.add_subplot(gs[0, 1])
+    ax_cd.set_facecolor(subplot_bg)
+    ax_cd.grid(True, color=grid_color, linewidth=1.2)
+    ax_cd.plot(iters, cd_history, 'o-', color='#3b6998', linewidth=2, markersize=5)
+    ax_cd.axhline(cd_theory_counts, color='#7a9bbd', linestyle='--', linewidth=1.8)
+    ax_cd.text(1.02, cd_theory_counts, 'theory', color='#7a9bbd', transform=ax_cd.get_yaxis_transform(),
+                va='center', fontsize=11, fontweight='bold')
+    ax_cd.set_ylabel('CD', fontsize=11)
+    plt.setp(ax_cd.get_xticklabels(), visible=False)
+    for spine in ax_cd.spines.values():
+        spine.set_visible(False)
+
+    # 2. Middle Subplot: CL
+    ax_cl = fig.add_subplot(gs[1, 1], sharex=ax_cd)
+    ax_cl.set_facecolor(subplot_bg)
+    ax_cl.grid(True, color=grid_color, linewidth=1.2)
+    ax_cl.plot(iters, cl_history, 'o-', color='#4fa86c', linewidth=2, markersize=5)
+    ax_cl.axhline(target_cl, color='#87c79d', linestyle='--', linewidth=1.8)
+    ax_cl.text(1.02, target_cl, 'con', color='#87c79d', transform=ax_cl.get_yaxis_transform(),
+                va='center', fontsize=11, fontweight='bold')
+    ax_cl.set_ylabel('CL', fontsize=11)
+    plt.setp(ax_cl.get_xticklabels(), visible=False)
+    for spine in ax_cl.spines.values():
+        spine.set_visible(False)
+
+    # 3. Bottom Subplot: S_ref
+    ax_sref = fig.add_subplot(gs[2, 1], sharex=ax_cd)
+    ax_sref.set_facecolor(subplot_bg)
+    ax_sref.grid(True, color=grid_color, linewidth=1.2)
+    ax_sref.plot(iters, sref_history, 'o-', color='#c54b4b', linewidth=2, markersize=5)
+    ax_sref.axhline(target_sref, color='#e08585', linestyle='--', linewidth=1.8)
+    ax_sref.text(1.02, target_sref, 'con', color='#e08585', transform=ax_sref.get_yaxis_transform(),
+                va='center', fontsize=11, fontweight='bold')
+    ax_sref.set_ylabel('S_ref', fontsize=11)
+    ax_sref.set_xlabel('Iterations', fontsize=11)
+    for spine in ax_sref.spines.values():
+        spine.set_visible(False)
+
+    fig.suptitle("Optimal wing geometry vs theory", y=0.03, fontsize=15, fontweight='bold')
+
+    summary_fig_path = os.path.join(latest_folder, 'optimization_summary.png')
+    plt.savefig(summary_fig_path, bbox_inches='tight', dpi=200)
+    plt.close()
+    print(f"Summary figure saved to: {summary_fig_path}")
+
+    # region Automatic Lift Distribution Analysis
+    from optimization_analyses.extract_lift_distribution import extract_and_plot_lift_distribution
+    import sys
+    extract_and_plot_lift_distribution(
+        output_folder=latest_folder,
+        jax_sim=jax_sim,
+        main_script=sys.modules[__name__],
+    )
+    # endregion
+
+    # endregion Plot Summary Figure
+    # endregion Plot Optimization History
