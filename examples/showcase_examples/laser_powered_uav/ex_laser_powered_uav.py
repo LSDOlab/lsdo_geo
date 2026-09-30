@@ -16,6 +16,7 @@ from lsdo_geo import (
     GeometricVariables,
     import_geometry,
 )
+from lsdo_geo.core.parameterization.ffd_block import FFDBlock
 
 recorder = csdl.Recorder(inline=True)
 recorder.start()
@@ -78,6 +79,10 @@ lprop_front_para = left_propeller.project(np.array([30.0, -7.0, 0.75]), plot=Fal
 rfuse_rear_para = right_fuselage.project(np.array([30.0, 7.0, 0.75]), plot=False)
 rprop_front_para = right_propeller.project(np.array([30.0, 7.0, 0.75]), plot=False)
 
+# Wing-fuselage attachment reference points
+wing_attach_r_para = wing.project(np.array([16.0, 7.0, 0.5]), plot=False)
+rfuse_wing_attach_para = right_fuselage.project(np.array([16.0, 7.0, 0.5]), plot=False)
+
 # Discretization lines for planform integration
 y_left = np.linspace(-31.9657, -7.0, 9)
 y_center = np.linspace(-7.0, 7.0, 5)[1:-1]
@@ -106,10 +111,28 @@ tail_te_line_para = tail.project(np.vstack([pts_tail_te_left, pts_tail_te_center
 
 # region Create Parameterization Objects (FFD Blocks & Sectional Parameterizations)
 # FFD Blocks
-wing_ffd_block = construct_ffd_block_around_entities(entities=wing, num_coefficients=(2, 5, 2), degree=(1, 1, 1), name="wing_ffd_block")
+# Wing FFD with sections coinciding with the fuselage booms: [-y_tip, -y_fuse, 0.0, y_fuse, y_tip]
+y_fuse = 7.0
+wing_pts = np.vstack([f.coefficients.value.reshape(-1, 3) for f in wing.functions.values()])
+mins_w = np.min(wing_pts, axis=0)
+maxs_w = np.max(wing_pts, axis=0)
+y_sections_w = np.array([mins_w[1], -y_fuse, 0.0, y_fuse, maxs_w[1]])
+v_sections_w = (y_sections_w - mins_w[1]) / (maxs_w[1] - mins_w[1])
+
+wing_ffd_init_coeffs = np.zeros((2, 5, 2, 3))
+for i, x in enumerate([mins_w[0], maxs_w[0]]):
+    for j, y in enumerate(y_sections_w):
+        for k, z in enumerate([mins_w[2], maxs_w[2]]):
+            wing_ffd_init_coeffs[i, j, k, :] = [x, y, z]
+
+knots_y_w = np.array([0.0, 0.0, v_sections_w[1], 0.5, v_sections_w[3], 1.0, 1.0])
+knots_x_w = np.array([0.0, 0.0, 1.0, 1.0])
+knots_z_w = np.array([0.0, 0.0, 1.0, 1.0])
+wing_ffd_space = lfs.BSplineSpace(num_parametric_dimensions=3, degree=(1, 1, 1), coefficients_shape=(2, 5, 2), knots=(knots_x_w, knots_y_w, knots_z_w))
+wing_ffd_block = FFDBlock(space=wing_ffd_space, coefficients=wing_ffd_init_coeffs, name="wing_ffd_block", embedded_entities=[wing])
 tail_ffd_block = construct_ffd_block_around_entities(entities=tail, num_coefficients=(2, 3, 2), degree=(1, 1, 1), name="tail_ffd_block")
-left_fuselage_ffd_block = construct_ffd_block_around_entities(entities=left_fuselage, num_coefficients=(2, 2, 2), degree=(1, 1, 1), name="left_fuselage_ffd_block")
-right_fuselage_ffd_block = construct_ffd_block_around_entities(entities=right_fuselage, num_coefficients=(2, 2, 2), degree=(1, 1, 1), name="right_fuselage_ffd_block")
+left_fuselage_ffd_block = construct_ffd_block_around_entities(entities=left_fuselage, num_coefficients=(3, 2, 2), degree=(1, 1, 1), name="left_fuselage_ffd_block")
+right_fuselage_ffd_block = construct_ffd_block_around_entities(entities=right_fuselage, num_coefficients=(3, 2, 2), degree=(1, 1, 1), name="right_fuselage_ffd_block")
 left_propeller_ffd_block = construct_ffd_block_around_entities(entities=left_propeller, num_coefficients=(2, 2, 2), degree=(1, 1, 1), name="left_propeller_ffd_block")
 right_propeller_ffd_block = construct_ffd_block_around_entities(entities=right_propeller, num_coefficients=(2, 2, 2), degree=(1, 1, 1), name="right_propeller_ffd_block")
 
@@ -132,20 +155,12 @@ wing_span_stretch = csdl.Variable(value=0., name="wing_span_stretch")
 
 
 
-wing_mid_chord = 0.5 * (wing_tip_chord_stretch + wing_root_chord_stretch)
 wing_sectional_chord_stretches = csdl.concatenate((
     wing_tip_chord_stretch,
-    wing_mid_chord,
     wing_root_chord_stretch,
-    wing_mid_chord,
+    wing_root_chord_stretch,
+    wing_root_chord_stretch,
     wing_tip_chord_stretch,
-))
-wing_sectional_span_translations = csdl.concatenate((
-    -wing_span_stretch,
-    -wing_span_stretch / 2,
-    csdl.Variable(value=0.),
-    wing_span_stretch / 2,
-    wing_span_stretch,
 ))
 
 # Tail (symmetric chord stretch, span stretch, and longitudinal translation)
@@ -166,25 +181,22 @@ tail_sectional_span_translations = csdl.concatenate((
     tail_span_stretch,
 ))
 
-# left_fuselage_stretch_bs = lfs.Function(space=space_2dof_linear, coefficients=csdl.Variable(shape=(2,), value=np.zeros(2)), name="left_fuselage_stretch")
-# right_fuselage_stretch_bs = lfs.Function(space=space_2dof_linear, coefficients=csdl.Variable(shape=(2,), value=np.zeros(2)), name="right_fuselage_stretch")
+fuselage_stretch = csdl.Variable(value=0., name="fuselage_stretch")
+fuselage_translation_y = csdl.Variable(value=0., name="fuselage_translation_y")
+wing_fuse_trans_y = csdl.Variable(value=0., name="wing_fuse_trans_y")
+propeller_stretch = csdl.Variable(value=0., name="propeller_stretch")
+propeller_translation_x = csdl.Variable(value=0., name="propeller_translation_x")
 
-fuselage_stretch = csdl.Variable(value=0.)
-fuselage_translation = csdl.Variable(shape=(3,), value=0.)
-right_fuselage_translation = fuselage_translation
-left_fuselage_translation = fuselage_translation.set(csdl.slice[1], -fuselage_translation[1])
-
-# left_prop_stretch_bs = lfs.Function(space=space_1dof_constant, coefficients=csdl.Variable(shape=(1,), value=np.zeros(1)), name="left_prop_stretch")
-# right_prop_stretch_bs = lfs.Function(space=space_1dof_constant, coefficients=csdl.Variable(shape=(1,), value=np.zeros(1)), name="right_prop_stretch")
-# left_prop_trans_x_bs = lfs.Function(space=space_1dof_constant, coefficients=csdl.Variable(shape=(1,), value=np.zeros(1)), name="left_prop_trans_x")
-# right_prop_trans_x_bs = lfs.Function(space=space_1dof_constant, coefficients=csdl.Variable(shape=(1,), value=np.zeros(1)), name="right_prop_trans_x")
-
-propeller_stretch = csdl.Variable(value=0.)
-
-propeller_translation = csdl.Variable(shape=(3,), value=0.)
-right_propeller_translation = propeller_translation
-left_propeller_translation = propeller_translation.set(
-    csdl.slice[1], -propeller_translation[1])
+# Wing span translations: section at y=7 translates by wing_fuse_trans_y, outboard by wing_span_stretch
+# When fuselages translate away from each other, conn_wing_rf[1] drives wing_fuse_trans_y,
+# causing strictly the inboard/rectangular wing section to stretch or squish, while outboard sections translate rigidly.
+wing_sectional_span_translations = csdl.concatenate((
+    -(wing_fuse_trans_y + wing_span_stretch),
+    -wing_fuse_trans_y,
+    csdl.Variable(value=0.),
+    wing_fuse_trans_y,
+    wing_fuse_trans_y + wing_span_stretch,
+))
 
 # endregion Create Parameterization Objects
 
@@ -209,43 +221,56 @@ tail.translate(translation=csdl.concatenate((
 )))
 
 # Fuselages
-# u_fuse = np.linspace(0, 1, left_fuselage_sectional_parameterization.num_sections).reshape((-1, 1))
-fuselage_sectional_stretches = csdl.concatenate((-fuselage_stretch/2, fuselage_stretch/2))
+# Section 0 (nose at x=0) = 0, Section 1 (wing at x=15) = 0, Section 2 (tail at x=30) = fuselage_stretch
+fuselage_sectional_stretches = csdl.concatenate((
+    csdl.Variable(value=0.),
+    csdl.Variable(value=0.),
+    fuselage_stretch,
+))
 
 lf_params = SectionalParameters()
 lf_params.add_translation(axis=0, translation=fuselage_sectional_stretches)
 left_fuselage.set_coefficients(left_fuselage_ffd_block.evaluate_ffd(left_fuselage_sectional_parameterization.evaluate(lf_params, plot=False), plot=False))
-left_fuselage.translate(translation=left_fuselage_translation)
+left_fuselage.translate(translation=csdl.concatenate((csdl.Variable(value=0.), -fuselage_translation_y, csdl.Variable(value=0.))))
 
 rf_params = SectionalParameters()
 rf_params.add_translation(axis=0, translation=fuselage_sectional_stretches)
 right_fuselage.set_coefficients(right_fuselage_ffd_block.evaluate_ffd(right_fuselage_sectional_parameterization.evaluate(rf_params, plot=False), plot=False))
-right_fuselage.translate(translation=right_fuselage_translation)
+right_fuselage.translate(translation=csdl.concatenate((csdl.Variable(value=0.), fuselage_translation_y, csdl.Variable(value=0.))))
 
-# Propellers (radial stretch on Y & Z, longitudinal translation on X)
-
-u_prop = np.linspace(0, 1, 2).reshape((-1, 1))
+# Propellers (radial stretch on Y & Z, translation in X and Y)
 lp_params = SectionalParameters()
 lp_params.add_stretch(axis=1, stretch=propeller_stretch)
 lp_params.add_stretch(axis=2, stretch=propeller_stretch)
-# lp_params.add_translation(axis=0, translation=left_prop_trans_x_bs.evaluate(u_prop))
 left_propeller.set_coefficients(left_propeller_ffd_block.evaluate_ffd(left_propeller_sectional_parameterization.evaluate(lp_params, plot=False), plot=False))
-left_propeller.translate(translation=left_propeller_translation)
+left_propeller.translate(translation=csdl.concatenate((
+    propeller_translation_x,
+    -fuselage_translation_y,
+    csdl.Variable(value=0.),
+)))
 
 rp_params = SectionalParameters()
 rp_params.add_stretch(axis=1, stretch=propeller_stretch)
 rp_params.add_stretch(axis=2, stretch=propeller_stretch)
-# rp_params.add_translation(axis=0, translation=right_prop_trans_x_bs.evaluate(u_prop))
 right_propeller.set_coefficients(right_propeller_ffd_block.evaluate_ffd(right_propeller_sectional_parameterization.evaluate(rp_params, plot=False), plot=False))
-right_propeller.translate(translation=right_propeller_translation)
+right_propeller.translate(translation=csdl.concatenate((
+    propeller_translation_x,
+    fuselage_translation_y,
+    csdl.Variable(value=0.),
+)))
 
-# Tail incidence angle rotation
-tail_incidence_angle = csdl.Variable(name="tail_incidence_angle", value=np.array([2.0]))
+# Tail incidence angle rotation (nominal 0.0 deg from initial CAD geometry)
+tail_incidence_angle = csdl.Variable(name="tail_incidence_angle", value=np.array([0.0]))
 tail_qc_center_eval = tail.evaluate(tail_le_center) + 0.25 * (tail.evaluate(tail_te_center) - tail.evaluate(tail_le_center))
 tail.rotate(rotation_origin=tail_qc_center_eval, axis_vector=np.array([0., 1., 0.]), angles=tail_incidence_angle, units="degrees")
 
-# Computed Wing Metrics
-wing_span_comp = geometry.evaluate(wing_le_right)[1] - geometry.evaluate(wing_le_left)[1]
+# Computed Wing Metrics and Fuselage Connection Invariant
+wing_attach_eval = geometry.evaluate(wing_attach_r_para)
+rfuse_wing_attach_eval = geometry.evaluate(rfuse_wing_attach_para)
+conn_wing_rf = wing_attach_eval - rfuse_wing_attach_eval
+
+outboard_wing_span = geometry.evaluate(wing_le_right)[1] - wing_attach_eval[1]
+wing_span_comp = 2.0 * (7.0 + outboard_wing_span)
 wing_root_chord_comp = geometry.evaluate(wing_te_center)[0] - geometry.evaluate(wing_le_center)[0]
 wing_tip_chord_l_comp = geometry.evaluate(wing_te_left)[0] - geometry.evaluate(wing_le_left)[0]
 wing_tip_chord_r_comp = geometry.evaluate(wing_te_right)[0] - geometry.evaluate(wing_le_right)[0]
@@ -256,7 +281,8 @@ wing_te_eval = geometry.evaluate(wing_te_line_para)
 chords_w = csdl.norm(wing_te_eval - wing_le_eval, axes=(1,))
 mid_w = 0.5 * (wing_le_eval + wing_te_eval)
 dl_w = csdl.norm(mid_w[1:] - mid_w[:-1], axes=(1,))
-wing_area_comp = csdl.sum(0.5 * (chords_w[:-1] + chords_w[1:]) * dl_w)
+wing_area_raw = csdl.sum(0.5 * (chords_w[:-1] + chords_w[1:]) * dl_w)
+wing_area_comp = wing_area_raw - 2.0 * wing_fuse_trans_y * wing_root_chord_comp
 wing_ar_comp = wing_span_comp**2 / wing_area_comp
 
 # Computed Tail Metrics
@@ -290,16 +316,17 @@ conn_prop_rf = geometry.evaluate(rfuse_rear_para) - geometry.evaluate(rprop_fron
 # endregion Evaluate Forward Parameterization Map
 
 # region Target Design Variables
-wing_area_dv = csdl.Variable(name="wing_area", value=np.array([205.0]))
-wing_ar_dv = csdl.Variable(name="wing_aspect_ratio", value=np.array([21.0]))
-wing_taper_dv = csdl.Variable(name="wing_taper_ratio", value=np.array([0.45]))
+# Nominal baseline values equal initial CAD geometry values so baseline solves with zero deformation
+wing_area_dv = csdl.Variable(name="wing_area", value=wing_area_comp.value)
+wing_ar_dv = csdl.Variable(name="wing_aspect_ratio", value=wing_ar_comp.value)
+wing_taper_dv = csdl.Variable(name="wing_taper_ratio", value=wing_taper_comp.value)
 
-tail_area_dv = csdl.Variable(name="tail_area", value=np.array([62.0]))
-tail_ar_dv = csdl.Variable(name="tail_aspect_ratio", value=np.array([4.1]))
-tail_taper_dv = csdl.Variable(name="tail_taper_ratio", value=tail_taper_comp.value)  # Keep tail taper ratio fixed for this example
-tail_moment_arm_dv = csdl.Variable(name="tail_moment_arm", value=np.array([14.0]))
+tail_area_dv = csdl.Variable(name="tail_area", value=tail_area_comp.value)
+tail_ar_dv = csdl.Variable(name="tail_aspect_ratio", value=tail_ar_comp.value)
+tail_taper_dv = csdl.Variable(name="tail_taper_ratio", value=tail_taper_comp.value)
+tail_moment_arm_dv = csdl.Variable(name="tail_moment_arm", value=tail_moment_arm_comp.value)
 
-propeller_radius_dv = csdl.Variable(name="propeller_radius", value=np.array([4.0]))
+propeller_radius_dv = csdl.Variable(name="propeller_radius", value=rprop_radius_comp.value)
 # endregion Target Design Variables
 
 # region Setup and Evaluate Geometry Parameterization Solver
@@ -316,32 +343,31 @@ parameterization_solver = ParameterizationSolver()
 # Solver States
 parameterization_solver.add_state(wing_chord_stretches)
 parameterization_solver.add_state(wing_span_stretch)
+parameterization_solver.add_state(wing_fuse_trans_y)
 parameterization_solver.add_state(tail_chord_stretches)
 parameterization_solver.add_state(tail_span_stretch)
 parameterization_solver.add_state(tail_translation_x)
 parameterization_solver.add_state(fuselage_stretch)
-parameterization_solver.add_state(fuselage_translation)
+parameterization_solver.add_state(fuselage_translation_y)
 parameterization_solver.add_state(propeller_stretch)
-parameterization_solver.add_state(propeller_translation)
-# parameterization_solver.add_state(tail_trans_x_bs.coefficients)
-# parameterization_solver.add_state(left_fuselage_stretch_bs.coefficients)
-# parameterization_solver.add_state(right_fuselage_stretch_bs.coefficients)
-# parameterization_solver.add_state(left_prop_stretch_bs.coefficients)
-# parameterization_solver.add_state(right_prop_stretch_bs.coefficients)
-# parameterization_solver.add_state(left_prop_trans_x_bs.coefficients)
-# parameterization_solver.add_state(right_prop_trans_x_bs.coefficients)
+parameterization_solver.add_state(propeller_translation_x)
 
-# Constraints
-# Symmetric constraints are satisfied by construction:
-# - Left and right wing tip chords are symmetric by definition
-# - Left and right tail tip chords are symmetric by definition
-# - Left tail attachment and propeller attachment are symmetric to right attachments
-# parameterization_solver.add_equality_constraint(wing_tip_chord_l_comp, wing_tip_chord_r_comp)
-# parameterization_solver.add_equality_constraint(tail_tip_chord_l_comp, tail_tip_chord_r_comp)
-# parameterization_solver.add_equality_constraint(conn_tail_lf, conn_tail_lf.value)
-parameterization_solver.add_equality_constraint(conn_tail_rf, conn_tail_rf.value)
-# parameterization_solver.add_equality_constraint(conn_prop_lf, conn_prop_lf.value)
-parameterization_solver.add_equality_constraint(conn_prop_rf, conn_prop_rf.value)
+target_conn_wing_rf = conn_wing_rf.value.copy()
+target_conn_tail_rf = conn_tail_rf.value.copy()
+target_conn_prop_rf = conn_prop_rf.value.copy()
+
+# Constraints:
+# Wing is completely fixed to point on fuselage:
+# In Y: conn_wing_rf[1] ensures wing section at fuselage moves rigidly with the fuselage
+# When fuselages translate away from each other, strictly the inboard/rectangular wing section stretches or squishes
+parameterization_solver.add_equality_constraint(conn_wing_rf[1], target_conn_wing_rf[1])
+# Tail is completely fixed to point on fuselage:
+# In X: conn_tail_rf[0] ensures tail stays attached to rfuse rear as fuselage stretches
+# In Y: conn_tail_rf[1] ensures fuselage translates laterally apart when tail span changes
+# In X: conn_prop_rf[0] ensures prop stays attached to rfuse rear
+parameterization_solver.add_equality_constraint(conn_tail_rf[0], target_conn_tail_rf[0])
+parameterization_solver.add_equality_constraint(conn_tail_rf[1], target_conn_tail_rf[1])
+parameterization_solver.add_equality_constraint(conn_prop_rf[0], target_conn_prop_rf[0])
 
 # Geometric Variables
 geometric_variables = GeometricVariables()
@@ -352,7 +378,6 @@ geometric_variables.add_variable(tail_area_comp, tail_area_dv)
 geometric_variables.add_variable(tail_ar_comp, tail_ar_dv)
 geometric_variables.add_variable(tail_taper_comp, tail_taper_dv)
 geometric_variables.add_variable(tail_moment_arm_comp, tail_moment_arm_dv)
-# geometric_variables.add_variable(lprop_radius_comp, propeller_radius_dv)
 geometric_variables.add_variable(rprop_radius_comp, propeller_radius_dv)
 
 print("Solving geometry parameterization...")
@@ -367,6 +392,11 @@ print(f"Tail: Area = {tail_area_comp.value[0]:.2f} (target {tail_area_dv.value[0
 print(f"Tail Moment Arm = {tail_moment_arm_comp.value[0]:.2f} (target {tail_moment_arm_dv.value[0]:.2f})")
 print(f"Tail Incidence Angle = {tail_incidence_angle.value[0]:.2f} deg")
 print(f"Propeller Radii: Left = {lprop_radius_comp.value[0]:.3f}, Right = {rprop_radius_comp.value[0]:.3f} (target {propeller_radius_dv.value[0]:.3f})")
+print("=== Connection Invariant Residuals ===")
+print(f"Wing -> Right Fuselage Connection Error (Y): {abs(conn_wing_rf.value[1] - target_conn_wing_rf[1]):.2e} m")
+print(f"Tail -> Right Fuselage Connection Error (X): {abs(conn_tail_rf.value[0] - target_conn_tail_rf[0]):.2e} m")
+print(f"Tail -> Right Fuselage Connection Error (Y): {abs(conn_tail_rf.value[1] - target_conn_tail_rf[1]):.2e} m")
+print(f"Prop -> Right Fuselage Connection Error (X): {abs(conn_prop_rf.value[0] - target_conn_prop_rf[0]):.2e} m")
 print()
 
 # endregion Setup and Evaluate Geometry Parameterization Solver
@@ -421,38 +451,37 @@ video_components = [
     (right_propeller, "#e74c3c", "Right Propeller"),
 ]
 
-# Pre-merge initial CAD geometry meshes into a single reference ghost mesh for high-performance rendering
+# Reference ghost meshes for rendering (kept unmerged to preserve smooth surface normals)
 valid_ghost_meshes = [m for m in initial_meshes if m is not None]
-ghost_mesh = valid_ghost_meshes[0].merge(valid_ghost_meshes[1:]) if len(valid_ghost_meshes) > 1 else valid_ghost_meshes[0]
 
 def render_frame(title_str, val_str, delta_str=""):
     plotter.clear()
 
     # 1. Initial geometry reference ghost plotted in #B6B1A9 with 0.3 opacity on all frames
-    plotter.add_mesh(
-        ghost_mesh,
-        color="#B6B1A9",
-        opacity=0.3,
-        smooth_shading=True,
-        show_edges=False,
-    )
+    for gm in valid_ghost_meshes:
+        plotter.add_mesh(
+            gm,
+            color="#B6B1A9",
+            opacity=0.3,
+            smooth_shading=True,
+            show_edges=False,
+        )
 
-    # 2. Current perturbed geometry with vivid component colors
+    # 2. Current perturbed geometry with vivid component colors (rendered without merging to preserve smooth normals)
     for comp, col, name in video_components:
         comp_meshes = [elem["mesh"] if isinstance(elem, dict) and "mesh" in elem else elem for elem in comp.plot(show=False)]
-        comp_meshes = [m for m in comp_meshes if m is not None]
-        if comp_meshes:
-            merged_comp = comp_meshes[0].merge(comp_meshes[1:]) if len(comp_meshes) > 1 else comp_meshes[0]
-            plotter.add_mesh(
-                merged_comp,
-                color=col,
-                smooth_shading=True,
-                specular=0.6,
-                specular_power=20,
-                ambient=0.25,
-                diffuse=0.75,
-                show_edges=False,
-            )
+        for m in comp_meshes:
+            if m is not None:
+                plotter.add_mesh(
+                    m,
+                    color=col,
+                    smooth_shading=True,
+                    specular=0.6,
+                    specular_power=20,
+                    ambient=0.25,
+                    diffuse=0.75,
+                    show_edges=False,
+                )
 
     plotter.enable_lightkit()
     plotter.set_background("#12151c", top="#1e2330")
@@ -528,7 +557,7 @@ variables_to_sweep = [
         'name': 'Tail Incidence Angle',
         'unit': '°',
         'nominal': tail_incidence_angle.value,
-        'offset': 30.0,  # 10 degrees (tail.rotate uses units="degrees")
+        'offset': 20.0,
     },
     {
         'variable': propeller_radius_dv,
@@ -581,13 +610,13 @@ for var_idx, var_info in enumerate(variables_to_sweep):
 
 # Closing hold position (8 frames = 0.4 sec)
 for _ in range(8):
-    render_frame("Nominal Return", "All 9 Geometric DVs Verified", "Parameterization Complete")
+    render_frame("Nominal Return", "All 8 Geometric DVs Verified", "Parameterization Complete")
 
 plotter.close()
 print(f"Successfully generated video: {video_path}")
 
 # Copy video to artifact directory
-artifact_dir = "/home/andrew/.gemini/antigravity/brain/bc376788-3f47-49d2-871b-76ff050ff703"
+artifact_dir = "/home/andrewfletcher/.gemini/antigravity/brain/29740a73-aa03-496c-b841-730839d9e40d"
 if os.path.exists(artifact_dir):
     dest_video = os.path.join(artifact_dir, "laser_powered_uav_perturbations.mp4")
     shutil.copy2(video_path, dest_video)

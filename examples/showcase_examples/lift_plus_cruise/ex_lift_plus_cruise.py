@@ -890,7 +890,7 @@ num_states = np.sum([list_of_states_arrays[i].shape[0] for i in range(len(list_o
 print('Number of states: ', num_states)
 
 parameterization_solver.evaluate(parameterization_design_parameters)
-geometry.plot()
+# geometry.plot()
 
 # endregion
 
