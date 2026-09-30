@@ -51,9 +51,14 @@ from lsdo_geo import (
     construct_ffd_block_around_entities,
     SectionalParameterization,
     SectionalParameters,
-    ParameterizationSolver,
     GeometricVariables,
+    ParameterizationSolver,
 )
+
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+from physics_models.ar_area_bspline import BsplineTargetRegularization
 
 
 @dataclass
@@ -152,6 +157,8 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
     resolution = resolution_override
     include_camber = None
     include_elevator = None
+    include_thickness_shape = None
+    include_te_thickness = None
 
     # 1. Check saved metadata in output folder
     dv_names = None
@@ -171,11 +178,20 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                         include_camber = bool(data['include_camber'])
                     if include_elevator is None and 'include_elevator' in data:
                         include_elevator = bool(data['include_elevator'])
+                    if include_thickness_shape is None and 'include_thickness_shape' in data:
+                        include_thickness_shape = bool(data['include_thickness_shape'])
+                    if include_te_thickness is None and 'include_te_thickness' in data:
+                        include_te_thickness = bool(data['include_te_thickness'])
                 except Exception:
                     pass
 
     # 2. Dynamic parsing if dv_names metadata is available
     if dv_names is not None:
+        if include_thickness_shape is None:
+            include_thickness_shape = 'thickness_shape_dvs' in dv_names
+        if include_te_thickness is None:
+            include_te_thickness = False
+
         if formulation is None:
             if any(k in dv_names for k in ['chord_stretch_dvs', 'span_stretch_dv', 'thickness_stretch_dvs']):
                 formulation = 'chord_span'
@@ -186,12 +202,15 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
             for res_candidate, n_stn in [('fast', 5), ('full', 8)]:
                 expected_len = 0
                 for name in dv_names:
-                    if name in ['chord_stretch_dvs', 'sweep_dvs', 'thickness_stretch_dvs', 'twist_dvs', 'ttop_dvs', 'tweb_dvs']:
+                    if name in ['chord_stretch_dvs', 'sweep_dvs', 'thickness_stretch_dvs', 'twist_dvs', 'ttop_dvs', 'tweb_dvs', 'tc_target_control_points']:
                         expected_len += n_stn
-                    elif name in ['taper_dvs', 'sweep_angle_dvs']:
+                    elif name in ['taper_dvs', 'taper_control_points', 'sweep_angle_dvs', 'sweep_angle_control_points']:
                         expected_len += n_stn - 1
                     elif name == 'camber_dvs':
                         expected_len += 3 * n_stn
+                    elif name == 'thickness_shape_dvs':
+                        n_rows_th = 5 if include_te_thickness else 4
+                        expected_len += n_rows_th * n_stn
                     else:
                         expected_len += 1
                 if expected_len == n_dv:
@@ -224,6 +243,10 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
             elif name in ['pitch', 'pitch_ss', 'pitch_neg1g', 'payload_cg']:
                 dv_dict[name] = x_opt[curr : curr + 1] / 10.0
                 curr += 1
+            elif name == 'payload_center_x':
+                payload_cx_scaler = 1.0 / scale_factor
+                dv_dict[name] = x_opt[curr : curr + 1] / payload_cx_scaler
+                curr += 1
             elif name in ['ttop_dvs', 'tweb_dvs']:
                 dv_dict[name] = x_opt[curr : curr + num_stations] / 5000.0
                 curr += num_stations
@@ -234,15 +257,27 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 camber_scaler = 1.0 / camber_max_percent
                 dv_dict[name] = (x_opt[curr : curr + 3 * num_chord_stations] / camber_scaler).reshape((3, num_chord_stations))
                 curr += 3 * num_chord_stations
-            elif name == 'taper_dvs':
-                dv_dict[name] = x_opt[curr : curr + num_chord_stations - 1] / 2.0
+            elif name in ['taper_dvs', 'taper_control_points']:
+                taper_scaler = 1.0 if name == 'taper_control_points' else 2.0
+                dv_dict['taper_dvs'] = x_opt[curr : curr + num_chord_stations - 1] / taper_scaler
                 curr += num_chord_stations - 1
             elif name == 'aspect_ratio':
                 dv_dict[name] = x_opt[curr : curr + 1] / 0.5
                 curr += 1
-            elif name == 'sweep_angle_dvs':
-                dv_dict[name] = x_opt[curr : curr + num_chord_stations - 1] / 10.0
+            elif name in ['sweep_angle_dvs', 'sweep_angle_control_points']:
+                dv_dict['sweep_angle_dvs'] = x_opt[curr : curr + num_chord_stations - 1] / 10.0
                 curr += num_chord_stations - 1
+            elif name == 'tc_target_control_points':
+                dv_dict[name] = x_opt[curr : curr + num_chord_stations] / 10.0
+                curr += num_chord_stations
+            elif name == 'planform_area_target':
+                dv_dict[name] = x_opt[curr : curr + 1] * (10.0 * (scale_factor ** 2))
+                curr += 1
+            elif name == 'thickness_shape_dvs':
+                n_rows_th = 5 if include_te_thickness else 4
+                thick_shape_scaler = 1.0 / 5.0
+                dv_dict[name] = (x_opt[curr : curr + n_rows_th * num_chord_stations] / thick_shape_scaler).reshape((n_rows_th, num_chord_stations))
+                curr += n_rows_th * num_chord_stations
             else:
                 print(f"  Warning: Unrecognized DV name '{name}', assuming size 1")
                 dv_dict[name] = x_opt[curr : curr + 1]
@@ -252,12 +287,15 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
             include_camber = 'camber_dvs' in dv_dict
             include_elevator = 'elevator_angle' in dv_dict
             include_sweep = 'sweep_dvs' in dv_dict
+            include_thickness_shape = 'thickness_shape_dvs' in dv_dict
             parsed = {
                 'formulation': 'chord_span',
                 'resolution': resolution,
                 'include_camber': include_camber,
                 'include_elevator': include_elevator,
                 'include_sweep': include_sweep,
+                'include_thickness_shape': include_thickness_shape,
+                'include_te_thickness': include_te_thickness,
                 'num_stations': num_stations,
                 'scale_factor': scale_factor,
                 'chord_stretch_dvs': dv_dict.get('chord_stretch_dvs', np.zeros(num_chord_stations)),
@@ -268,6 +306,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 'pitch': dv_dict.get('pitch', np.array([0.0])),
                 'pitch_ss': dv_dict.get('pitch_ss', np.array([0.0])),
                 'camber_dvs': dv_dict.get('camber_dvs', np.zeros((3, num_chord_stations))),
+                'thickness_shape_dvs': dv_dict.get('thickness_shape_dvs', None),
                 'elevator_angle': dv_dict.get('elevator_angle', 0.0),
             }
             print(f"  Detected Formulation : Chord & Span Stretch ('chord_span') [via dv_names metadata]")
@@ -275,6 +314,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
             print(f"  Active DVs ({len(dv_names)}): {dv_names}")
             print(f"  Camber DVs Active    : {include_camber}")
             print(f"  Elevator Active      : {include_elevator}")
+            print(f"  Thick Shape Active   : {include_thickness_shape}")
             print(f"  Chord Stretches (m)  : {np.round(parsed['chord_stretch_dvs'], 3)}")
             print(f"  Effective Chords (m) : {np.round(initial_chord + parsed['chord_stretch_dvs'], 3)}")
             print(f"  Twist Angles (deg)   : {np.round(np.degrees(parsed['twist_dvs']), 2)}")
@@ -283,23 +323,30 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
         else:
             include_camber = 'camber_dvs' in dv_dict
             include_elevator = 'elevator_angle' in dv_dict
+            include_thickness_shape = 'thickness_shape_dvs' in dv_dict
             parsed = {
                 'formulation': 'ar_area',
                 'resolution': resolution,
                 'include_camber': include_camber,
                 'include_elevator': include_elevator,
+                'include_thickness_shape': include_thickness_shape,
+                'include_te_thickness': include_te_thickness,
                 'num_stations': num_stations,
                 'scale_factor': scale_factor,
                 'taper_dvs': dv_dict.get('taper_dvs', np.ones(num_chord_stations - 1)),
                 'aspect_ratio': dv_dict.get('aspect_ratio', np.array([10.0])),
                 'sweep_angle_dvs': dv_dict.get('sweep_angle_dvs', np.zeros(num_chord_stations - 1)),
+                'tc_target_control_points': dv_dict.get('tc_target_control_points', None),
+                'planform_area_target': dv_dict.get('planform_area_target', None),
                 'twist_dvs': dv_dict.get('twist_dvs', np.zeros(num_chord_stations)),
                 'pitch': dv_dict.get('pitch', np.array([0.0])),
                 'pitch_ss': dv_dict.get('pitch_ss', np.array([0.0])),
                 'payload_cg': dv_dict.get('payload_cg', np.array([0.4])),
+                'payload_center_x': dv_dict.get('payload_center_x', np.array([0.5 * scale_factor])),
                 'ttop_dvs': dv_dict.get('ttop_dvs', np.full(num_stations, 0.001)),
                 'tweb_dvs': dv_dict.get('tweb_dvs', np.full(num_stations, 0.001)),
                 'camber_dvs': dv_dict.get('camber_dvs', np.zeros((3, num_chord_stations))),
+                'thickness_shape_dvs': dv_dict.get('thickness_shape_dvs', None),
                 'elevator_angle': dv_dict.get('elevator_angle', 0.0),
             }
             print(f"  Detected Formulation : Aspect Ratio & Area ('ar_area') [via dv_names metadata]")
@@ -310,6 +357,8 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
             print(f"  Aspect Ratio         : {float(parsed['aspect_ratio'][0]):.2f}")
             print(f"  Taper Ratios         : {np.round(parsed['taper_dvs'], 4)}")
             print(f"  Twist Angles (deg)   : {np.round(np.degrees(parsed['twist_dvs']), 2)}")
+            if 'payload_center_x' in dv_dict:
+                print(f"  Payload Center x (m) : {float(parsed['payload_center_x'][0]):.3f}")
             return parsed
 
     # 3. Fallback heuristic detection from vector length if dv_names is not available
@@ -565,8 +614,25 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     upper_thickness_projections = [geometry.project(np.array([0.3 * scale_factor, y, 0.05 * scale_factor]), direction=np.array([0, 0, -1])) for y in chord_station_y]
     lower_thickness_projections = [geometry.project(np.array([0.3 * scale_factor, y, -0.05 * scale_factor]), direction=np.array([0, 0, 1])) for y in chord_station_y]
 
-    num_ffd_coefficients_chordwise = 5 if include_camber else 2
-    ffd_degree_chordwise = 2 if include_camber else 1
+    # Project dense spanwise leading and trailing edge lines to compute planform area via trapezoid rule
+    ny_area = 31
+    area_station_y = np.linspace(0.0, 5.0 * scale_factor, ny_area)
+    area_le_physical = np.zeros((ny_area, 3))
+    area_le_physical[:, 0] = 0.0
+    area_le_physical[:, 1] = area_station_y
+    area_le_physical[:, 2] = 0.0
+    area_te_physical = np.zeros((ny_area, 3))
+    area_te_physical[:, 0] = 1.0 * scale_factor
+    area_te_physical[:, 1] = area_station_y
+    area_te_physical[:, 2] = 0.0
+
+    projected_area_le = geometry.project(area_le_physical, plot=False)
+    projected_area_te = geometry.project(area_te_physical, plot=False)
+
+    include_thickness_shape = parsed_dvs.get('include_thickness_shape', False)
+    include_te_thickness = parsed_dvs.get('include_te_thickness', False)
+    num_ffd_coefficients_chordwise = 5 if (include_camber or include_thickness_shape) else 2
+    ffd_degree_chordwise = 2 if (include_camber or include_thickness_shape) else 1
     ffd_spanwise_degree = 2 if (formulation == 'chord_span' or resolution == 'full') else 3
     ffd_block = construct_ffd_block_around_entities(
         entities=geometry,
@@ -629,6 +695,31 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
             camber_displacement = (full_span_camber / 100.0) * csdl.expand(section_chords, (3, num_ffd_sections), 'j->ij')
             camber_delta = csdl.expand(camber_displacement, (3, num_ffd_sections, 2), 'ij->ijk')
             ffd_coefficients = ffd_coefficients.set(csdl.slice[1:4, :, :, 2], ffd_coefficients[1:4, :, :, 2] + camber_delta)
+
+        if include_thickness_shape and 'thickness_shape_dvs' in parsed_dvs and parsed_dvs['thickness_shape_dvs'] is not None:
+            thickness_shape_dvs_val = parsed_dvs['thickness_shape_dvs']
+            n_rows_th = thickness_shape_dvs_val.shape[0]
+            section_chords = ffd_coefficients[-1, :, 0, 0] - ffd_coefficients[0, :, 0, 0]
+            full_span_thick_list = []
+            for c in range(n_rows_th):
+                row = csdl.concatenate(
+                    [csdl.Variable(value=thickness_shape_dvs_val[c, i]) for i in range(num_chord_stations - 1, 0, -1)] +
+                    [csdl.Variable(value=thickness_shape_dvs_val[c, i]) for i in range(num_chord_stations)]
+                )
+                full_span_thick_list.append(csdl.reshape(row, (1, num_ffd_sections)))
+            full_span_thick = csdl.concatenate(full_span_thick_list, axis=0)
+            thick_displacement = (full_span_thick / 100.0) * csdl.expand(section_chords, (n_rows_th, num_ffd_sections), 'j->ij')
+            half_dt = 0.5 * thick_displacement
+            row_end = n_rows_th
+            dt_pair = csdl.concatenate(
+                [csdl.reshape(-half_dt, (row_end, num_ffd_sections, 1)),
+                 csdl.reshape(half_dt, (row_end, num_ffd_sections, 1))],
+                axis=2
+            )
+            ffd_coefficients = ffd_coefficients.set(
+                csdl.slice[0:row_end, :, :, 2],
+                ffd_coefficients[0:row_end, :, :, 2] + dt_pair
+            )
 
         geometry_coefficients = ffd_block.evaluate_ffd(coefficients=ffd_coefficients, plot=False)
         geometry.set_coefficients(geometry_coefficients)
@@ -702,6 +793,31 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
             camber_delta = csdl.expand(camber_displacement, (3, num_ffd_sections, 2), 'ij->ijk')
             ffd_coefficients = ffd_coefficients.set(csdl.slice[1:4, :, :, 2], ffd_coefficients[1:4, :, :, 2] + camber_delta)
 
+        if include_thickness_shape and 'thickness_shape_dvs' in parsed_dvs and parsed_dvs['thickness_shape_dvs'] is not None:
+            thickness_shape_dvs_val = parsed_dvs['thickness_shape_dvs']
+            n_rows_th = thickness_shape_dvs_val.shape[0]
+            section_chords = ffd_coefficients[-1, :, 0, 0] - ffd_coefficients[0, :, 0, 0]
+            full_span_thick_list = []
+            for c in range(n_rows_th):
+                row = csdl.concatenate(
+                    [csdl.Variable(value=thickness_shape_dvs_val[c, i]) for i in range(num_chord_stations - 1, 0, -1)] +
+                    [csdl.Variable(value=thickness_shape_dvs_val[c, i]) for i in range(num_chord_stations)]
+                )
+                full_span_thick_list.append(csdl.reshape(row, (1, num_ffd_sections)))
+            full_span_thick = csdl.concatenate(full_span_thick_list, axis=0)
+            thick_displacement = (full_span_thick / 100.0) * csdl.expand(section_chords, (n_rows_th, num_ffd_sections), 'j->ij')
+            half_dt = 0.5 * thick_displacement
+            row_end = n_rows_th
+            dt_pair = csdl.concatenate(
+                [csdl.reshape(-half_dt, (row_end, num_ffd_sections, 1)),
+                 csdl.reshape(half_dt, (row_end, num_ffd_sections, 1))],
+                axis=2
+            )
+            ffd_coefficients = ffd_coefficients.set(
+                csdl.slice[0:row_end, :, :, 2],
+                ffd_coefficients[0:row_end, :, :, 2] + dt_pair
+            )
+
         geometry_coefficients = ffd_block.evaluate_ffd(coefficients=ffd_coefficients, plot=False)
         geometry.set_coefficients(geometry_coefficients)
 
@@ -709,24 +825,15 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
         local_chords = [geometry.evaluate(chord_te_projections[i])[0] - geometry.evaluate(chord_le_projections[i])[0] for i in range(num_chord_stations)]
         local_thicknesses = [geometry.evaluate(upper_thickness_projections[i])[2] - geometry.evaluate(lower_thickness_projections[i])[2] for i in range(num_chord_stations)]
 
-        nx_area, ny_area = 21, 41
-        x_grid = np.linspace(0.0, 1.0 * scale_factor, nx_area)
-        y_grid = np.linspace(-5.0 * scale_factor, 5.0 * scale_factor, ny_area)
-        X_mesh, Y_mesh = np.meshgrid(x_grid, y_grid, indexing='ij')
-        upper_seed_pts = np.column_stack([X_mesh.ravel(), Y_mesh.ravel(), np.full(X_mesh.size, 0.05 * scale_factor)])
-        lower_seed_pts = np.column_stack([X_mesh.ravel(), Y_mesh.ravel(), np.full(X_mesh.size, -0.05 * scale_factor)])
-        projected_upper_skin = geometry.project(upper_seed_pts, force_reprojection=False, direction=np.array([0, 0, -1]), plot=False)
-        projected_lower_skin = geometry.project(lower_seed_pts, force_reprojection=False, direction=np.array([0, 0, 1]), plot=False)
+        area_le_pts = geometry.evaluate(projected_area_le, plot=False)
+        area_te_pts = geometry.evaluate(projected_area_te, plot=False)
+        dense_chords = area_te_pts[:, 0] - area_le_pts[:, 0]
+        dense_y = area_le_pts[:, 1]
 
-        upper_skin_pts = geometry.evaluate(projected_upper_skin, plot=False)
-        lower_skin_pts = geometry.evaluate(projected_lower_skin, plot=False)
-        chord_surface_pts = 0.5 * (upper_skin_pts + lower_skin_pts)
-        chord_surface_grid = csdl.reshape(chord_surface_pts, (nx_area, ny_area, 3))
-        v_x = chord_surface_grid[1:, :-1, :] - chord_surface_grid[:-1, :-1, :]
-        v_y = chord_surface_grid[:-1, 1:, :] - chord_surface_grid[:-1, :-1, :]
-        area_vectors = csdl.cross(v_x, v_y, axis=2)
-        element_areas = csdl.norm(area_vectors, axes=(2,))
-        planform_area = csdl.sum(element_areas)
+        c_mid = 0.5 * (dense_chords[:-1] + dense_chords[1:])
+        dy = dense_y[1:] - dense_y[:-1]
+        half_planform_area = csdl.sum(c_mid * dy)
+        planform_area = 2.0 * half_planform_area
         aspect_ratio_calc = (wingspan**2) / planform_area
 
         geometry_solver = ParameterizationSolver()
@@ -735,24 +842,49 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
         geometry_solver.add_state(span_stretch_state)
         geometry_solver.add_state(sweep_translation_states)
 
-        target_area = 10.0 * (scale_factor ** 2)
+        bspline_reg = BsplineTargetRegularization(num_chord_stations=num_chord_stations, scale_factor=scale_factor)
 
         geometric_variables = GeometricVariables()
-        for i in range(1, num_chord_stations):
-            normalized_chord = local_chords[i] / local_chords[0]
-            geometric_variables.add_variable(normalized_chord, taper_dvs[i - 1], penalty_value=None)
-        for i in range(num_chord_stations):
-            tc_ratio = local_thicknesses[i] / local_chords[i]
-            geometric_variables.add_variable(tc_ratio / 0.12, 1.0, penalty_value=None)
-        geometric_variables.add_variable(planform_area / target_area, 1.0, penalty_value=None)
-        geometric_variables.add_variable(aspect_ratio_calc / 10.0, aspect_ratio / 10.0, penalty_value=None)
+
+        local_chords_vec = csdl.concatenate([csdl.reshape(c, (1,)) for c in local_chords])
+        local_thicknesses_vec = csdl.concatenate([csdl.reshape(t, (1,)) for t in local_thicknesses])
+
+        c_ref_scale = float(np.asarray(local_chords[0].value).flatten()[0]) if local_chords[0].value is not None else 1.0 * scale_factor
+        res_taper = bspline_reg.compute_taper_residual(local_chords_vec, taper_dvs, c_ref=c_ref_scale)
+        geometric_variables.add_variable(res_taper, 0.0, penalty_value=None)
+
+        t_ref_scale = 0.12 * c_ref_scale
+        if 'tc_target_control_points' in parsed_dvs and parsed_dvs['tc_target_control_points'] is not None:
+            tc_target_control_points = csdl.Variable(shape=(num_chord_stations,), value=parsed_dvs['tc_target_control_points'])
+        else:
+            tc_target_control_points = csdl.Variable(shape=(num_chord_stations,), value=np.full(num_chord_stations, 0.12))
+        res_thick = bspline_reg.compute_thickness_residual(
+            local_thicknesses_vec, local_chords_vec, tc_target_control_points, t_ref=t_ref_scale
+        )
+        geometric_variables.add_variable(res_thick, 0.0, penalty_value=None)
+
+        if 'planform_area_target' in parsed_dvs and parsed_dvs['planform_area_target'] is not None:
+            target_area = csdl.Variable(value=float(np.asarray(parsed_dvs['planform_area_target']).flatten()[0]))
+            geometric_variables.add_variable(planform_area / (10.0 * scale_factor**2), target_area / (10.0 * scale_factor**2), penalty_value=None)
+            geometric_variables.add_variable(wingspan**2 / (10.0 * 10.0 * scale_factor**2),
+                                             aspect_ratio * target_area / (10.0 * 10.0 * scale_factor**2), penalty_value=None)
+        else:
+            target_area = 10.0 * (scale_factor ** 2)
+            geometric_variables.add_variable(planform_area / target_area, 1.0, penalty_value=None)
+            geometric_variables.add_variable(wingspan**2 / (10.0 * target_area),
+                                             aspect_ratio * 1.0 / 10.0, penalty_value=None)
 
         qc_pts = [geometry.evaluate(quarter_chord_projections[i]) for i in range(num_chord_stations)]
-        for i in range(num_chord_stations - 1):
-            dx = qc_pts[i + 1][0] - qc_pts[i][0]
-            dy = qc_pts[i + 1][1] - qc_pts[i][1]
-            sectional_sweep = csdl.arctan(dx / dy)
-            geometric_variables.add_variable(sectional_sweep, sweep_angle_dvs[i], penalty_value=None)
+        dx_list = [csdl.reshape(qc_pts[i + 1][0] - qc_pts[i][0], (1,)) for i in range(num_chord_stations - 1)]
+        dy_list = [csdl.reshape(qc_pts[i + 1][1] - qc_pts[i][1], (1,)) for i in range(num_chord_stations - 1)]
+        dx_qc_vec = csdl.concatenate(dx_list)
+        dy_qc_vec = csdl.concatenate(dy_list)
+
+        y_scale = 5.0 * scale_factor
+        res_sweep = bspline_reg.compute_sweep_residual(
+            dx_qc_vec, dy_qc_vec, sweep_angle_dvs, y_scale=y_scale
+        )
+        geometric_variables.add_variable(res_sweep, 0.0, penalty_value=None)
 
         print("Executing ParameterizationSolver (in-line Newton solver)...")
         geometry_solver.evaluate(geometric_variables)
@@ -773,7 +905,7 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     for i, cv in enumerate(local_chords_vals):
         print(f"  Station {i} Design Chord = {cv:.3f} m (Stretch = {chord_stretch_vals[i]:+.3f} m)")
 
-    # Fine spanwise continuous chord profile sampled directly from CAD surface
+    # Fine spanwise continuous chord and planform profile sampled directly from CAD surface
     print("Evaluating fine continuous CAD surface chord profile...")
     fn_lo = geometry.functions[0]
     fn_up = geometry.functions[1]
@@ -781,16 +913,26 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     cad_eta = np.linspace(0.0, 0.999, n_fine_cad)
     v_fine_pts = np.linspace(0.0, 1.0, 120)
     cad_chords = np.zeros(n_fine_cad)
+    cad_x_le = np.zeros(n_fine_cad)
+    cad_x_te = np.zeros(n_fine_cad)
+    cad_y = np.zeros(n_fine_cad)
     for idx_cad, eta_val in enumerate(cad_eta):
         coords = np.column_stack([np.full_like(v_fine_pts, eta_val), v_fine_pts])
         p_lo = fn_lo.evaluate(coords, non_csdl=True)
         p_up = fn_up.evaluate(coords, non_csdl=True)
         all_x = np.concatenate([p_lo[:, 0], p_up[:, 0]])
-        cad_chords[idx_cad] = all_x.max() - all_x.min()
+        all_y = np.concatenate([p_lo[:, 1], p_up[:, 1]])
+        cad_x_le[idx_cad] = float(np.min(all_x))
+        cad_x_te[idx_cad] = float(np.max(all_x))
+        cad_y[idx_cad] = float(np.mean(all_y))
+        cad_chords[idx_cad] = cad_x_te[idx_cad] - cad_x_le[idx_cad]
 
     cad_chord_profile = {
         'eta': cad_eta,
         'chord': cad_chords,
+        'x_le': cad_x_le,
+        'x_te': cad_x_te,
+        'y': cad_y,
     }
 
     return geometry, total_wingspan, half_span, local_chords_vals, chord_stretch_vals, cad_chord_profile
@@ -942,7 +1084,7 @@ def extract_station_airfoils(geometry, half_span: float, num_stations: int = 8):
     return station_data
 
 
-def generate_airfoil_gallery_plot(station_data: list, output_path: str, half_span: float):
+def generate_airfoil_gallery_plot(station_data: list, output_path: str, half_span: float, parsed_dvs: dict = None):
     """
     Figure 1: 4x2 Grid of individual stations with detailed annotations.
     """
@@ -973,6 +1115,26 @@ def generate_airfoil_gallery_plot(station_data: list, output_path: str, half_spa
         ax.plot(x_g, z_l, '-', color=c_lower, linewidth=2.0, label='Lower Surface')
         ax.plot(x_g, z_cam, '--', color=c_camber, linewidth=1.5, label='Mean Camber Line')
         ax.plot(x_g, z_ch, ':', color=c_chord, linewidth=1.2, label='Chord Line')
+
+        # Draw payload box on root section if available
+        if k == 0 and parsed_dvs and 'payload_center_x' in parsed_dvs:
+            from matplotlib.patches import Rectangle
+            pay_x = float(np.asarray(parsed_dvs['payload_center_x']).flatten()[0])
+            L_box = 33.0 / 3.28084
+            H_box = 10.0 / 3.28084
+            rect = Rectangle(
+                (pay_x - L_box / 2.0, -H_box / 2.0),
+                L_box,
+                H_box,
+                linewidth=1.8,
+                edgecolor='#d62728',
+                facecolor='#ff9896',
+                alpha=0.30,
+                linestyle='--',
+                label=f'TCP0 Payload ({L_box:.2f}m × {H_box:.2f}m)',
+                zorder=3,
+            )
+            ax.add_patch(rect)
 
         # Internal spar box representation (25% to 75% chord)
         x_spar_front = data['x_le'] + 0.25 * data['chord']
@@ -1083,16 +1245,19 @@ def generate_shape_evolution_plot(
     # Panel (a): Planform View with Station Cutlines
     # -------------------------------------------------------------------------
     ax_plan = fig.add_subplot(gs[0, 0])
-    y_stations = [d['y'] for d in station_data]
-    x_les = [d['x_le'] for d in station_data]
-    x_tes = [d['x_te'] for d in station_data]
-
-    # Smooth planform edges
-    y_dense = np.linspace(0.0, half_span, 200)
-    spl_le = si.CubicSpline(y_stations, x_les, bc_type='natural')
-    spl_te = si.CubicSpline(y_stations, x_tes, bc_type='natural')
-    x_le_dense = spl_le(y_dense)
-    x_te_dense = spl_te(y_dense)
+    if cad_chord_profile is not None and 'x_le' in cad_chord_profile:
+        y_dense = cad_chord_profile['y']
+        x_le_dense = cad_chord_profile['x_le']
+        x_te_dense = cad_chord_profile['x_te']
+    else:
+        y_stations = [d['y'] for d in station_data]
+        x_les = [d['x_le'] for d in station_data]
+        x_tes = [d['x_te'] for d in station_data]
+        y_dense = np.linspace(0.0, half_span, 200)
+        spl_le = si.CubicSpline(y_stations, x_les, bc_type='natural')
+        spl_te = si.CubicSpline(y_stations, x_tes, bc_type='natural')
+        x_le_dense = spl_le(y_dense)
+        x_te_dense = spl_te(y_dense)
 
     ax_plan.fill_betweenx(y_dense, x_le_dense, x_te_dense, color='#e9ecef', alpha=0.8, label='Right Wing Planform')
     ax_plan.plot(x_le_dense, y_dense, 'k-', linewidth=1.8, label='Leading Edge')
@@ -1174,12 +1339,12 @@ def generate_shape_evolution_plot(
         chord_cps = np.array([d['chord'] for d in station_data])
 
     eta_fine, ffd_chord_curve, chord_cp_eta = evaluate_symmetric_bspline(chord_cps)
-    c_root_val = float(chord_cps[0])
+    c_root_val = float(ffd_chord_curve[0])
 
     # FFD continuous B-spline curve
     ax_chord.plot(
         eta_fine, ffd_chord_curve, '-', color='#d62728', linewidth=2.5,
-        label=f'FFD Chord B-spline $c(y)$ ($c_{{\\mathrm{{root}}}}={c_root_val:.2f}$ m)'
+        label=f'FFD Chord B-spline $c(y)$ ($c(0)={c_root_val:.2f}$ m)'
     )
     # FFD chord control points
     ax_chord.plot(
@@ -1360,7 +1525,7 @@ def main():
     evolution_fig_path = os.path.join(target_dir, "airfoil_shape_evolution.png")
     telemetry_path = os.path.join(target_dir, "airfoil_cross_sections_data.npz")
 
-    generate_airfoil_gallery_plot(station_data, gallery_fig_path, half_span)
+    generate_airfoil_gallery_plot(station_data, gallery_fig_path, half_span, parsed_dvs=parsed_dvs)
     generate_shape_evolution_plot(
         station_data,
         evolution_fig_path,
@@ -1373,8 +1538,22 @@ def main():
     save_airfoil_telemetry(station_data, telemetry_path, half_span)
 
     # Also copy artifacts to the active agent brain directory if available
-    artifact_dir = os.environ.get('ARTIFACT_DIR', '/home/andrew/.gemini/antigravity/brain/680209fd-293d-4fa0-9f6c-ae59a72a6987')
-    if os.path.exists(artifact_dir):
+    current_conv_id = '0ac41e2d-0335-41d9-9f48-d6791df931f1'
+    candidate_ids = [
+        current_conv_id,
+        'ce0e9874-a39a-41db-b481-5008cc744a13',
+        '0c0a47e5-2e16-41bb-9139-10357c23c5ee',
+        '3256dd7c-d4c8-4c73-887d-131361f9d0c3',
+        '680209fd-293d-4fa0-9f6c-ae59a72a6987',
+    ]
+    artifact_dir = os.environ.get('ARTIFACT_DIR', None)
+    if not artifact_dir or not os.path.exists(artifact_dir):
+        for c_id in candidate_ids:
+            cand_path = f'/home/andrew/.gemini/antigravity/brain/{c_id}'
+            if os.path.exists(cand_path):
+                artifact_dir = cand_path
+                break
+    if artifact_dir and os.path.exists(artifact_dir):
         shutil.copy2(gallery_fig_path, os.path.join(artifact_dir, "airfoil_cross_sections_gallery.png"))
         shutil.copy2(evolution_fig_path, os.path.join(artifact_dir, "airfoil_shape_evolution.png"))
         print(f"Artifacts successfully copied to brain directory: {artifact_dir}")

@@ -463,37 +463,46 @@ def extract_and_plot_wave_drag_distribution(
         strip_tc = data['strip_tc']
         strip_sweep = data['strip_sweep_halfchord']
 
-        # If y_strip or strip_cl not directly stored in shared cache, evaluate simulator
-        x_out_path = os.path.join(output_folder, 'x.out')
-        if os.path.exists(x_out_path):
-            print(f"Evaluating exact simulator variables from {x_out_path}...")
-            import examples.showcase_examples.rectangular_wing.ex_rectangular_wing_to_bwb as main_script
-            jax_sim = main_script.jax_sim
-            x_history = np.loadtxt(x_out_path)
-            x_opt = x_history[-1] if x_history.ndim > 1 else x_history
-
-            curr_idx = 0
-            for name, dv_info in main_script.design_variables.items():
-                var_size = int(np.prod(dv_info.variable.shape))
-                slc = slice(curr_idx, curr_idx + var_size)
-                unscaled_val = (x_opt[slc] / dv_info.scaler).reshape(dv_info.variable.shape)
-                jax_sim[dv_info.variable] = unscaled_val
-                curr_idx += var_size
-
-            jax_sim.run()
-
-            y_strip = np.asarray(jax_sim[main_script.y_strip_pts]).flatten()
-            strip_wave_cd = np.asarray(jax_sim[main_script.strip_wave_cd_cruise]).flatten()
-            strip_M_crit = np.asarray(jax_sim[main_script.strip_M_crit_cruise]).flatten()
-            strip_M_dd = np.asarray(jax_sim[main_script.strip_M_dd_cruise]).flatten()
-            strip_tc = np.asarray(jax_sim[main_script.strip_tc]).flatten()
-            strip_sweep = np.asarray(jax_sim[main_script.strip_sweep_halfchord]).flatten()
-            strip_cl = np.asarray(jax_sim[main_script.cl_local_elem]).flatten()
-            local_chord_drag = None
-            dy_strip = None
-            strip_area = None
+        if 'y_strip_pts' in data and 'strip_wave_cd' in data and 'strip_M_crit' in data and 'strip_M_dd' in data and 'cl_local_elem' in data:
+            y_strip = data['y_strip_pts']
+            strip_wave_cd = data['strip_wave_cd']
+            strip_M_crit = data['strip_M_crit']
+            strip_M_dd = data['strip_M_dd']
+            strip_cl = data['cl_local_elem']
+            local_chord_drag = data['local_chord_drag'] if 'local_chord_drag' in data else None
+            dy_strip = data['dy_strip'] if 'dy_strip' in data else None
+            strip_area = data['strip_area'] if 'strip_area' in data else None
         else:
-            raise FileNotFoundError(f"Cannot reconstruct strip wave drag without x.out or complete cache in {output_folder}")
+            x_out_path = os.path.join(output_folder, 'x.out')
+            if os.path.exists(x_out_path):
+                print(f"Evaluating exact simulator variables from {x_out_path}...")
+                import examples.showcase_examples.rectangular_wing.ex_rectangular_wing_to_bwb as main_script
+                jax_sim = main_script.jax_sim
+                x_history = np.loadtxt(x_out_path)
+                x_opt = x_history[-1] if x_history.ndim > 1 else x_history
+
+                curr_idx = 0
+                for name, dv_info in main_script.design_variables.items():
+                    var_size = int(np.prod(dv_info.variable.shape))
+                    slc = slice(curr_idx, curr_idx + var_size)
+                    unscaled_val = (x_opt[slc] / dv_info.scaler).reshape(dv_info.variable.shape)
+                    jax_sim[dv_info.variable] = unscaled_val
+                    curr_idx += var_size
+
+                jax_sim.run()
+
+                y_strip = np.asarray(jax_sim[main_script.y_strip_pts]).flatten()
+                strip_wave_cd = np.asarray(jax_sim[main_script.strip_wave_cd_cruise]).flatten()
+                strip_M_crit = np.asarray(jax_sim[main_script.strip_M_crit_cruise]).flatten()
+                strip_M_dd = np.asarray(jax_sim[main_script.strip_M_dd_cruise]).flatten()
+                strip_tc = np.asarray(jax_sim[main_script.strip_tc]).flatten()
+                strip_sweep = np.asarray(jax_sim[main_script.strip_sweep_halfchord]).flatten()
+                strip_cl = np.asarray(jax_sim[main_script.cl_local_elem]).flatten()
+                local_chord_drag = None
+                dy_strip = None
+                strip_area = None
+            else:
+                raise FileNotFoundError(f"Cannot reconstruct strip wave drag without x.out or complete cache in {output_folder}")
 
     else:
         # Re-run from x.out

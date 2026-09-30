@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Union, Literal
 import sys
 import os
+os.environ.setdefault('JAX_PLATFORMS', 'cpu')
 import numpy.typing as npt
 import csdl_alpha as csdl
 import numpy as np
@@ -34,16 +35,24 @@ from physics_models.flight_conditions import (
 )
 from physics_models.wave_drag import (
     setup_strip_projection_points,
+    compute_strip_sweep,
+    compute_quarter_chord_sweep,
     compute_half_chord_sweep,
     compute_strip_thickness_to_chord,
     evaluate_wave_drag,
 )
+from physics_models.ar_area_bspline import BsplineTargetRegularization
 
 class CompatUnpickler(pickle.Unpickler):
     def find_class(self, module, name):
-        if module.startswith('numpy._core'):
-            module = module.replace('numpy._core', 'numpy.core')
-        return super().find_class(module, name)
+        try:
+            return super().find_class(module, name)
+        except (ModuleNotFoundError, AttributeError):
+            if module.startswith('numpy._core'):
+                module = module.replace('numpy._core', 'numpy.core')
+            elif module.startswith('numpy.core'):
+                module = module.replace('numpy.core', 'numpy._core')
+            return super().find_class(module, name)
 
 _orig_pickle_load = pickle.load
 pickle.load = lambda f, **kwargs: CompatUnpickler(f, **kwargs).load()
@@ -84,11 +93,35 @@ include_neg1g_sizing = False
 
 # Induced drag objective formulation: 'fourier' (Prandtl lifting-line Fourier sine series, e <= 1.0)
 # vs 'trefftz' (VortexAD Trefftz-plane integration)
-# induced_drag_objective = 'mixed'  # Options: 'fourier' or 'trefftz' or 'mixed
-induced_drag_objective = 'trefftz'  # Options: 'fourier' or 'trefftz' or 'mixed
+induced_drag_objective = 'mixed'  # Options: 'fourier' or 'trefftz' or 'mixed
+# induced_drag_objective = 'trefftz'  # Options: 'fourier' or 'trefftz' or 'mixed
 
 # Geometric CAD control points are kept equivalent across resolutions (15 spanwise)
 num_spanwise_cp_target = 25     # was using 15 for the longest time, but I think this may help the geometry fit the desired profiles better
+
+# Toggleable geometric non-interference comparison (Geonic)
+# Default is False (baseline behavior preserved unchanged).
+use_geonic_default = True
+use_geonic = os.environ.get('USE_GEONIC', '0') == '1' if 'USE_GEONIC' in os.environ else use_geonic_default
+
+if use_geonic:
+    try:
+        import bsm3
+    except ImportError as e:
+        raise ImportError(
+            "use_geonic=True requires 'bsm3' to be installed. "
+            "Please install the repaired checkout at /home/andrew/optimization/BSM3 "
+            "via `pip install -e /home/andrew/optimization/BSM3 --no-deps`."
+        ) from e
+    from physics_models.geonic_payload import (
+        GEONIC_CLEARANCE_M,
+        PAYLOAD_LENGTH_M,
+        PAYLOAD_WIDTH_M,
+        PAYLOAD_HEIGHT_M,
+        build_geonic_payload_sample_points,
+        compute_geonic_clearance_and_margin,
+        get_full_payload_box_corners,
+    )
 
 geometry = import_geometry(
     geometry_directory + file_name + ".stp",
@@ -250,10 +283,35 @@ te_line_physical[:, 1] = y_beam_span
 te_line_physical[:, 2] = 0.0
 projected_te_mesh = geometry.project(te_line_physical, plot=False)
 
-upper_beam_seed = np.column_stack([np.full(num_beam_nodes, 0.25 * scale_factor), y_beam_span, np.full(num_beam_nodes, 0.05 * scale_factor)])
-lower_beam_seed = np.column_stack([np.full(num_beam_nodes, 0.25 * scale_factor), y_beam_span, np.full(num_beam_nodes, -0.05 * scale_factor)])
-projected_upper_beam_mesh = geometry.project(upper_beam_seed, direction=np.array([0, 0, -1]), plot=False)
-projected_lower_beam_mesh = geometry.project(lower_beam_seed, direction=np.array([0, 0, 1]), plot=False)
+# Sample wingbox upper/lower surfaces at 5 chordwise stations across 20% to 60% chord
+# Using composite Simpson's rule: weights = [1, 4, 2, 4, 1] / 12
+# Integrates quadratic B-spline thickness profiles with zero algebraic truncation error
+x_fracs_box = np.array([0.20, 0.30, 0.40, 0.50, 0.60])
+num_box_samples = len(x_fracs_box)
+simpson_weights_box = np.array([1.0, 4.0, 2.0, 4.0, 1.0]) / 12.0
+
+x_box_grid, y_box_grid = np.meshgrid(x_fracs_box * scale_factor, y_beam_span, indexing='ij')
+upper_box_seed = np.column_stack([
+    x_box_grid.ravel(),
+    y_box_grid.ravel(),
+    np.full(x_box_grid.size, 0.05 * scale_factor),
+])
+lower_box_seed = np.column_stack([
+    x_box_grid.ravel(),
+    y_box_grid.ravel(),
+    np.full(x_box_grid.size, -0.05 * scale_factor),
+])
+projected_upper_box_mesh = geometry.project(upper_box_seed, direction=np.array([0, 0, -1]), plot=False)
+projected_lower_box_mesh = geometry.project(lower_box_seed, direction=np.array([0, 0, 1]), plot=False)
+projected_upper_beam_mesh = projected_upper_box_mesh
+projected_lower_beam_mesh = projected_lower_box_mesh
+
+# Weighting matrix for csdl.matvec: shape (num_beam_nodes, num_box_samples * num_beam_nodes)
+# Computes node_heights[i] = sum_k w[k] * (upper_z[k, i] - lower_z[k, i])
+W_box_mat = np.zeros((num_beam_nodes, num_box_samples * num_beam_nodes))
+for i in range(num_beam_nodes):
+    for k in range(num_box_samples):
+        W_box_mat[i, k * num_beam_nodes + i] = simpson_weights_box[k]
 
 # Project 101 points along leading and trailing edges for 100-strip refined drag & local Cl
 num_drag_strips = 100
@@ -452,16 +510,35 @@ d_root_cl_row[0, 1] = 1.0
 M_cl_ss_sys = np.vstack([B100_cl_matrix, d_root_cl_row])
 M_cl_ss_inv = np.linalg.inv(M_cl_ss_sys)
 
-# Evaluation points corresponding to the design variable stations (peaks) and intermediate points
-# exactly matching the stress fitting/evaluation/aggregation architecture
+# Evaluation points corresponding to the design variable stations (peaks) and dense intermediate points
+# to ensure continuous stall progression envelopment across the entire span
 station_cl_peaks = np.linspace(0.0, 1.0, num_stations)
+num_intermediate_cl = 10
+m_cl = num_intermediate_cl // 2
+
 eval_cl_points_list = []
+station_cl_peak_indices = []
+
 for i in range(num_stations - 1):
+    station_cl_peak_indices.append(len(eval_cl_points_list))
     eval_cl_points_list.append(station_cl_peaks[i])
-    pts = np.linspace(station_cl_peaks[i], station_cl_peaks[i+1], 4)[1:3]
+    pts = np.linspace(station_cl_peaks[i], station_cl_peaks[i+1], num_intermediate_cl + 2)[1:-1]
     eval_cl_points_list.extend(pts)
+station_cl_peak_indices.append(len(eval_cl_points_list))
 eval_cl_points_list.append(station_cl_peaks[-1])
-eval_cl_points_arr = np.array(eval_cl_points_list).reshape((-1, 1))  # shape (3 * num_stations - 2, 1)
+
+eval_cl_points_arr = np.array(eval_cl_points_list).reshape((-1, 1))
+
+# Build station grouping indices for aggregation with smooth boundary overlap
+station_cl_group_indices = []
+total_eval_cl_pts = len(eval_cl_points_list)
+for i in range(num_stations):
+    p_idx = station_cl_peak_indices[i]
+    left = 0 if i == 0 else p_idx - m_cl
+    right = total_eval_cl_pts - 1 if i == num_stations - 1 else p_idx + m_cl
+    left_ol = max(0, left - 1) if i > 0 else 0
+    right_ol = min(total_eval_cl_pts - 1, right + 1) if i < num_stations - 1 else right
+    station_cl_group_indices.append(list(range(left_ol, right_ol + 1)))
 
 # endregion
 
@@ -474,14 +551,18 @@ eval_cl_points_arr = np.array(eval_cl_points_list).reshape((-1, 1))  # shape (3 
 # Camber formulation option: adds 3x5 (fast) or 3x8 (full) FFD camber DVs
 include_camber = True  # Options: True or False
 
+# Airfoil thickness shape option: adds 4x5/4x8 (LE + 3 interior) or 5x5/5x8 (LE + 3 interior + TE) FFD thickness DVs
+include_thickness_shape = True  # Options: True or False
+include_te_thickness = False  # Options: True (5 rows: LE + 3 interior + TE) or False (4 rows: LE + 3 interior, TE pinned)
+
 # Elevator formulation option: default off when camber is on
 # include_elevator = False if include_camber else True  # Options: True or False
 include_elevator = False  # Options: True or False
 
 # Construct a Free Form Deformation (FFD) block around the geometry
-# 5 chordwise control points when camber is active (excluding LE & TE gives 3 interior points)
-num_ffd_coefficients_chordwise = 5 if include_camber else 2
-ffd_degree_chordwise = 2 if include_camber else 1
+# 5 chordwise control points when camber or thickness shape is active (excluding LE & TE gives 3 interior points)
+num_ffd_coefficients_chordwise = 5 if (include_camber or include_thickness_shape) else 2
+ffd_degree_chordwise = 2 if (include_camber or include_thickness_shape) else 1
 # num_ffd_sections is dynamically set by resolution ('fast': 9, 'full': 15)
 # Note: This FFD block construction is one of a few helper functions that can be used to create a FFD block.
 #       The "manual" method is to use construct_ffd_block_from_corners, which allows for defining the coefficients directly.
@@ -507,14 +588,18 @@ ffd_sectional_parameterization = SectionalParameterization(
 ParamerizationType = Literal['ar_area', 'chord_span']
 # formulation = 'chord_span'  # Options: 'ar_area' or 'chord_span'
 # formulation = 'ar_area'  # Options: 'ar_area' or 'chord_span'
-formulation : ParamerizationType = 'ar_area'
+formulation : ParamerizationType = 'chord_span'  # Options: 'ar_area' or 'chord_span'
 
 pitch = csdl.Variable(value=5.*np.pi/180) # pitch angle in radians
 elevator_angle = csdl.Variable(value=0.0) # elevator deflection angle in radians
 pitch_ss = csdl.Variable(value=10.0*np.pi/180) # pitch angle for pull-up structural sizing maneuver in radians
 if include_neg1g_sizing:
     pitch_neg1g = csdl.Variable(value=-5.0*np.pi/180) # pitch angle for -1.0g push-down sizing maneuver in radians
-payload_cg = csdl.Variable(value=0.25) # payload CG location as fraction of root chord (0.05 to 0.95)
+if use_geonic:
+    # Undeformed root mid-chord = 0.5 * scale_factor (3.75 m for scale_factor = 7.5)
+    payload_center_x = csdl.Variable(value=0.5 * scale_factor, name='payload_center_x')
+else:
+    payload_cg = csdl.Variable(value=0.25, name='payload_cg') # payload CG location as fraction of root chord (0.05 to 0.95)
 
 @dataclass
 class DVInfo:
@@ -538,32 +623,75 @@ camber_max_percent = 5.0  # 5.0% chord max camber displacement
 camber_lower = -camber_max_percent
 camber_upper = camber_max_percent
 camber_scaler = 1.0 / camber_max_percent  # Scales DVs in [-5.0, 5.0] to [-1, 1] range for optimizer
+
+num_chordwise_thick_dvs = 5 if include_te_thickness else 4
+thick_shape_lower = np.full((num_chordwise_thick_dvs, num_chord_stations), -3.0)
+thick_shape_lower[0, :] = 0.0  # LE cannot have negative thickness change
+if include_te_thickness:
+    thick_shape_lower[-1, :] = 0.0  # TE cannot have negative thickness change
+
+thick_shape_upper = np.full((num_chordwise_thick_dvs, num_chord_stations), 5.0)
+if include_te_thickness:
+    thick_shape_upper[-1, :] = 0.5  # Max 0.5% chord blunt TE
+
+thick_shape_scaler = 1.0 / 5.0  # Scales [-5.0, 5.0] to [-1, 1] range for optimizer
 warm_start = False
 
 if formulation == 'ar_area':
-    # Formulation 1: Taper ratio DVs (stations 1 to num_stations-1) + Aspect Ratio (AR) + Sectional Sweep Angles + Elevator + Pitch + Pitch 2.5g + Linear Twist
-    taper_dvs = csdl.Variable(shape=(num_chord_stations - 1,), value=np.ones(num_chord_stations - 1))
+    # Formulation 1: Cubic B-spline Target Regularization
+    # Taper ratio control points (stations 1 to num_stations-1) + Aspect Ratio (AR) + Sweep Angle Control Points + Elevator + Pitch + Pitch 2.5g + Linear Twist
+    taper_control_points = csdl.Variable(shape=(num_chord_stations - 1,), value=np.ones(num_chord_stations - 1))
+    taper_dvs = taper_control_points  # backward-compatibility alias
     aspect_ratio = csdl.Variable(shape=(1,), value=np.array([10.0]))
-    sweep_angle_dvs = csdl.Variable(shape=(num_chord_stations - 1,), value=np.zeros(num_chord_stations - 1))
+    sweep_angle_control_points = csdl.Variable(shape=(num_chord_stations - 1,), value=np.zeros(num_chord_stations - 1))
+    sweep_angle_dvs = sweep_angle_control_points  # backward-compatibility alias
+    tc_target_control_points = csdl.Variable(shape=(num_chord_stations,), value=np.full(num_chord_stations, 0.12), name='tc_target_control_points')
     twist_dvs = csdl.Variable(shape=(num_chord_stations,), value=np.zeros(num_chord_stations))
 
+    tc_lower = np.full(num_chord_stations, 0.06)
+    tc_upper = np.full(num_chord_stations, 0.35)
+    tc_scaler = 10.0
+
     design_variables: dict[str, DVInfo] = {
-        'taper_dvs': DVInfo(variable=taper_dvs, lower=0.15, upper=5.0, scaler=1.0),
+        'taper_control_points': DVInfo(variable=taper_control_points, lower=0.05, upper=1.25, scaler=1.0),
         'aspect_ratio': DVInfo(variable=aspect_ratio, lower=2.0, upper=15.0, scaler=0.5),
-        # 'sweep_angle_dvs': DVInfo(variable=sweep_angle_dvs, lower=-10.0*np.pi/180, upper=45.0*np.pi/180, scaler=1.e1),
-        'sweep_angle_dvs': DVInfo(variable=sweep_angle_dvs, lower=0.0*np.pi/180, upper=60.0*np.pi/180, scaler=1.e1),
+        'sweep_angle_control_points': DVInfo(variable=sweep_angle_control_points, lower=0.0*np.pi/180, upper=60.0*np.pi/180, scaler=1.e1),
+        'tc_target_control_points': DVInfo(variable=tc_target_control_points, lower=tc_lower, upper=tc_upper, scaler=tc_scaler),
         'twist_dvs': DVInfo(variable=twist_dvs, lower=twist_lower, upper=twist_upper, scaler=1.e1),
         'pitch': DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
         'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
-        'payload_cg': DVInfo(variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1),
-        'ttop_dvs': DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.5, scaler=5.e3),
-        'tweb_dvs': DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.5, scaler=5.e3),
     }
+    if use_geonic:
+        design_variables['payload_center_x'] = DVInfo(
+            variable=payload_center_x, lower=0.0, upper=10.0, scaler=1.0 / scale_factor
+        )
+        planform_area_target = csdl.Variable(value=10.0 * scale_factor**2, name='planform_area_target')
+        area_lower = 1.0 * scale_factor**2   # 56.25 m^2 (vs 562.5 m^2 baseline)
+        area_upper = 30.0 * scale_factor**2  # 1687.5 m^2
+        area_scaler = 1.0 / (10.0 * scale_factor**2)
+        design_variables['planform_area_target'] = DVInfo(
+            variable=planform_area_target, lower=area_lower, upper=area_upper, scaler=area_scaler
+        )
+    else:
+        design_variables['payload_cg'] = DVInfo(
+            variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1
+        )
+    design_variables['ttop_dvs'] = DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.5, scaler=5.e1)
+    design_variables['tweb_dvs'] = DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.5, scaler=5.e1)
     if include_elevator:
         design_variables['elevator_angle'] = DVInfo(variable=elevator_angle, lower=-25.0*np.pi/180, upper=25.0*np.pi/180, scaler=1.e1)
     if include_camber:
         camber_dvs = csdl.Variable(shape=(3, num_chord_stations), value=np.zeros((3, num_chord_stations)))
         design_variables['camber_dvs'] = DVInfo(variable=camber_dvs, lower=camber_lower, upper=camber_upper, scaler=camber_scaler)
+    if include_thickness_shape:
+        thickness_shape_dvs = csdl.Variable(
+            shape=(num_chordwise_thick_dvs, num_chord_stations),
+            value=np.zeros((num_chordwise_thick_dvs, num_chord_stations)),
+            name='thickness_shape_dvs',
+        )
+        design_variables['thickness_shape_dvs'] = DVInfo(
+            variable=thickness_shape_dvs, lower=thick_shape_lower, upper=thick_shape_upper, scaler=thick_shape_scaler
+        )
     if include_neg1g_sizing:
         design_variables['pitch_neg1g'] = DVInfo(variable=pitch_neg1g, lower=-35.0*np.pi/180, upper=10.0*np.pi/180, scaler=1.e1)
 
@@ -649,15 +777,31 @@ elif formulation == 'chord_span':
         'span_stretch_dv': DVInfo(variable=span_stretch_dv, lower=span_stretch_lower, upper=span_stretch_upper, scaler=1.0 / scale_factor),
         'pitch': DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
         'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
-        'payload_cg': DVInfo(variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1),
-        'ttop_dvs': DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.5, scaler=5.e3),
-        'tweb_dvs': DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.5, scaler=5.e3),
     }
+    if use_geonic:
+        design_variables['payload_center_x'] = DVInfo(
+            variable=payload_center_x, lower=0.0, upper=10.0, scaler=1.0 / scale_factor
+        )
+    else:
+        design_variables['payload_cg'] = DVInfo(
+            variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1
+        )
+    design_variables['ttop_dvs'] = DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.5, scaler=5.e1)
+    design_variables['tweb_dvs'] = DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.5, scaler=5.e1)
     if include_elevator:
         design_variables['elevator_angle'] = DVInfo(variable=elevator_angle, lower=-25.0*np.pi/180, upper=25.0*np.pi/180, scaler=1.e1)
     if include_camber:
         camber_dvs = csdl.Variable(shape=(3, num_chord_stations), value=np.zeros((3, num_chord_stations)))
         design_variables['camber_dvs'] = DVInfo(variable=camber_dvs, lower=camber_lower, upper=camber_upper, scaler=camber_scaler)
+    if include_thickness_shape:
+        thickness_shape_dvs = csdl.Variable(
+            shape=(num_chordwise_thick_dvs, num_chord_stations),
+            value=np.zeros((num_chordwise_thick_dvs, num_chord_stations)),
+            name='thickness_shape_dvs',
+        )
+        design_variables['thickness_shape_dvs'] = DVInfo(
+            variable=thickness_shape_dvs, lower=thick_shape_lower, upper=thick_shape_upper, scaler=thick_shape_scaler
+        )
     if include_neg1g_sizing:
         design_variables['pitch_neg1g'] = DVInfo(variable=pitch_neg1g, lower=-35.0*np.pi/180, upper=10.0*np.pi/180, scaler=1.e1)
 
@@ -689,23 +833,50 @@ sectional_parameters.add_rotation(axis=np.array([0., 1., 0.]), rotation=twist_pa
 
 ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=False)
 
-if include_camber:
+if include_camber or include_thickness_shape:
     # Section chord calculated from difference in x coordinate between leading and trailing FFD control points
     section_chords = ffd_coefficients[-1, :, 0, 0] - ffd_coefficients[0, :, 0, 0]
 
-    full_span_camber_list = []
-    for c in range(3):
-        row = csdl.concatenate(
-            [camber_dvs[c, i] for i in range(num_chord_stations - 1, 0, -1)] +
-            [camber_dvs[c, i] for i in range(num_chord_stations)]
-        )
-        full_span_camber_list.append(csdl.reshape(row, (1, num_ffd_sections)))
-    full_span_camber = csdl.concatenate(full_span_camber_list, axis=0)  # shape (3, num_ffd_sections)
+    if include_camber:
+        full_span_camber_list = []
+        for c in range(3):
+            row = csdl.concatenate(
+                [camber_dvs[c, i] for i in range(num_chord_stations - 1, 0, -1)] +
+                [camber_dvs[c, i] for i in range(num_chord_stations)]
+            )
+            full_span_camber_list.append(csdl.reshape(row, (1, num_ffd_sections)))
+        full_span_camber = csdl.concatenate(full_span_camber_list, axis=0)  # shape (3, num_ffd_sections)
 
-    # Convert chord percentage to physical vertical displacement for each section
-    camber_displacement = (full_span_camber / 100.0) * csdl.expand(section_chords, (3, num_ffd_sections), 'j->ij')
-    camber_delta = csdl.expand(camber_displacement, (3, num_ffd_sections, 2), 'ij->ijk')
-    ffd_coefficients = ffd_coefficients.set(csdl.slice[1:4, :, :, 2], ffd_coefficients[1:4, :, :, 2] + camber_delta)
+        # Convert chord percentage to physical vertical displacement for each section
+        camber_displacement = (full_span_camber / 100.0) * csdl.expand(section_chords, (3, num_ffd_sections), 'j->ij')
+        camber_delta = csdl.expand(camber_displacement, (3, num_ffd_sections, 2), 'ij->ijk')
+        ffd_coefficients = ffd_coefficients.set(csdl.slice[1:4, :, :, 2], ffd_coefficients[1:4, :, :, 2] + camber_delta)
+
+    if include_thickness_shape:
+        full_span_thick_list = []
+        for c in range(num_chordwise_thick_dvs):
+            row = csdl.concatenate(
+                [thickness_shape_dvs[c, i] for i in range(num_chord_stations - 1, 0, -1)] +
+                [thickness_shape_dvs[c, i] for i in range(num_chord_stations)]
+            )
+            full_span_thick_list.append(csdl.reshape(row, (1, num_ffd_sections)))
+        full_span_thick = csdl.concatenate(full_span_thick_list, axis=0)  # shape (num_chordwise_thick_dvs, num_ffd_sections)
+
+        # Convert chord percentage to physical vertical displacement for each section (half-thickness delta)
+        thick_displacement = (full_span_thick / 100.0) * csdl.expand(section_chords, (num_chordwise_thick_dvs, num_ffd_sections), 'j->ij')
+        half_dt = 0.5 * thick_displacement
+        row_end = 5 if include_te_thickness else 4
+
+        # Combine lower (-0.5 * dt) and upper (+0.5 * dt) shifts into single atomic FFD slice update
+        dt_pair = csdl.concatenate(
+            [csdl.reshape(-half_dt, (row_end, num_ffd_sections, 1)),
+             csdl.reshape(half_dt, (row_end, num_ffd_sections, 1))],
+            axis=2
+        )
+        ffd_coefficients = ffd_coefficients.set(
+            csdl.slice[0:row_end, :, :, 2],
+            ffd_coefficients[0:row_end, :, :, 2] + dt_pair
+        )
 
 geometry_coefficients = ffd_block.evaluate_ffd(coefficients=ffd_coefficients, plot=False)
 geometry.set_coefficients(geometry_coefficients) # type: ignore
@@ -762,38 +933,83 @@ if formulation == 'ar_area':
     geometry_solver.add_state(span_stretch_state)
     geometry_solver.add_state(sweep_translation_states)
 
+    bspline_reg = BsplineTargetRegularization(num_chord_stations=num_chord_stations, scale_factor=scale_factor)
+
     geometric_variables = GeometricVariables()
-    # Enforce normalized chord profile (taper ratios) at stations 1 to 7
-    for i in range(1, num_chord_stations):
-        # normalized_chord = local_chords[i] / local_chords[0]
-        # geometric_variables.add_variable(normalized_chord, taper_dvs[i - 1], penalty_value=None)
 
-        # Apply operation inversion to remove some nonlinearity in the solve
-        geometric_variables.add_variable(local_chords[i]/local_chords[0].value, local_chords[0]*taper_dvs[i - 1]/local_chords[0].value, penalty_value=None)
+    local_chords_vec = csdl.concatenate([csdl.reshape(c, (1,)) for c in local_chords])
+    local_thicknesses_vec = csdl.concatenate([csdl.reshape(t, (1,)) for t in local_thicknesses])
 
-    # Enforce constant thickness-to-chord ratio = 0.12 at all stations (normalized by 0.12)
-    for i in range(num_chord_stations):
-        tc_ratio = local_thicknesses[i] / local_chords[i]
-        geometric_variables.add_variable(tc_ratio / 0.12, 1.0, penalty_value=None)
-    
-    # Enforce planform area and aspect ratio simultaneously (AR normalized by reference 10.0)
-    geometric_variables.add_variable(planform_area / (10*scale_factor**2), planform_area.value / (10*scale_factor**2), penalty_value=None)
-    # geometric_variables.add_variable(aspect_ratio_calc / 10.0, aspect_ratio / 10.0, penalty_value=None)
+    # 1. Enforce normalized chord profile (taper ratios) via Galerkin weak form (n - 1 equations)
+    c_ref_scale = float(np.asarray(local_chords[0].value).flatten()[0]) if local_chords[0].value is not None else 1.0 * scale_factor
+    res_taper = bspline_reg.compute_taper_residual(local_chords_vec, taper_control_points, c_ref=c_ref_scale)
+    # for i in range(num_chord_stations - 1):
+    #     geometric_variables.add_variable(res_taper[i], 0.0, penalty_value=None)
+    geometric_variables.add_variable(res_taper, 0.0, penalty_value=None)  # shape (num_chord_stations - 1,)
 
-    # Apply operation inversion to remove some nonlinearity in the solve
-    geometric_variables.add_variable(wingspan**2 / (10.0 * 10*scale_factor**2),
-                                     aspect_ratio * planform_area.value / (10.0 * 10*scale_factor**2), penalty_value=None)
+    # 2. Enforce thickness-to-chord ratio target via Galerkin weak form (n equations)
+    t_ref_scale = 0.12 * c_ref_scale
+    res_thick = bspline_reg.compute_thickness_residual(
+        local_thicknesses_vec, local_chords_vec, tc_target_control_points, t_ref=t_ref_scale
+    )
+    # for i in range(num_chord_stations):
+    #     geometric_variables.add_variable(res_thick[i], 0.0, penalty_value=None)
+    geometric_variables.add_variable(res_thick, 0.0, penalty_value=None)  # shape (num_chord_stations,)
 
-    # Enforce sectional sweep angles between adjacent quarter chord stations
+    # 3. Enforce planform area and aspect ratio simultaneously (2 equations)
+    if use_geonic:
+        geometric_variables.add_variable(
+            planform_area / (10*scale_factor**2),
+            planform_area_target / (10*scale_factor**2),
+            penalty_value=None
+        )
+        geometric_variables.add_variable(
+            wingspan**2 / (10.0 * 10*scale_factor**2),
+            aspect_ratio * planform_area_target / (10.0 * 10*scale_factor**2),
+            penalty_value=None
+        )
+    else:
+        geometric_variables.add_variable(
+            planform_area / (10*scale_factor**2),
+            planform_area.value / (10*scale_factor**2),
+            penalty_value=None
+        )
+        geometric_variables.add_variable(
+            wingspan**2 / (10.0 * 10*scale_factor**2),
+            aspect_ratio * planform_area.value / (10.0 * 10*scale_factor**2),
+            penalty_value=None
+        )
+
+    # 4. Enforce sectional sweep angles via Galerkin weak form (n - 1 equations)
     qc_pts = [geometry.evaluate(quarter_chord_projections[i]) for i in range(num_chord_stations)]
+    dx_list = []
+    dy_list = []
     for i in range(num_chord_stations - 1):
-        dx = qc_pts[i + 1][0] - qc_pts[i][0]
-        dy = qc_pts[i + 1][1] - qc_pts[i][1]
-        # Calculate the sectional sweep angle using arctan2 to get the correct quadrant
-        # sectional_sweep = csdl.arctan2(dx, dy)
-        geometric_variables.add_variable(dx, dy*csdl.tan(sweep_angle_dvs[i]), penalty_value=None)
+        dx_list.append(csdl.reshape(qc_pts[i + 1][0] - qc_pts[i][0], (1,)))
+        dy_list.append(csdl.reshape(qc_pts[i + 1][1] - qc_pts[i][1], (1,)))
+    dx_qc_vec = csdl.concatenate(dx_list)
+    dy_qc_vec = csdl.concatenate(dy_list)
+
+    y_scale = 5.0 * scale_factor
+    res_sweep = bspline_reg.compute_sweep_residual(
+        dx_qc_vec, dy_qc_vec, sweep_angle_control_points, y_scale=y_scale
+    )
+    # for i in range(num_chord_stations - 1):
+    #     geometric_variables.add_variable(res_sweep[i], 0.0, penalty_value=None)
+    geometric_variables.add_variable(res_sweep, 0.0, penalty_value=None)  # shape (num_chord_stations - 1,)
 
     geometry_solver.evaluate(geometric_variables)
+
+    # Dense diagnostics
+    ar_area_diagnostics = bspline_reg.compute_diagnostics(
+        local_chords=local_chords_vec,
+        local_thicknesses=local_thicknesses_vec,
+        dx_qc=dx_qc_vec,
+        dy_qc=dy_qc_vec,
+        taper_control_points=taper_control_points,
+        tc_target_control_points=tc_target_control_points,
+        sweep_angle_control_points=sweep_angle_control_points,
+    )
 
 # Right-half sectional quarter-chord sweep between successive evaluated quarter-chord stations:
 # Lambda_qc[i] = atan2(x_qc[i+1]-x_qc[i], y_qc[i+1]-y_qc[i])
@@ -810,7 +1026,57 @@ lambda_qc_vec = csdl.concatenate(lambda_qc_list)  # shape (num_sweep_eval_statio
 max_quarter_chord_sweep = csdl.maximum(lambda_qc_vec, axes=(0,), rho=50.0)
 quarter_chord_sweep_margin = (60.0 * np.pi / 180.0) - max_quarter_chord_sweep
 
-geometry.rotate(rotation_origin=geometry.evaluate(quarter_chord_center), axis_vector=np.array([0., 1., 0.]), angles=pitch, units='radians')
+quarter_chord_rot_origin = geometry.evaluate(quarter_chord_center)
+
+if use_geonic:
+    # Construct 8 CSDL sample points for TCP0 oversized payload in body frame
+    payload_sample_points = build_geonic_payload_sample_points(payload_center_x)
+    payload_sample_points.name = 'payload_sample_points'
+
+    # Complete geometry function set passed for enclosed-volume signed distance
+    projection_model = bsm3.FunctionSetProjectionModel(
+        function_set=geometry,
+        warm_start_nu=50,
+        warm_start_nv=50,
+        sdf=True,
+        sdf_sign_mode='enclosed',
+    )
+    sdf_op = bsm3.FunctionSetClosestDistanceOperation(model=projection_model)
+    payload_signed_distance = sdf_op.evaluate(
+        coefficients=geometry.stack_coefficients(),
+        points=payload_sample_points,
+    )
+    payload_signed_distance.name = 'payload_signed_distance'
+
+    geonic_constraint_values, geonic_clearance_per_point, geonic_margin = (
+        compute_geonic_clearance_and_margin(payload_signed_distance, clearance_buffer=GEONIC_CLEARANCE_M, rho=50.0)
+    )
+    geonic_constraint_values.name = 'geonic_payload_oml_clearance'
+    geonic_clearance_per_point.name = 'geonic_clearance_per_point'
+    geonic_margin.name = 'geonic_margin'
+
+    geonic_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
+
+    # Payload center in body frame: (payload_center_x, 0, 0)
+    payload_center_body = csdl.reshape(
+        csdl.concatenate([
+            csdl.reshape(payload_center_x, (1,)),
+            csdl.Variable(value=np.array([0.0])),
+            csdl.Variable(value=np.array([0.0])),
+        ]),
+        (1, 3),
+    )
+    # When BWB geometry rotates for pitch, rotate payload center about the same quarter-chord origin
+    payload_center_inertial = rotate(
+        points=payload_center_body,
+        rotation_origin=quarter_chord_rot_origin,
+        axis_vector=np.array([0., 1., 0.]),
+        angles=pitch,
+        units='radians',
+    )
+    payload_center_inertial = csdl.reshape(payload_center_inertial, (3,))
+
+geometry.rotate(rotation_origin=quarter_chord_rot_origin, axis_vector=np.array([0., 1., 0.]), angles=pitch, units='radians')
 
 # cruise_speed = csdl.Variable(value=1.)
 if scale_factor == 1.0 or scale_factor == 1.0/np.sqrt(10.0):
@@ -934,13 +1200,15 @@ strip_lower_mesh = geometry.evaluate(projected_strip_lower_skin, plot=False)
 node_chords = te_mesh[:,0] - le_mesh[:,0]
 local_chord = 0.5 * (node_chords[:-1] + node_chords[1:])
 
-node_heights = upper_beam_mesh[:, 2] - lower_beam_mesh[:, 2]
+# Compute area-weighted wingbox height across 20% to 60% chord via composite Simpson's rule
+box_diff_z = upper_beam_mesh[:, 2] - lower_beam_mesh[:, 2]
+node_heights = csdl.matvec(W_box_mat, box_diff_z)
 local_height = 0.5 * (node_heights[:-1] + node_heights[1:])
 
 # Define wingbox cross-section along the span
-# Wingbox width is 40% of local chord; height is 50% of local maximum thickness
+# Wingbox width is 40% of local chord; height is the full area-weighted torque box height
 box_width = 0.40 * local_chord
-box_height = 0.50 * local_height
+box_height = local_height
 
 # Evaluate B-spline thickness parameterization at element midpoints
 num_beam_elements = num_beam_nodes - 1
@@ -973,13 +1241,19 @@ structural_cg = beam.cg
 x_struct = structural_cg[0]
 z_struct = structural_cg[2]
 
-# Compute payload location: payload_cg fraction of root chord (y = 0.0, node 0)
+# Compute payload location
 x_le_root = le_mesh[0, 0]
 x_te_root = te_mesh[0, 0]
 root_chord = x_te_root - x_le_root
-x_payload = x_le_root + payload_cg * root_chord
-y_payload = csdl.Variable(value=np.array([0.0]))
-z_payload = 0.5 * (upper_beam_mesh[0, 2] + lower_beam_mesh[0, 2])
+if use_geonic:
+    # Use rotated inertial payload center for mass/CG consistency
+    x_payload = payload_center_inertial[0]
+    y_payload = payload_center_inertial[1]
+    z_payload = payload_center_inertial[2]
+else:
+    x_payload = x_le_root + payload_cg * root_chord
+    y_payload = csdl.Variable(value=np.array([0.0]))
+    z_payload = 0.5 * (upper_beam_mesh[0, 2] + lower_beam_mesh[0, 2])
 
 payload_mass = payload_weight / 9.81
 W_total = structural_mass * 9.81 + payload_weight
@@ -988,7 +1262,7 @@ total_mass = structural_mass + payload_mass
 # Dynamic composite aircraft Center of Mass (CG) updated each iteration
 x_cg = (structural_mass * x_struct + payload_mass * x_payload) / total_mass
 z_cg = (structural_mass * z_struct + payload_mass * z_payload) / total_mass
-r_cg = csdl.concatenate([csdl.reshape(x_cg, (1,)), y_payload, csdl.reshape(z_cg, (1,))])
+r_cg = csdl.concatenate([csdl.reshape(x_cg, (1,)), csdl.reshape(y_payload, (1,)), csdl.reshape(z_cg, (1,))])
 # endregion Structural beam model geometry and Center of Mass calculation
 
 pm_solver_inputs = {
@@ -1242,11 +1516,17 @@ strip_tc = compute_strip_thickness_to_chord(
     rho=50.0,
 )
 
-# Strip mid-chord points and aerodynamic half-chord sweep angle Lambda_0.5:
-mid_chord_drag_pts = 0.5 * (le_strip_center + te_strip_center)  # shape (num_drag_strips, 3)
-strip_sweep_halfchord = compute_half_chord_sweep(mid_chord_drag_pts)  # shape (num_drag_strips,)
-max_half_chord_sweep = csdl.maximum(strip_sweep_halfchord, axes=(0,), rho=50.0)
-half_chord_sweep_excess = max_half_chord_sweep - (60.0 * np.pi / 180.0)
+# Strip quarter-chord points and aerodynamic quarter-chord sweep angle Lambda_c/4:
+qc_drag_pts = 0.75 * le_strip_center + 0.25 * te_strip_center  # shape (num_drag_strips, 3)
+strip_sweep_qc = compute_quarter_chord_sweep(qc_drag_pts)  # shape (num_drag_strips,)
+max_strip_qc_sweep = csdl.maximum(strip_sweep_qc, axes=(0,), rho=50.0)
+strip_qc_sweep_excess = max_strip_qc_sweep - (60.0 * np.pi / 180.0)
+
+# Backward-compatible aliases for diagnostics and logging:
+mid_chord_drag_pts = 0.5 * (le_strip_center + te_strip_center)
+strip_sweep_halfchord = strip_sweep_qc  # Korn-Lock wave drag now uses quarter-chord sweep
+max_half_chord_sweep = max_strip_qc_sweep
+half_chord_sweep_excess = strip_qc_sweep_excess
 
 # Dynamic spanwise scaling: dy scales with wingspan stretch
 span_scale = wingspan / (10.0 * scale_factor)
@@ -1274,7 +1554,7 @@ for node_idx in range(num_nodes):
     
     node_wave = evaluate_wave_drag(
         strip_tc=strip_tc,
-        strip_sweep_halfchord=strip_sweep_halfchord,
+        strip_sweep=strip_sweep_qc,
         strip_cl=cl_strip_node,
         strip_area=strip_area,
         total_strip_area=total_strip_area,
@@ -1346,18 +1626,21 @@ D_total = Di_chosen + D_profile + D_wave_cruise
 # Reference values for scaling constraints and objective function
 payload_weight_val = float(np.asarray(payload_weight.value).flatten()[0]) if hasattr(payload_weight, 'value') else float(payload_weight)
 W_ref = 2.0 * payload_weight_val  # reference cruise weight [N] (~1.15x payload weight)
-D_ref = W_ref / 20. # reference drag [N] (~1/20 of payload weight if we assume L/D ~ 20)
+D_ref = W_ref / 50. # reference drag [N] (~1/20 of payload weight if we assume L/D ~ 20)
 c_ref = scale_factor * 1.0 # Initial chord length
 
 # Set active optimization objective based on induced_drag_objective toggle:
-# CD_total = CDi_chosen + CD_profile + CD_wave[0]
+# Physical drag force objective: D = 0.5 * rho * V^2 * S * CD
 if induced_drag_objective == 'fourier':
-    objective = CDi_Fourier + CD_profile + CD_wave_cruise
+    CD_active = CDi_Fourier + CD_profile + CD_wave_cruise
 elif induced_drag_objective == 'mixed':
-    objective = csdl.maximum(CDi_Fourier, CDi[0], rho=2.*1.e3) + CD_profile + CD_wave_cruise
+    CD_active = csdl.maximum(CDi_Fourier, CDi[0], rho=2.*1.e3) + CD_profile + CD_wave_cruise
 else:
-    objective = CDi[0] + CD_profile + CD_wave_cruise
-objective.set_as_objective(scaler=1.e3)
+    CD_active = CDi[0] + CD_profile + CD_wave_cruise
+
+# D_total in Newtons = 0.5 * rho * V^2 * S * CD
+objective = 0.5 * rho_array[0] * (cruise_speed ** 2) * planform_area * CD_active
+objective.set_as_objective(scaler=1.0 / D_ref)
 
 # L = W constraint (Node 0: cruise condition)
 lift_trim = lift_effective_cruise - W_total
@@ -1462,18 +1745,13 @@ cl_ss_coeffs_flat = csdl.matvec(csdl.Variable(value=M_cl_ss_inv), cl_ss_rhs)
 cl_ss_coeffs = csdl.reshape(cl_ss_coeffs_flat, (101, 1))
 cl_ss_func = lfs.Function(space=cl_ss_fit_space, coefficients=cl_ss_coeffs)
 
-# Evaluate at the peak design variable stations and intermediate points (shape: 3*num_stations - 2)
+# Evaluate at the dense spanwise evaluation points across the half-span
 all_eval_cl_ss = cl_ss_func.evaluate(eval_cl_points_arr)
 
-# Aggregate each peak station with its neighboring intermediate points using smooth maximum
+# Aggregate each station's span sector using smooth maximum
 aggregated_cl_ss_list = []
 for i in range(num_stations):
-    if i == 0:
-        grp = [0, 1]
-    elif i == num_stations - 1:
-        grp = [3*i - 1, 3*i]
-    else:
-        grp = [3*i - 1, 3*i, 3*i + 1]
+    grp = station_cl_group_indices[i]
     sub_cl_ss = csdl.concatenate([all_eval_cl_ss[idx] for idx in grp])
     grp_cl_max = csdl.maximum(sub_cl_ss, axes=(0,), rho=50.0)
     aggregated_cl_ss_list.append(csdl.reshape(grp_cl_max, (1,)))
@@ -1482,27 +1760,60 @@ for i in range(num_stations):
 dv_cl_ss = csdl.concatenate(aggregated_cl_ss_list)
 
 # Stall progression ceiling: decreases monotonically from root to tip
-# Root allowable = 1.30, Tip allowable = 0.80
-cl_root_max = 1.30
-cl_tip_max = 0.80
+# Root allowable = 1.40, Tip allowable = 1.15
+cl_root_max = 1.4
+cl_tip_max = 1.15
 cl_ss_ceiling = np.linspace(cl_root_max, cl_tip_max, num_stations)
 
 # for i in range(num_stations):
     # dv_cl_ss[i].set_as_constraint(upper=cl_ss_ceiling[i], scaler=1.0 / cl_ss_ceiling[i])
 cl_constraints_to_enforce = dv_cl_ss[-3:] if resolution == 'fast' else dv_cl_ss[-4:]
 cl_ceiling_to_enforce = cl_ss_ceiling[-3:] if resolution == 'fast' else cl_ss_ceiling[-4:]
-cl_constraints_to_enforce.set_as_constraint(upper=cl_ceiling_to_enforce, scaler=1.0 / cl_ceiling_to_enforce)
+# cl_constraints_to_enforce.set_as_constraint(upper=cl_ceiling_to_enforce, scaler=1.0 / cl_ceiling_to_enforce)
+
+# =========================================================================
+# 4C: Transonic Drag Divergence / Buffet Constraint via B-Spline Fit
+# =========================================================================
+# Fit 101-CP cubic B-spline to the 100 drag strip drag divergence Mach numbers (M_dd)
+# in a fully-determined manner with root symmetry S'(0)=0, matching cl_ss architecture.
+mdd_rhs = csdl.concatenate([strip_M_dd_cruise, csdl.Variable(value=np.array([0.0]))])
+mdd_coeffs_flat = csdl.matvec(csdl.Variable(value=M_cl_ss_inv), mdd_rhs)
+mdd_coeffs = csdl.reshape(mdd_coeffs_flat, (101, 1))
+mdd_func = lfs.Function(space=cl_ss_fit_space, coefficients=mdd_coeffs)
+
+# Evaluate at the dense spanwise evaluation points across the half-span
+all_eval_mdd = mdd_func.evaluate(eval_cl_points_arr)
+all_eval_mdd_excess = cruise_cond['mach'] - all_eval_mdd
+
+# Aggregate each station's span sector using smooth maximum
+aggregated_mdd_excess_list = []
+for i in range(num_stations):
+    grp = station_cl_group_indices[i]
+    sub_mdd_excess = csdl.concatenate([all_eval_mdd_excess[idx] for idx in grp])
+    grp_mdd_max = csdl.maximum(sub_mdd_excess, axes=(0,), rho=50.0)
+    aggregated_mdd_excess_list.append(csdl.reshape(grp_mdd_max, (1,)))
+
+# dv_mdd_excess has shape (num_stations,) -> exactly 5 locally aggregated values in fast, 8 in full
+dv_mdd_excess = csdl.concatenate(aggregated_mdd_excess_list)
+
+# Additional aggregation at the end to reduce to a single global constraint
+global_mdd_excess = csdl.maximum(dv_mdd_excess, axes=(0,), rho=50.0)
+min_strip_mdd_margin_cruise = -global_mdd_excess  # min(M_dd - M_cruise) across the wing
+
+# Enforce M_inf <= M_dd (can be switched to dv_mdd_excess in the future)
+# global_mdd_excess.set_as_constraint(upper=0.0, scaler=10.0)
 
 if formulation == 'chord_span':
     # For chord and span stretch formulation (no ParameterizationSolver),
-    # keep planform area constraint (10.0 m^2) and aspect ratio inequality constraint AR <= 15.0
-    planform_area.set_as_constraint(equals=10.0 * scale_factor**2, scaler=1.0 / (10*scale_factor**2))
+    # keep planform area constraint (10.0 m^2) unless geonic is active
+    if not use_geonic:
+        planform_area.set_as_constraint(equals=10.0 * scale_factor**2, scaler=1.0 / (10*scale_factor**2))
     aspect_ratio_calc.set_as_constraint(upper=15.0, scaler=1.e-1)
-    # Enforce constant thickness-to-chord ratio = 0.12 at all stations only if thickness or chord DVs are active
+    # Enforce thickness-to-chord ratio bounds at all stations only if thickness or chord DVs are active
     if 'thickness_stretch_dvs' in design_variables and 'chord_stretch_dvs' in design_variables:
         for i in range(num_chord_stations):
             tc_ratio = local_thicknesses[i] / local_chords[i]
-            tc_ratio.set_as_constraint(equals=0.12, scaler=10.0)
+            tc_ratio.set_as_constraint(lower=0.06, upper=0.35, scaler=10.0)
 
     # Enforce evaluated Lambda_qc in [0, 60 deg] at every adjacent evaluation section:
     sweep_max_rad = 60.0 * np.pi / 180.0
@@ -1510,7 +1821,7 @@ if formulation == 'chord_span':
         lambda_qc_vec[i].set_as_constraint(lower=0.0, upper=sweep_max_rad, scaler=1.0 / sweep_max_rad)
 else:
     # For AR and Area formulation, ParameterizationSolver explicitly enforces
-    # taper ratios, planform area, and aspect ratio.
+    # taper ratios, planform area, and aspect ratio, and sweep is bounded by sweep_angle_dvs.
     pass
 
 for dv_info in design_variables.values():
@@ -1524,7 +1835,8 @@ additional_outs = [
     dv_stresses, stress_coeffs, ttop_elem, tweb_elem, ttop_dvs, tweb_dvs, twist_dvs,
     Di_Trefftz, CD_profile, D_profile, D_total, alpha_local_elem, cl_local_elem,
     cl_local_elem_ss, dv_cl_ss, cl_ss_coeffs, y_strip_pts, W_total, M, CM, pitch_trim, lift_ss, static_margin,
-    neutral_point_x, x_cg, x_payload, payload_cg, x_struct, r_cg, local_chord, local_height,
+    neutral_point_x, x_cg, x_payload, x_struct, r_cg, local_chord, local_height,
+    box_height, node_heights,
     box_width, beam_mesh, F_node, pitch_ss, dynamic_panel_centers_right,
     panel_forces_right_cruise, panel_lift_right_cruise, panel_forces_right_ss,
     lift_effective_cruise, lift_effective_ss, L_loss_cruise, L_loss_ss,
@@ -1540,14 +1852,34 @@ additional_outs = [
     strip_tc, CD_wave_array, D_wave_array, CD_wave_cruise, D_wave_cruise,
     strip_wave_cd_cruise, strip_M_dd_cruise, strip_M_crit_cruise,
     strip_delta_M_cruise, strip_delta_M_eff_cruise, min_strip_mach_margin_cruise,
+    global_mdd_excess, dv_mdd_excess, min_strip_mdd_margin_cruise, mdd_coeffs,
     local_chord_drag, dy_strip, strip_area,
 ]
+if use_geonic:
+    additional_outs += [
+        payload_center_x,
+        payload_sample_points,
+        payload_signed_distance,
+        geonic_constraint_values,
+        geonic_clearance_per_point,
+        geonic_margin,
+        payload_center_inertial,
+    ]
+else:
+    additional_outs += [payload_cg]
 if include_camber:
     additional_outs += [camber_dvs]
+if include_thickness_shape:
+    additional_outs += [thickness_shape_dvs]
 if include_elevator:
     additional_outs += [elevator_angle]
 if include_neg1g_sizing:
     additional_outs += [lift_neg1g, root_stress_neg1g, stress_coeffs_neg1g, elem_max_stress_neg1g, pitch_neg1g, panel_forces_right_neg1g]
+if formulation == 'ar_area':
+    additional_outs += list(ar_area_diagnostics.values())
+    additional_outs += [res_taper, res_thick, res_sweep, tc_target_control_points]
+    if use_geonic:
+        additional_outs += [planform_area_target]
 additional_outs += geometry_coefficients
 
 jax_sim = csdl.experimental.JaxSimulator(
@@ -1645,19 +1977,50 @@ if run_pre_diagnostics:
         st_status = "FEASIBLE" if cl_val_st <= ceil_val else "VIOLATED"
         print(f"{j:7d} | {station_cl_peaks[j]:8.4f} | {cl_val_st:20.4f} | {ceil_val:18.4f} | {st_status:8s}")
 
+    dv_mdd_excess_arr = np.asarray(jax_sim[dv_mdd_excess]).flatten()
+    global_mdd_excess_val = float(np.asarray(jax_sim[global_mdd_excess]))
+    print(f"\n================ {num_stations} STATION TRANSONIC DRAG DIVERGENCE / BUFFET MARGIN (Cruise M_inf = {cruise_cond['mach']:.3f}) ================")
+    print(f"{'Station':7s} | {'eta_peak':8s} | {'M_inf - M_dd':14s} | {'M_dd - M_inf Margin':20s} | {'Status':8s}")
+    print("-" * 75)
+    for j in range(num_stations):
+        excess_st = dv_mdd_excess_arr[j]
+        mdd_margin = -excess_st
+        st_status = "FEASIBLE" if excess_st <= 0.0 else "VIOLATED"
+        print(f"{j:7d} | {station_cl_peaks[j]:8.4f} | {excess_st:14.4f} | {mdd_margin:20.4f} | {st_status:8s}")
+    print(f"Global M_dd margin min(M_dd - M_inf): {-global_mdd_excess_val:.4f} (Status: {'FEASIBLE' if global_mdd_excess_val <= 0.0 else 'VIOLATED'})\n")
+
+    if use_geonic:
+        pay_cx_val = float(np.asarray(jax_sim[payload_center_x]).flatten()[0])
+        clearance_vals = np.asarray(jax_sim[geonic_clearance_per_point]).flatten()
+        min_clearance = float(np.min(clearance_vals))
+        g_margin = float(np.asarray(jax_sim[geonic_margin]).flatten()[0])
+        g_status = "FEASIBLE" if g_margin >= 0.0 else "VIOLATED"
+        print(f"================ GEONIC PAYLOAD NON-INTERFERENCE DIAGNOSTIC ================")
+        print(f"Mode: ENABLED | Payload Center x: {pay_cx_val:.3f} m (Inertial: [{float(np.asarray(jax_sim[x_payload]).flatten()[0]):.3f}, {float(np.asarray(jax_sim[y_payload]).flatten()[0]):.3f}, {float(np.asarray(jax_sim[z_payload]).flatten()[0]):.3f}] m)")
+        print(f"Buffer Requirement: {GEONIC_CLEARANCE_M:.2f} m | Min Clearance: {min_clearance:.4f} m | Geonic Margin: {g_margin:+.4f} m | Status: {g_status}")
+        print(f"{'Sample Point':14s} | {'SDF [m]':10s} | {'Clearance [m]':14s} | {'Buffer [m]':12s} | {'Status':8s}")
+        print("-" * 65)
+        for pt_i in range(len(clearance_vals)):
+            c_val = clearance_vals[pt_i]
+            pt_status = "FEASIBLE" if c_val >= GEONIC_CLEARANCE_M else "VIOLATED"
+            print(f"Point {pt_i:2d}       | {-c_val:10.4f} | {c_val:14.4f} | {GEONIC_CLEARANCE_M:12.2f} | {pt_status:8s}")
+        print()
+    else:
+        print(f"Geonic Mode: DISABLED (Legacy payload_cg active)\n")
+
 
 if __name__ == '__main__':
-    optimization_problem = modopt.CSDLAlphaProblem(
-        problem_name='rectangular_wing_to_bwb_aerostructural_optimization',
-        simulator=jax_sim,
-    )
-    optimizer = modopt.PySLSQP(
-        optimization_problem,
-        # solver_options={'maxiter': 100, 'acc': 1.e-7},
-        solver_options={'maxiter': 500, 'acc': 1.e-5},
-        readable_outputs=['x'],
-    )
     if os.environ.get('SKIP_OPTIMIZATION', '0') != '1':
+        optimization_problem = modopt.CSDLAlphaProblem(
+            problem_name='rectangular_wing_to_bwb_aerostructural_optimization',
+            simulator=jax_sim,
+        )
+        max_iter = int(os.environ.get('MAX_ITER', '500'))
+        optimizer = modopt.PySLSQP(
+            optimization_problem,
+            solver_options={'maxiter': max_iter, 'acc': 1.e-5},
+            readable_outputs=['x'],
+        )
         optimizer.solve()
         optimizer.print_results()
     else:
@@ -1717,6 +2080,11 @@ if __name__ == '__main__':
                                 ss_val = inp_grp['span_stretch_dv'][:]
                                 x_vec = np.concatenate([cs_val, ss_val, pitch_val])
                                 x_history_list.append(x_vec)
+                            elif 'taper_control_points' in inp_grp:
+                                taper = inp_grp['taper_control_points'][:]
+                                ar_val = inp_grp['aspect_ratio'][:] if 'aspect_ratio' in inp_grp else np.array([10.0])
+                                x_vec = np.concatenate([taper, ar_val, pitch_val])
+                                x_history_list.append(x_vec)
                             elif 'taper_dvs' in inp_grp:
                                 taper = inp_grp['taper_dvs'][:]
                                 ar_val = inp_grp['aspect_ratio'][:] if 'aspect_ratio' in inp_grp else np.array([10.0])
@@ -1752,16 +2120,31 @@ if __name__ == '__main__':
     frames_dir = os.path.join(latest_folder, 'temp_video_frames')
     os.makedirs(frames_dir, exist_ok=True)
     plotter = pv.Plotter(off_screen=True, window_size=[1920, 1080])
+    plotter.set_background('black')
     
+    # Top-down planform camera (~77.7 deg elevation): span horizontal, nose pointing up,
+    # minimal planform foreshortening (2.3%) while allowing 3D thickness/camber to catch light.
     camera = {
-        'position': (-20.0 * scale_factor, -15.0 * scale_factor, 10.0 * scale_factor),
-        'focal_point': (0.0, 0.0, 0.0),
-        'viewup': (0, 0, 1),
+        'position': (1.2 * scale_factor - 3.5 * scale_factor, 0.0, 16.0 * scale_factor),
+        'focal_point': (1.2 * scale_factor, 0.0, 0.0),
+        'viewup': (-1, 0, 0),
     }
+
+    # Setup 3-point scene lighting for smooth Phong shading and realistic surface highlights
+    plotter.renderer.RemoveAllLights()
+    # Key light: upper-front-left (illuminates leading edge and upper surface curvature)
+    plotter.add_light(pv.Light(position=(camera['position'][0] - 10*scale_factor, -15*scale_factor, camera['position'][2] + 5*scale_factor),
+                               focal_point=camera['focal_point'], color='white', intensity=0.85, light_type='scene light'))
+    # Fill light: upper-right (softens shadows across starboard wing)
+    plotter.add_light(pv.Light(position=(camera['position'][0] + 5*scale_factor, 15*scale_factor, camera['position'][2] + 3*scale_factor),
+                               focal_point=camera['focal_point'], color='#d0e4f7', intensity=0.45, light_type='scene light'))
+    # Headlight / camera light: fills dead zones and ensures uniform depth definition
+    plotter.add_light(pv.Light(position=camera['position'], focal_point=camera['focal_point'], color='white', intensity=0.4, light_type='camera light'))
     
     cd_history = []
     cl_history = []
     sref_history = []
+    geonic_margin_history = []
     from optimization_analyses.wake_load_consistency import (
         WakeCirculationClosureHistory,
         WakeLoadConsistencyHistory,
@@ -1834,44 +2217,88 @@ if __name__ == '__main__':
         max_qc_sw_deg = np.degrees(float(np.asarray(jax_sim[max_quarter_chord_sweep]).flatten()[0]))
         max_hc_sw_deg = np.degrees(float(np.asarray(jax_sim[max_half_chord_sweep]).flatten()[0]))
         min_mach_margin = float(np.asarray(jax_sim[min_strip_mach_margin_cruise]).flatten()[0])
+        min_mdd_margin = float(np.asarray(jax_sim[min_strip_mdd_margin_cruise]).flatten()[0])
 
         cd_active_val = (cdi_fourier_val if induced_drag_objective == 'fourier' else cd_trefftz_val) + cd_profile_val + cd_wave_val
         cd_history.append(cd_active_val * 1e4)  # Active total CD in drag counts (x 1e4)
         cl_history.append(cl_val)
         sref_history.append(sref_val)
+        if use_geonic:
+            geonic_margin_history.append(float(np.asarray(jax_sim[geonic_margin]).flatten()[0]))
     
         # Get plotting elements from geometry.plot (returns list of pyvista objects)
         plotting_elements = geometry.plot(show=False)
     
-        # Clear previous frame and add new geometry
-        plotter.clear()
+        # Clear previous frame actors while preserving lighting setup
+        plotter.clear_actors()
     
-        # Add each plotting element to the plotter
+        # Add each plotting element to the plotter with smooth Phong shading and surface normals
         for element in plotting_elements:
             if isinstance(element, dict) and 'mesh' in element:
                 mesh = element['mesh']
                 kwargs = element.get('kwargs', {})
-                plotter.add_mesh(mesh, **kwargs)
             elif isinstance(element, tuple) and len(element) == 2:
                 mesh, kwargs = element
-                plotter.add_mesh(mesh, **kwargs)
             elif isinstance(element, pv.Actor):
                 plotter.add_actor(element)
+                continue
             elif isinstance(element, pv.DataSet):
-                plotter.add_mesh(element)
+                mesh = element
+                kwargs = {}
+            else:
+                continue
+
+            # Convert StructuredGrid to PolyData with exact point normals for smooth Phong shading
+            if hasattr(mesh, 'extract_surface'):
+                try:
+                    surf = mesh.extract_surface(algorithm='dataset_surface')
+                except TypeError:
+                    surf = mesh.extract_surface()
+                if hasattr(surf, 'compute_normals'):
+                    surf = surf.compute_normals(auto_orient_normals=True)
+            else:
+                surf = mesh
+
+            mesh_kwargs = {
+                'smooth_shading': True,
+                'specular': 0.5,
+                'specular_power': 30,
+                'ambient': 0.25,
+                'diffuse': 0.75,
+            }
+            mesh_kwargs.update(kwargs)
+            # Ensure shading parameters are active
+            mesh_kwargs['smooth_shading'] = True
+            mesh_kwargs['specular'] = 0.5
+            mesh_kwargs['specular_power'] = 30
+            mesh_kwargs['ambient'] = 0.25
+            mesh_kwargs['diffuse'] = 0.75
+            plotter.add_mesh(surf, **mesh_kwargs)
     
         # Build parameter info string depending on active formulation
         dv_str = ""
         if formulation == 'ar_area':
             ar_val = float(np.asarray(unscaled_values['aspect_ratio']).flatten()[0]) if 'aspect_ratio' in unscaled_values else 10.0
-            t_vals = unscaled_values['taper_dvs'] if 'taper_dvs' in unscaled_values else np.ones(num_chord_stations - 1)
-            c_vals = [1.0] + list(t_vals)
-            c_str = " ".join([f"t{i}={c_vals[i]:.2f}" for i in range(len(c_vals))])
-            sw_vals = unscaled_values['sweep_angle_dvs'] if 'sweep_angle_dvs' in unscaled_values else np.zeros(num_chord_stations - 1)
-            sw_str = " ".join([f"sw{i}={np.degrees(sw_vals[i]):.1f}°" for i in range(len(sw_vals))])
+            if 'taper_control_points' in unscaled_values:
+                t_vals = unscaled_values['taper_control_points']
+            elif 'taper_dvs' in unscaled_values:
+                t_vals = unscaled_values['taper_dvs']
+            else:
+                t_vals = np.ones(num_chord_stations - 1)
+            p1 = float(np.asarray(t_vals).flatten()[0]) if len(t_vals) > 0 else 1.0
+            p0 = 1.5 - 0.5 * p1
+            c_vals = [p0] + list(t_vals)
+            c_str = " ".join([f"cp_t{i}={c_vals[i]:.2f}" for i in range(len(c_vals))])
+            if 'sweep_angle_control_points' in unscaled_values:
+                sw_vals = unscaled_values['sweep_angle_control_points']
+            elif 'sweep_angle_dvs' in unscaled_values:
+                sw_vals = unscaled_values['sweep_angle_dvs']
+            else:
+                sw_vals = np.zeros(num_chord_stations - 1)
+            sw_str = " ".join([f"cp_sw{i}={np.degrees(float(np.asarray(sw_vals[i]).flatten()[0])):.1f}°" for i in range(len(sw_vals))])
             if 'twist_dvs' in unscaled_values:
                 tw_vals = unscaled_values['twist_dvs']
-                tw_str = " ".join([f"tw{i}={np.degrees(tw_vals[i]):.1f}°" for i in range(len(tw_vals))])
+                tw_str = " ".join([f"tw{i}={np.degrees(float(np.asarray(tw_vals[i]).flatten()[0])):.1f}°" for i in range(len(tw_vals))])
                 dv_str = f"AR={ar_val:.2f}  {c_str}\n{sw_str}\n{tw_str}"
             else:
                 dv_str = f"AR={ar_val:.2f}  {c_str}\n{sw_str}"
@@ -1893,7 +2320,17 @@ if __name__ == '__main__':
         if 'camber_dvs' in unscaled_values:
             cam_vals = unscaled_values['camber_dvs']
             max_cam_pct = np.max(np.abs(cam_vals))
-            dv_str += (f"\nmax|camber|={max_cam_pct:.2f}% chord" if dv_str else f"max|camber|={max_cam_pct:.2f}% chord")
+            dv_str += (f"\nmax camber={max_cam_pct:.2f}% chord" if dv_str else f"max camber={max_cam_pct:.2f}% chord")
+        if 'thickness_shape_dvs' in unscaled_values:
+            th_vals = unscaled_values['thickness_shape_dvs']
+            max_th_pct = np.max(np.abs(th_vals))
+            dv_str += (f"\nmax thick shape={max_th_pct:.2f}% chord" if dv_str else f"max thick shape={max_th_pct:.2f}% chord")
+        if 'tc_target_control_points' in unscaled_values:
+            tc_vals = np.asarray(unscaled_values['tc_target_control_points']).flatten()
+            dv_str += (f"\nt/c=[{tc_vals[0]:.3f}..{tc_vals[-1]:.3f}]" if dv_str else f"t/c=[{tc_vals[0]:.3f}..{tc_vals[-1]:.3f}]")
+        if 'planform_area_target' in unscaled_values:
+            ar_tgt_val = float(np.asarray(unscaled_values['planform_area_target']).flatten()[0])
+            dv_str += (f"\nS_target={ar_tgt_val:.1f}m²" if dv_str else f"S_target={ar_tgt_val:.1f}m²")
     
         pitch_val = float(np.asarray(unscaled_values['pitch']).flatten()[0]) if 'pitch' in unscaled_values else 0.0
         pitch_ss_val = float(np.asarray(unscaled_values['pitch_ss']).flatten()[0]) if 'pitch_ss' in unscaled_values else 0.0
@@ -1901,32 +2338,67 @@ if __name__ == '__main__':
         pitch_neg1g_str = f"  Pitch_-1g={np.degrees(pitch_neg1g_val):.1f}°" if 'pitch_neg1g' in unscaled_values else ""
         elev_val = float(np.asarray(unscaled_values['elevator_angle']).flatten()[0]) if 'elevator_angle' in unscaled_values else 0.0
         elev_str = f"Elevator={np.degrees(elev_val):.1f}°  " if include_elevator else ""
-        pay_cg_val = float(np.asarray(unscaled_values['payload_cg']).flatten()[0]) if 'payload_cg' in unscaled_values else 0.40
         sm_val = float(np.asarray(jax_sim[static_margin]).flatten()[0])
         xnp_val = float(np.asarray(jax_sim[neutral_point_x]).flatten()[0])
         xcg_val = float(np.asarray(jax_sim[x_cg]).flatten()[0])
         xpay_val = float(np.asarray(jax_sim[x_payload]).flatten()[0])
+
+        if use_geonic:
+            pay_cx_val = float(np.asarray(unscaled_values['payload_center_x']).flatten()[0]) if 'payload_center_x' in unscaled_values else float(np.asarray(jax_sim[payload_center_x]).flatten()[0])
+            clearance_vals = np.asarray(jax_sim[geonic_clearance_per_point]).flatten()
+            min_clearance = float(np.min(clearance_vals))
+            g_margin = float(np.asarray(jax_sim[geonic_margin]).flatten()[0])
+            g_status = "FEAS" if g_margin >= 0.0 else "VIOL"
+            geonic_hud_str = f"Geonic: ON | pay_x={pay_cx_val:.2f}m | min_clr={min_clearance:.3f}m | margin={g_margin:+.3f}m ({g_status})\n"
+            pay_cg_str = f"x_pay={xpay_val:.3f}m (pay_x={pay_cx_val:.3f}m)"
+
+            box_corners_body = get_full_payload_box_corners(pay_cx_val, 0.0, 0.0)
+            pay_inertial_val = np.asarray(jax_sim[payload_center_inertial]).flatten()
+            cos_p = np.cos(pitch_val)
+            sin_p = np.sin(pitch_val)
+            box_corners_rot = np.empty_like(box_corners_body)
+            dx = box_corners_body[:, 0] - pay_cx_val
+            dz = box_corners_body[:, 2]
+            box_corners_rot[:, 0] = pay_inertial_val[0] + dx * cos_p + dz * sin_p
+            box_corners_rot[:, 1] = box_corners_body[:, 1]
+            box_corners_rot[:, 2] = pay_inertial_val[2] - dx * sin_p + dz * cos_p
+
+            box_faces = [
+                4, 0, 1, 3, 2,  # front
+                4, 4, 6, 7, 5,  # rear
+                4, 0, 4, 5, 1,  # left
+                4, 2, 3, 7, 6,  # right
+                4, 0, 2, 6, 4,  # bottom
+                4, 1, 5, 7, 3,  # top
+            ]
+            payload_poly = pv.PolyData(box_corners_rot, box_faces)
+            plotter.add_mesh(payload_poly, color='cyan', opacity=0.4, style='wireframe', line_width=2.0)
+            plotter.add_mesh(payload_poly, color='cyan', opacity=0.15, style='surface')
+        else:
+            pay_cg_val = float(np.asarray(unscaled_values['payload_cg']).flatten()[0]) if 'payload_cg' in unscaled_values else 0.40
+            geonic_hud_str = ""
+            pay_cg_str = f"x_pay={xpay_val:.3f}m [{pay_cg_val*100:.1f}%]"
     
         # Add iteration counter label using unscaled physical values
         plotter.add_text(
             f"Iteration {iteration}/{num_iterations - 1}\n"
             f"Formulation: {formulation} | Res: {resolution} | Obj: {induced_drag_objective}\n"
             f"CD_tot={cd_active_val*1e4:.1f} cts (CDi={(cdi_fourier_val if induced_drag_objective=='fourier' else cd_trefftz_val)*1e4:.1f}, CDprof={cd_profile_val*1e4:.1f}, CDwave={cd_wave_val*1e4:.1f})\n"
-            f"D_tot={d_total_val:.1f} N | Λ_qc_max={max_qc_sw_deg:.1f}° | Λ_0.5_max={max_hc_sw_deg:.1f}° | min(Mcrit-M)={min_mach_margin:+.4f}\n"
+            f"D_tot={d_total_val:.1f} N | Λ_qc_max={max_qc_sw_deg:.1f}° | Λ_0.5_max={max_hc_sw_deg:.1f}° | min(Mdd-M)={min_mdd_margin:+.4f}\n"
+            f"{geonic_hud_str}"
             f"{dv_str}\n"
             f"{elev_str}Pitch={np.degrees(pitch_val):.1f}°  Pitch_ss={np.degrees(pitch_ss_val):.1f}°{pitch_neg1g_str}\n"
-            f"SM={sm_val:.4f} (x_cg={xcg_val:.3f}m, x_np={xnp_val:.3f}m, x_pay={xpay_val:.3f}m [{pay_cg_val*100:.1f}%])",
+            f"SM={sm_val:.4f} (x_cg={xcg_val:.3f}m, x_np={xnp_val:.3f}m, {pay_cg_str})",
             position='upper_left',
             font_size=11,
             color='white',
-            shadow=True,
+            shadow=False,
         )
     
         # Set camera
         plotter.camera.position = camera['position']
         plotter.camera.focal_point = camera['focal_point']
         plotter.camera.up = camera['viewup']
-        plotter.set_background('black')
     
         frame_file = os.path.join(frames_dir, f"frame_{iteration:04d}.png")
         plotter.screenshot(frame_file)
@@ -1974,8 +2446,7 @@ if __name__ == '__main__':
                 dy_strip_opt = np.asarray(jax_sim[dy_strip]).flatten()
                 strip_area_opt = np.asarray(jax_sim[strip_area]).flatten()
 
-                np.savez_compressed(
-                    cache_file_opt,
+                cache_dict = dict(
                     panel_centers_right=panel_centers_right_opt,
                     f_cruise=f_cruise_opt,
                     f_ss=f_ss_opt,
@@ -1994,6 +2465,7 @@ if __name__ == '__main__':
                     d_profile_val=d_profile_val_opt,
                     d_total_val=d_total_val_opt,
                     strip_tc=strip_tc_opt,
+                    strip_sweep_qc=strip_sweep_opt,
                     strip_sweep_halfchord=strip_sweep_opt,
                     y_strip_pts=y_strip_pts_opt,
                     strip_wave_cd=strip_wave_cd_opt,
@@ -2006,6 +2478,7 @@ if __name__ == '__main__':
                     station_cl_peaks=np.asarray(station_cl_peaks).flatten(),
                     dv_cl_ss=np.asarray(jax_sim[dv_cl_ss]).flatten(),
                     cl_ss_ceiling=cl_ss_ceiling,
+                    cl_constraints_enforced=False,
                     local_chord_drag=local_chord_drag_opt,
                     dy_strip=dy_strip_opt,
                     strip_area=strip_area_opt,
@@ -2015,10 +2488,29 @@ if __name__ == '__main__':
                     formulation=str(formulation),
                     resolution=str(resolution),
                     include_camber=bool(include_camber),
+                    include_thickness_shape=bool(include_thickness_shape),
+                    include_te_thickness=bool(include_te_thickness),
                     include_elevator=bool(include_elevator),
                     scale_factor=float(scale_factor),
-                    dv_names=np.array(list(design_variables.keys()), dtype=object),
+                    use_geonic=bool(use_geonic),
+                    num_chord_stations=int(num_chord_stations),
+                    num_stations=int(num_stations),
+                    dv_names=np.array(list(design_variables.keys()), dtype=str),
                 )
+                for dv_name, dv_info in design_variables.items():
+                    cache_dict[f'dv_opt_{dv_name}'] = np.asarray(jax_sim[dv_info.variable])
+
+                if use_geonic:
+                    cache_dict['payload_center_x'] = float(np.asarray(jax_sim[payload_center_x]).flatten()[0])
+                    cache_dict['payload_sample_points'] = np.asarray(jax_sim[payload_sample_points])
+                    cache_dict['payload_signed_distance'] = np.asarray(jax_sim[payload_signed_distance]).flatten()
+                    cache_dict['geonic_margin'] = float(np.asarray(jax_sim[geonic_margin]).flatten()[0])
+                    cache_dict['geonic_clearance_per_point'] = np.asarray(jax_sim[geonic_clearance_per_point]).flatten()
+                    cache_dict['payload_center_inertial'] = np.asarray(jax_sim[payload_center_inertial]).flatten()
+                else:
+                    cache_dict['payload_cg'] = float(np.asarray(jax_sim[payload_cg]).flatten()[0])
+
+                np.savez_compressed(cache_file_opt, **cache_dict)
                 print(f"Cached panel telemetry saved to: {cache_file_opt}")
 
                 # Dedicated cache for extract_wave_drag_distribution.py
@@ -2032,6 +2524,8 @@ if __name__ == '__main__':
                     strip_delta_M=strip_delta_M_opt,
                     strip_tc=strip_tc_opt,
                     strip_sweep=strip_sweep_opt,
+                    strip_sweep_qc=strip_sweep_opt,
+                    strip_sweep_halfchord=strip_sweep_opt,
                     strip_cl=cl_local_elem_opt,
                     local_chord_drag=local_chord_drag_opt,
                     dy_strip=dy_strip_opt,
@@ -2041,11 +2535,11 @@ if __name__ == '__main__':
                     cd_wave_val=cd_wave_val_opt,
                     d_wave_val=d_wave_val_opt,
                     mach_cruise=0.70,
-                    q_cruise=0.5 * rho_array[0] * (cruise_speed ** 2),
+                    q_cruise=float(cruise_cond['dynamic_pressure_Pa']),
                 )
                 print(f"Cached wave drag telemetry saved to: {wave_cache_opt}")
             except Exception as e:
-                print(f"Warning: could not save panel telemetry cache: {e}")
+                print(f"Warning: could not save wave drag telemetry cache: {e}")
     
             # Cache structural telemetry for generate_structural_plots.py
             struct_cache_opt = os.path.join(latest_folder, 'structural_data.npz')
@@ -2069,6 +2563,10 @@ if __name__ == '__main__':
                     knots_stress_15=np.asarray(knots_stress_15) if 'knots_stress_15' in globals() else np.array([]),
                     resolution=str(resolution),
                     formulation=str(formulation),
+                    num_chord_stations=int(num_chord_stations),
+                    num_stations=int(num_stations),
+                    use_geonic=bool(use_geonic),
+                    dv_names=np.array(list(design_variables.keys()), dtype=str),
                     load_factor_val=float(load_factor_val) if 'load_factor_val' in globals() else 2.5,
                 )
                 print(f"Cached structural telemetry saved to: {struct_cache_opt}")
@@ -2103,14 +2601,19 @@ if __name__ == '__main__':
     import matplotlib.image as mpimg
     
     # Compute theoretical Cd = Cl^2 / (pi * AR) in drag counts (x 1e4)
-    span_b = 15.0 * scale_factor
-    target_cl = 0.5
     target_sref = 10.0 * scale_factor ** 2
-    target_ar = 15
-    cd_theory_counts = (target_cl ** 2) / (np.pi * target_ar) * 1e4
+    final_sref = float(sref_history[-1]) if len(sref_history) > 0 else float(target_sref)
+    final_ar = float(np.asarray(jax_sim[aspect_ratio_calc]).flatten()[0])
+    final_w_total = float(np.asarray(jax_sim[W_total]).flatten()[0])
+    q_cruise_val = float(cruise_cond['dynamic_pressure_Pa'])
+    target_cl = float(final_w_total / (q_cruise_val * final_sref))
+    cd_theory_counts = float((target_cl ** 2) / (np.pi * final_ar) * 1e4)
     
-    fig = plt.figure(figsize=(14, 6), dpi=150)
-    gs = fig.add_gridspec(3, 2, width_ratios=[1.1, 1.5], wspace=0.25, hspace=0.2)
+    has_geonic_history = use_geonic and len(geonic_margin_history) == num_iterations
+    n_rows = 4 if has_geonic_history else 3
+    fig_height = 8 if has_geonic_history else 6
+    fig = plt.figure(figsize=(14, fig_height), dpi=150)
+    gs = fig.add_gridspec(n_rows, 2, width_ratios=[1.1, 1.5], wspace=0.25, hspace=0.25)
     
     # Left panel: 3D Render of final optimized wing geometry
     ax_img = fig.add_subplot(gs[:, 0])
@@ -2143,14 +2646,14 @@ if __name__ == '__main__':
     ax_cl.grid(True, color=grid_color, linewidth=1.2)
     ax_cl.plot(iters, cl_history, 'o-', color='#4fa86c', linewidth=2, markersize=5)
     ax_cl.axhline(target_cl, color='#87c79d', linestyle='--', linewidth=1.8)
-    ax_cl.text(1.02, target_cl, 'con', color='#87c79d', transform=ax_cl.get_yaxis_transform(),
+    ax_cl.text(1.02, target_cl, 'L=W trim', color='#87c79d', transform=ax_cl.get_yaxis_transform(),
                 va='center', fontsize=11, fontweight='bold')
     ax_cl.set_ylabel('CL', fontsize=11)
     plt.setp(ax_cl.get_xticklabels(), visible=False)
     for spine in ax_cl.spines.values():
         spine.set_visible(False)
     
-    # 3. Bottom Subplot: S_ref
+    # 3. Third Subplot: S_ref
     ax_sref = fig.add_subplot(gs[2, 1], sharex=ax_cd)
     ax_sref.set_facecolor(subplot_bg)
     ax_sref.grid(True, color=grid_color, linewidth=1.2)
@@ -2158,10 +2661,27 @@ if __name__ == '__main__':
     ax_sref.axhline(target_sref, color='#e08585', linestyle='--', linewidth=1.8)
     ax_sref.text(1.02, target_sref, 'con', color='#e08585', transform=ax_sref.get_yaxis_transform(),
                 va='center', fontsize=11, fontweight='bold')
-    ax_sref.set_ylabel('S_ref', fontsize=11)
-    ax_sref.set_xlabel('Iterations', fontsize=11)
+    ax_sref.set_ylabel('S_ref [m²]', fontsize=11)
+    if has_geonic_history:
+        plt.setp(ax_sref.get_xticklabels(), visible=False)
+    else:
+        ax_sref.set_xlabel('Iterations', fontsize=11)
     for spine in ax_sref.spines.values():
         spine.set_visible(False)
+
+    # 4. Fourth Subplot (if geonic): Geonic Margin
+    if has_geonic_history:
+        ax_geo = fig.add_subplot(gs[3, 1], sharex=ax_cd)
+        ax_geo.set_facecolor(subplot_bg)
+        ax_geo.grid(True, color=grid_color, linewidth=1.2)
+        ax_geo.plot(iters, geonic_margin_history, 'o-', color='#9467bd', linewidth=2, markersize=5)
+        ax_geo.axhline(0.0, color='#2ca02c', linestyle='--', linewidth=1.8)
+        ax_geo.text(1.02, 0.0, 'con (≥0)', color='#2ca02c', transform=ax_geo.get_yaxis_transform(),
+                    va='center', fontsize=11, fontweight='bold')
+        ax_geo.set_ylabel('Geonic Margin [m]', fontsize=11)
+        ax_geo.set_xlabel('Iterations', fontsize=11)
+        for spine in ax_geo.spines.values():
+            spine.set_visible(False)
     
     fig.suptitle("Optimal wing geometry vs theory", y=0.03, fontsize=15, fontweight='bold')
     
@@ -2184,9 +2704,11 @@ if __name__ == '__main__':
         print(f"Warning: unable to save wake-circulation closure diagnostic: {exc}")
     
     import shutil
-    current_conv_id = '0c0a47e5-2e16-41bb-9139-10357c23c5ee'
+    current_conv_id = '0ac41e2d-0335-41d9-9f48-d6791df931f1'
     candidate_ids = [
         current_conv_id,
+        'ce0e9874-a39a-41db-b481-5008cc744a13',
+        '0c0a47e5-2e16-41bb-9139-10357c23c5ee',
         '3256dd7c-d4c8-4c73-887d-131361f9d0c3',
         '680209fd-293d-4fa0-9f6c-ae59a72a6987',
     ]
@@ -2218,9 +2740,14 @@ if __name__ == '__main__':
         from optimization_analyses.extract_lift_distribution import extract_and_plot_lift_distribution
         extract_and_plot_lift_distribution(
             output_folder=latest_folder,
+            artifact_dir=artifact_dir,
             jax_sim=jax_sim,
             main_script=sys.modules[__name__],
         )
+        if artifact_dir and os.path.exists(artifact_dir):
+            lift_fig = os.path.join(latest_folder, 'lift_distribution.png')
+            if os.path.exists(lift_fig):
+                shutil.copy2(lift_fig, os.path.join(artifact_dir, 'lift_distribution.png'))
         print("Automatic lift distribution analysis completed successfully.")
     except Exception as exc:
         print(f"Warning: automatic lift distribution analysis failed: {exc}")

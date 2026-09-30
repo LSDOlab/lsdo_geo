@@ -214,13 +214,18 @@ def extract_and_plot_lift_distribution(output_folder, jax_sim=None, main_script=
     cache_file = os.path.join(output_folder, 'lift_distribution_data.npz')
 
     if artifact_dir is None:
-        curr_id = '3256dd7c-d4c8-4c73-887d-131361f9d0c3'
-        candidate = os.environ.get('ARTIFACT_DIR', f'/home/andrew/.gemini/antigravity/brain/{curr_id}')
-        if not os.path.exists(candidate):
-            old = '/home/andrew/.gemini/antigravity/brain/680209fd-293d-4fa0-9f6c-ae59a72a6987'
-            artifact_dir = old if os.path.exists(old) else None
-        else:
-            artifact_dir = candidate
+        candidate_ids = [
+            '0c0a47e5-2e16-41bb-9139-10357c23c5ee',
+            '3256dd7c-d4c8-4c73-887d-131361f9d0c3',
+            '680209fd-293d-4fa0-9f6c-ae59a72a6987',
+        ]
+        artifact_dir = os.environ.get('ARTIFACT_DIR', None)
+        if not artifact_dir or not os.path.exists(artifact_dir):
+            for c_id in candidate_ids:
+                cand_path = f'/home/andrew/.gemini/antigravity/brain/{c_id}'
+                if os.path.exists(cand_path):
+                    artifact_dir = cand_path
+                    break
 
     # 1. Obtain Telemetry (from in-memory jax_sim, cache, or fresh evaluation)
     if jax_sim is not None and main_script is not None:
@@ -256,6 +261,7 @@ def extract_and_plot_lift_distribution(output_folder, jax_sim=None, main_script=
         induced_drag_objective = getattr(main_script, 'induced_drag_objective', 'trefftz')
         cdi_fourier_cache = float(np.asarray(jax_sim[main_script.CDi_Fourier]).flatten()[0]) if hasattr(main_script, 'CDi_Fourier') else None
         e_fourier_cache = float(np.asarray(jax_sim[main_script.e_fourier]).flatten()[0]) if hasattr(main_script, 'e_fourier') else None
+        lift_ratio_cache = float(np.asarray(jax_sim[main_script.trefftz_lift_ratio]).flatten()[0]) if hasattr(main_script, 'trefftz_lift_ratio') else None
 
     elif (os.path.exists(os.path.join(output_folder, 'lift_and_moment_data.npz')) or os.path.exists(cache_file)) and not force_rerun:
         active_cache = os.path.join(output_folder, 'lift_and_moment_data.npz') if os.path.exists(os.path.join(output_folder, 'lift_and_moment_data.npz')) else cache_file
@@ -476,7 +482,7 @@ def extract_and_plot_lift_distribution(output_folder, jax_sim=None, main_script=
     plt.savefig(lift_fig_path, dpi=200, bbox_inches='tight')
     print(f"Lift distribution figure saved to: {lift_fig_path}")
 
-    if os.path.exists(artifact_dir):
+    if artifact_dir is not None and os.path.exists(artifact_dir):
         artifact_fig_path = os.path.join(artifact_dir, f"lift_distribution_{run_label}.png")
         plt.savefig(artifact_fig_path, dpi=200, bbox_inches='tight')
         # Also maintain un-suffixed copy
