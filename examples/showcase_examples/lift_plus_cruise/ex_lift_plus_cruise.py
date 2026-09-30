@@ -1,3 +1,6 @@
+import os
+if "JAX_PLATFORMS" not in os.environ:
+    os.environ["JAX_PLATFORMS"] = "cpu"
 import time
 import csdl_alpha as csdl
 import numpy as np
@@ -924,10 +927,11 @@ jax_sim = csdl.experimental.JaxSimulator(
     gpu=False
 )
 
-t0 = time.time()
-jax_sim.run()
-t1 = time.time()
-print('Time taken for JAX compile + run simulation: ', t1 - t0)
-jax_sim.run()
-t2 = time.time()
-print('Time taken for JAX simulation: ', t2 - t1)
+if os.environ.get("SKIP_JAX_SIM", "0") != "1":
+    t0 = time.time()
+    jax_sim.run()
+    t1 = time.time()
+    print('Time taken for JAX compile + run simulation: ', t1 - t0)
+    jax_sim.run()
+    t2 = time.time()
+    print('Time taken for JAX simulation: ', t2 - t1)
