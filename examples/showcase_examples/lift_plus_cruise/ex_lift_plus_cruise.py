@@ -913,21 +913,21 @@ beam_heights = csdl.norm(beam_tops - beam_bottoms, axes=(1,))
 # endregion Mesh Evaluation
 
 
-jax_inputs = [wing_span, wing_root_chord, wing_tip_chord, h_tail_span, h_tail_root_chord, h_tail_tip_chord,
-              tail_moment_arm,
-              flo_radius, fli_radius, fri_radius, fro_radius, rlo_radius, rli_radius, rri_radius, rro_radius]
-# jax outputs is a list containing all the geometry coefficients (geometry.functions[:].coefficients)
-jax_outputs = [geometry_function.coefficients for geometry_function in geometry.functions.values()]
-
-recorder = csdl.get_current_recorder()
-jax_sim = csdl.experimental.JaxSimulator(
-    recorder=recorder,
-    additional_inputs=jax_inputs,
-    additional_outputs=jax_outputs,
-    gpu=False
-)
-
 if os.environ.get("RUN_JAX_BENCHMARK", "0") == "1":
+    jax_inputs = [wing_span, wing_root_chord, wing_tip_chord, h_tail_span, h_tail_root_chord, h_tail_tip_chord,
+                  tail_moment_arm,
+                  flo_radius, fli_radius, fri_radius, fro_radius, rlo_radius, rli_radius, rri_radius, rro_radius]
+    # jax outputs is a list containing all the geometry coefficients (geometry.functions[:].coefficients)
+    jax_outputs = [geometry_function.coefficients for geometry_function in geometry.functions.values()]
+
+    recorder = csdl.get_current_recorder()
+    jax_sim = csdl.experimental.JaxSimulator(
+        recorder=recorder,
+        additional_inputs=jax_inputs,
+        additional_outputs=jax_outputs,
+        gpu=False
+    )
+
     t0 = time.time()
     jax_sim.run()
     t1 = time.time()
@@ -935,3 +935,4 @@ if os.environ.get("RUN_JAX_BENCHMARK", "0") == "1":
     jax_sim.run()
     t2 = time.time()
     print('Time taken for JAX simulation: ', t2 - t1)
+
