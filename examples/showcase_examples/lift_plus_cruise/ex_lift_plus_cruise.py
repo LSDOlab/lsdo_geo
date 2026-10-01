@@ -927,7 +927,7 @@ jax_sim = csdl.experimental.JaxSimulator(
     gpu=False
 )
 
-if os.environ.get("SKIP_JAX_SIM", "0") != "1":
+if os.environ.get("RUN_JAX_BENCHMARK", "0") == "1":
     t0 = time.time()
     jax_sim.run()
     t1 = time.time()

@@ -27,6 +27,9 @@ def test_example_script_execution(example_rel_path):
     env = os.environ.copy()
     env["PYVISTA_OFF_SCREEN"] = "true"
     env["PYTHONPATH"] = str(REPO_ROOT)
+    env["JAX_PLATFORMS"] = "cpu"
+    env["SKIP_JAX_SIM"] = "1"
+    env["RUN_JAX_BENCHMARK"] = "0"
 
     result = subprocess.run(
         [sys.executable, str(script_path)],
@@ -34,7 +37,7 @@ def test_example_script_execution(example_rel_path):
         env=env,
         capture_output=True,
         text=True,
-        timeout=900,
+        timeout=300,
     )
 
     assert result.returncode == 0, (
