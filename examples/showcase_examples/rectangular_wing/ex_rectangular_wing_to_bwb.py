@@ -1795,11 +1795,23 @@ if viscous_drag_mode == 'ibl':
     H_coeffs = csdl.reshape(H_coeffs_flat, (101, 1))
     H_func = lfs.Function(space=cl_ss_fit_space, coefficients=H_coeffs)
 
-    # Evaluate at the num_stations design variable station peaks (5 in fast, 8 in full)
-    dv_H_stations = H_func.evaluate(station_cl_peaks.reshape((-1, 1)))
+    # Evaluate at the dense spanwise evaluation points across the half-span (matching cl_ss architecture)
+    all_eval_H = H_func.evaluate(eval_cl_points_arr)
+
+    # Locally aggregate each station's span sector using smooth maximum
+    # This prevents flow separation from hiding in unconstrained gaps between stations
+    aggregated_H_list = []
+    for i in range(num_stations):
+        grp = station_cl_group_indices[i]
+        sub_H = csdl.concatenate([all_eval_H[idx] for idx in grp])
+        grp_H_max = csdl.maximum(sub_H, axes=(0,), rho=30.0)
+        aggregated_H_list.append(csdl.reshape(grp_H_max, (1,)))
+
+    # dv_H_stations has shape (num_stations,) -> exactly 5 in fast, 8 in full
+    dv_H_stations = csdl.concatenate(aggregated_H_list)
     dv_H_stations.name = 'dv_H_stations'
 
-    # Enforce active attachment constraint at each station individually: H <= 2.4, scaled by 0.15
+    # Enforce active attachment constraint at each station sector: H <= 2.4, scaled by 0.15
     dv_H_stations.set_as_constraint(upper=2.4, scaler=0.15)
 else:
     cd_viscous_elem = CD0_base
