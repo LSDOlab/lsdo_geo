@@ -583,9 +583,8 @@ print(f"  Fuselage -> Tail Joint Error (XZ)  : {err_fuse_tail:.2e} m")
 print("--------------------------------------------------------------------------------\n")
 
 # ==============================================================================
-# 9. JaxSimulator Setup for Fast Interactive Re-Evaluation
+# 9. Shared Interface for Evaluation, Perturbations, and Benchmarking
 # ==============================================================================
-print("=== Setting up JaxSimulator for Geometric Variable Perturbations ===")
 jax_inputs = [
     wing_area_dv,
     wing_ar_dv,
@@ -600,110 +599,162 @@ jax_inputs = [
     tail_ar_dv,
     tail_taper_dv,
 ]
-jax_outputs = [f.coefficients for f in geo.functions.values()]
 
-print("Compiling JaxSimulator (XLA JIT graph compilation)...")
-t_jit0 = time.time()
-sim = csdl.experimental.JaxSimulator(
-    recorder=recorder,
-    additional_inputs=jax_inputs,
-    additional_outputs=jax_outputs,
-    gpu=False,
-)
-sim.run()
-print(f"JaxSimulator compiled and verified in {time.time() - t_jit0:.2f}s!\n")
+variable_names = [
+    'wing_area',
+    'wing_aspect_ratio',
+    'wing_mid_taper_ratio',
+    'wing_tip_taper_ratio',
+    'wing_inboard_sweep',
+    'wing_outboard_sweep',
+    'cabin_length',
+    'tail_moment_arm',
+    'fuselage_radius',
+    'tail_area',
+    'tail_aspect_ratio',
+    'tail_taper_ratio',
+]
+
+target_comp_pairs = [
+    (wing_area_dv, wing_area_comp),
+    (wing_ar_dv, wing_ar_comp),
+    (wing_mid_taper_dv, wing_mid_taper_comp),
+    (wing_tip_taper_dv, wing_tip_taper_comp),
+    (wing_inboard_sweep_dv, wing_inboard_sweep_comp),
+    (wing_outboard_sweep_dv, wing_outboard_sweep_comp),
+    (cabin_length_dv, cabin_length_comp),
+    (tail_moment_arm_dv, tail_moment_arm_comp),
+    (fuselage_radius_dv, fuselage_radius_comp),
+    (tail_area_dv, tail_area_comp),
+    (tail_ar_dv, tail_ar_comp),
+    (tail_taper_dv, tail_taper_comp),
+]
+
+tracking_outputs = [
+    wing_area_comp,
+    wing_ar_comp,
+    wing_mid_taper_comp,
+    wing_tip_taper_comp,
+    wing_inboard_sweep_comp,
+    wing_outboard_sweep_comp,
+    cabin_length_comp,
+    tail_moment_arm_comp,
+    fuselage_radius_comp,
+    tail_area_comp,
+    tail_ar_comp,
+    tail_taper_comp,
+    conn_fuse_strut,
+    conn_wing_strut,
+    conn_strut_jury,
+    conn_fuse_tail,
+]
+
+jax_outputs = [f.coefficients for f in geo.functions.values()]
 
 # ==============================================================================
 # 10. Perturbation Video Generation
 # ==============================================================================
-output_dir = "examples/showcase_examples/truss_braced_wing"
-os.makedirs(output_dir, exist_ok=True)
-video_path = os.path.join(output_dir, "truss_braced_wing_perturbations.mp4")
+def generate_perturbation_video():
+    print("=== Setting up JaxSimulator for Geometric Variable Perturbations ===")
+    print("Compiling JaxSimulator (XLA JIT graph compilation)...")
+    t_jit0 = time.time()
+    sim = csdl.experimental.JaxSimulator(
+        recorder=recorder,
+        additional_inputs=jax_inputs,
+        additional_outputs=jax_outputs,
+        gpu=False,
+    )
+    sim.run()
+    print(f"JaxSimulator compiled and verified in {time.time() - t_jit0:.2f}s!\n")
 
-pv.OFF_SCREEN = True
-plotter = pv.Plotter(off_screen=True, window_size=[1920, 1088])
-fps = 10
-plotter.open_movie(video_path, framerate=fps)
+    output_dir = "examples/showcase_examples/truss_braced_wing"
+    os.makedirs(output_dir, exist_ok=True)
+    video_path = os.path.join(output_dir, "truss_braced_wing_perturbations.mp4")
 
-# Isometric perspective framing showing complete aircraft and truss attachments
-camera_pos = (-65.0, -130.0, 95.0)
-focal_pt = (55.0, 0.0, 8.0)
-view_up = (0.0, 0.0, 1.0)
+    pv.OFF_SCREEN = True
+    plotter = pv.Plotter(off_screen=True, window_size=[1920, 1088])
+    fps = 10
+    plotter.open_movie(video_path, framerate=fps)
 
-video_components = [
-    (wing, "#3498db", "Wing"),
-    (struts, "#e74c3c", "Struts"),
-    (juries, "#f39c12", "Juries"),
-    (fuselage, "#95a5a6", "Fuselage"),
-    (tail, "#2ecc71", "Tail"),
-]
+    # Isometric perspective framing showing complete aircraft and truss attachments
+    camera_pos = (-65.0, -130.0, 95.0)
+    focal_pt = (55.0, 0.0, 8.0)
+    view_up = (0.0, 0.0, 1.0)
 
-def render_frame(title_str, val_str, delta_str=""):
-    plotter.clear()
+    video_components = [
+        (wing, "#3498db", "Wing"),
+        (struts, "#e74c3c", "Struts"),
+        (juries, "#f39c12", "Juries"),
+        (fuselage, "#95a5a6", "Fuselage"),
+        (tail, "#2ecc71", "Tail"),
+    ]
 
-    # 1. Initial CAD geometry reference ghost overlay in #B6B1A9 with 0.25 opacity
-    for gm in valid_ghost_meshes:
-        plotter.add_mesh(
-            gm,
-            color="#B6B1A9",
-            opacity=0.25,
-            smooth_shading=True,
-            show_edges=False,
+    def render_frame(title_str, val_str, delta_str=""):
+        plotter.clear()
+
+        # 1. Initial CAD geometry reference ghost overlay in #B6B1A9 with 0.25 opacity
+        for gm in valid_ghost_meshes:
+            plotter.add_mesh(
+                gm,
+                color="#B6B1A9",
+                opacity=0.25,
+                smooth_shading=True,
+                show_edges=False,
+            )
+
+        # 2. Current perturbed geometry with vivid component colors (rendered without merging to preserve smooth normals)
+        for comp, col, name in video_components:
+            comp_meshes = [
+                elem["mesh"] if isinstance(elem, dict) and "mesh" in elem else elem
+                for elem in comp.plot(show=False)
+            ]
+            for m in comp_meshes:
+                if m is not None:
+                    plotter.add_mesh(
+                        m,
+                        color=col,
+                        smooth_shading=True,
+                        specular=0.5,
+                        specular_power=20,
+                        ambient=0.3,
+                        diffuse=0.7,
+                        show_edges=False,
+                    )
+
+        plotter.enable_lightkit()
+        plotter.set_background("#12151c", top="#1e2330")
+
+        # Monospace telemetry HUD card
+        hud_text = (
+            "LSDO_GEO: Truss-Braced Wing Parameterization\n"
+            "------------------------------------------------------------\n"
+            f"Design Variable: {title_str}\n"
+            f"Current Value:   {val_str}\n"
+            f"Perturbation:    {delta_str}\n"
+            "Strut Attach:    Locked (Residual = 0.000 m)\n"
+            "Jury Attach:     Locked (Residual = 0.000 m)\n"
+            "Tail Attach:     Locked (Residual = 0.000 m)\n"
+            "Ghost Reference: Initial CAD Geometry (gray, 0.25 opacity)"
+        )
+        plotter.add_text(
+            hud_text,
+            position="upper_left",
+            font_size=12,
+            color="white",
+            font="courier",
+            shadow=True,
         )
 
-    # 2. Current perturbed geometry with vivid component colors (rendered without merging to preserve smooth normals)
-    for comp, col, name in video_components:
-        comp_meshes = [
-            elem["mesh"] if isinstance(elem, dict) and "mesh" in elem else elem
-            for elem in comp.plot(show=False)
-        ]
-        for m in comp_meshes:
-            if m is not None:
-                plotter.add_mesh(
-                    m,
-                    color=col,
-                    smooth_shading=True,
-                    specular=0.5,
-                    specular_power=20,
-                    ambient=0.3,
-                    diffuse=0.7,
-                    show_edges=False,
-                )
+        plotter.camera.position = camera_pos
+        plotter.camera.focal_point = focal_pt
+        plotter.camera.up = view_up
+        plotter.write_frame()
 
-    plotter.enable_lightkit()
-    plotter.set_background("#12151c", top="#1e2330")
+        # Periodic garbage collection for VTK memory management
+        gc.collect()
 
-    # Monospace telemetry HUD card
-    hud_text = (
-        "LSDO_GEO: Truss-Braced Wing Parameterization\n"
-        "------------------------------------------------------------\n"
-        f"Design Variable: {title_str}\n"
-        f"Current Value:   {val_str}\n"
-        f"Perturbation:    {delta_str}\n"
-        "Strut Attach:    Locked (Residual = 0.000 m)\n"
-        "Jury Attach:     Locked (Residual = 0.000 m)\n"
-        "Tail Attach:     Locked (Residual = 0.000 m)\n"
-        "Ghost Reference: Initial CAD Geometry (#B6B1A9, 0.25 opacity)"
-    )
-    plotter.add_text(
-        hud_text,
-        position="upper_left",
-        font_size=12,
-        color="white",
-        font="courier",
-        shadow=True,
-    )
-
-    plotter.camera.position = camera_pos
-    plotter.camera.focal_point = focal_pt
-    plotter.camera.up = view_up
-    plotter.write_frame()
-
-    # Periodic garbage collection for VTK memory management
-    gc.collect()
-
-# Define geometric design variables to sweep with nominal values and large visible perturbations (~50%)
-variables_to_sweep = [
+    # Define geometric design variables to sweep with nominal values and large visible perturbations (~50%)
+    variables_to_sweep = [
     {
         'variable': wing_area_dv,
         'name': 'Wing Area',
@@ -794,76 +845,79 @@ variables_to_sweep = [
     },
 ]
 
-def generate_sweep_values_with_hold(nominal, offset, offset_neg=None, num_osc_points=16, hold_points=3):
-    nominal = float(np.squeeze(nominal))
-    offset = float(np.squeeze(offset))
-    if offset_neg is None:
-        offset_neg = offset
-    else:
-        offset_neg = float(np.squeeze(offset_neg))
-    hold_start = np.full(hold_points, nominal)
-    s = np.sin(np.linspace(0, 2 * np.pi, num_osc_points, endpoint=False))
-    osc = nominal + np.where(s >= 0, offset * s, offset_neg * s)
-    hold_end = np.full(hold_points, nominal)
-    return np.concatenate([hold_start, osc, hold_end])
+    def generate_sweep_values_with_hold(nominal, offset, offset_neg=None, num_osc_points=16, hold_points=3):
+        nominal = float(np.squeeze(nominal))
+        offset = float(np.squeeze(offset))
+        if offset_neg is None:
+            offset_neg = offset
+        else:
+            offset_neg = float(np.squeeze(offset_neg))
+        hold_start = np.full(hold_points, nominal)
+        s = np.sin(np.linspace(0, 2 * np.pi, num_osc_points, endpoint=False))
+        osc = nominal + np.where(s >= 0, offset * s, offset_neg * s)
+        hold_end = np.full(hold_points, nominal)
+        return np.concatenate([hold_start, osc, hold_end])
 
-print("Rendering video frames across all 12 geometric design variables...")
+    print("Rendering video frames across all 12 geometric design variables...")
 
-# Opening hold position (6 frames = 0.6s)
-for _ in range(6):
-    render_frame("Baseline Solved Configuration", "All Variables at Nominal", "Nominal Hold Position")
+    # Opening hold position (6 frames = 0.6s)
+    for _ in range(6):
+        render_frame("Baseline Solved Configuration", "All Variables at Nominal", "Nominal Hold Position")
 
-# Sweep over each design variable sequentially
-for var_idx, var_info in enumerate(variables_to_sweep):
-    target_var = var_info['variable']
-    var_name = var_info['name']
-    unit_str = var_info['unit']
-    is_angle = var_info.get('is_angle', False)
-    nominal_val = float(np.squeeze(var_info['nominal']))
-    offset_val = float(np.squeeze(var_info['offset']))
-    offset_neg_val = var_info.get('offset_neg', None)
+    # Sweep over each design variable sequentially
+    for var_idx, var_info in enumerate(variables_to_sweep):
+        target_var = var_info['variable']
+        var_name = var_info['name']
+        unit_str = var_info['unit']
+        is_angle = var_info.get('is_angle', False)
+        nominal_val = float(np.squeeze(var_info['nominal']))
+        offset_val = float(np.squeeze(var_info['offset']))
+        offset_neg_val = var_info.get('offset_neg', None)
 
-    display_nominal = nominal_val * 180.0 / np.pi if is_angle else nominal_val
-    display_offset = offset_val * 180.0 / np.pi if is_angle else offset_val
+        display_nominal = nominal_val * 180.0 / np.pi if is_angle else nominal_val
+        display_offset = offset_val * 180.0 / np.pi if is_angle else offset_val
 
-    print(f"  [{var_idx+1}/{len(variables_to_sweep)}] Sweeping {var_name} (nominal = {display_nominal:.2f}{unit_str}, offset = ±{display_offset:.2f}{unit_str})...")
+        print(f"  [{var_idx+1}/{len(variables_to_sweep)}] Sweeping {var_name} (nominal = {display_nominal:.2f}{unit_str}, offset = ±{display_offset:.2f}{unit_str})...")
 
-    sweep_values = generate_sweep_values_with_hold(
-        nominal_val, offset_val, offset_neg=offset_neg_val, num_osc_points=16, hold_points=3
-    )
+        sweep_values = generate_sweep_values_with_hold(
+            nominal_val, offset_val, offset_neg=offset_neg_val, num_osc_points=16, hold_points=3
+        )
 
-    for val in sweep_values:
-        sim[target_var] = np.array([val])
+        for val in sweep_values:
+            sim[target_var] = np.array([val])
+            sim.run()
+
+            delta = val - nominal_val
+            if is_angle:
+                disp_val = val * 180.0 / np.pi
+                disp_delta = delta * 180.0 / np.pi
+            else:
+                disp_val = val
+                disp_delta = delta
+
+            val_display = f"{disp_val:.2f} {unit_str}".strip()
+            delta_display = f"Δ = {disp_delta:+.2f} {unit_str}".strip() if abs(disp_delta) > 1e-4 else "Hold at Nominal"
+
+            render_frame(var_name, val_display, delta_display)
+
+        # Reset back to nominal
+        sim[target_var] = np.array([nominal_val])
         sim.run()
 
-        delta = val - nominal_val
-        if is_angle:
-            disp_val = val * 180.0 / np.pi
-            disp_delta = delta * 180.0 / np.pi
-        else:
-            disp_val = val
-            disp_delta = delta
+    # Closing hold position (6 frames = 0.6s)
+    for _ in range(6):
+        render_frame("Nominal Return", "All 12 Geometric DVs Verified", "Parameterization Complete")
 
-        val_display = f"{disp_val:.2f} {unit_str}".strip()
-        delta_display = f"Δ = {disp_delta:+.2f} {unit_str}".strip() if abs(disp_delta) > 1e-4 else "Hold at Nominal"
+    plotter.close()
+    print(f"\nSuccessfully generated video: {video_path}")
 
-        render_frame(var_name, val_display, delta_display)
+    # Copy video to artifact directory
+    artifact_dir = "/home/andrewfletcher/.gemini/antigravity/brain/29740a73-aa03-496c-b841-730839d9e40d"
+    if os.path.exists(artifact_dir):
+        dest_video = os.path.join(artifact_dir, "truss_braced_wing_perturbations.mp4")
+        shutil.copy2(video_path, dest_video)
+        print(f"Copied video to artifact directory: {dest_video}")
 
-    # Reset back to nominal
-    sim[target_var] = np.array([nominal_val])
-    sim.run()
-
-# Closing hold position (6 frames = 0.6s)
-for _ in range(6):
-    render_frame("Nominal Return", "All 11 Geometric DVs Verified", "Parameterization Complete")
-
-plotter.close()
-print(f"\nSuccessfully generated video: {video_path}")
-
-# Copy video to artifact directory
-artifact_dir = "/home/andrewfletcher/.gemini/antigravity/brain/29740a73-aa03-496c-b841-730839d9e40d"
-if os.path.exists(artifact_dir):
-    dest_video = os.path.join(artifact_dir, "truss_braced_wing_perturbations.mp4")
-    shutil.copy2(video_path, dest_video)
-    print(f"Copied video to artifact directory: {dest_video}")
+if __name__ == '__main__':
+    generate_perturbation_video()
 

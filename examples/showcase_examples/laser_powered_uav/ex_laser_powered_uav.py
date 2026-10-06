@@ -401,224 +401,275 @@ print()
 
 # endregion Setup and Evaluate Geometry Parameterization Solver
 
-# region Perturbation Video Generation with JaxSimulator
-import pyvista as pv
-import shutil
-
-print("=== Setting up JaxSimulator for Geometric Variable Perturbations ===")
-
+# region Shared Interface for Evaluation, Perturbations, and Benchmarking
+# 9 design variables (8 solver targets + 1 direct geometry rotation)
 jax_inputs = [
     wing_area_dv,
     wing_ar_dv,
     wing_taper_dv,
     tail_area_dv,
     tail_ar_dv,
+    tail_taper_dv,
     tail_moment_arm_dv,
     tail_incidence_angle,
     propeller_radius_dv,
 ]
-jax_outputs = [f.coefficients for f in geometry.functions.values()]
 
-print("Compiling JaxSimulator for video parameter sweep...")
-sim = csdl.experimental.JaxSimulator(
-    recorder=recorder,
-    additional_inputs=jax_inputs,
-    additional_outputs=jax_outputs,
-    gpu=False,
-)
-sim.run()
-print("JaxSimulator compiled successfully!\n")
-
-output_dir = "examples/showcase_examples/laser_powered_uav"
-video_path = os.path.join(output_dir, "laser_powered_uav_perturbations.mp4")
-
-pv.OFF_SCREEN = True
-plotter = pv.Plotter(off_screen=True, window_size=[1920, 1088])
-# fps = 20
-fps = 10
-plotter.open_movie(video_path, framerate=fps)
-
-camera_pos = (-25.0, -55.0, 55.0)
-focal_pt = (18.0, 0.0, 1.0)
-view_up = (0.0, 0.0, 1.0)
-
-video_components = [
-    (wing, "#3498db", "Wing"),
-    (tail, "#e67e22", "Tail"),
-    (left_fuselage, "#95a5a6", "Left Fuselage"),
-    (right_fuselage, "#95a5a6", "Right Fuselage"),
-    (left_propeller, "#e74c3c", "Left Propeller"),
-    (right_propeller, "#e74c3c", "Right Propeller"),
+variable_names = [
+    'wing_area',
+    'wing_aspect_ratio',
+    'wing_taper_ratio',
+    'tail_area',
+    'tail_aspect_ratio',
+    'tail_taper_ratio',
+    'tail_moment_arm',
+    'tail_incidence_angle',
+    'propeller_radius',
 ]
 
-# Reference ghost meshes for rendering (kept unmerged to preserve smooth surface normals)
-valid_ghost_meshes = [m for m in initial_meshes if m is not None]
+target_comp_pairs = [
+    (wing_area_dv, wing_area_comp),
+    (wing_ar_dv, wing_ar_comp),
+    (wing_taper_dv, wing_taper_comp),
+    (tail_area_dv, tail_area_comp),
+    (tail_ar_dv, tail_ar_comp),
+    (tail_taper_dv, tail_taper_comp),
+    (tail_moment_arm_dv, tail_moment_arm_comp),
+    (propeller_radius_dv, rprop_radius_comp),
+]
 
-def render_frame(title_str, val_str, delta_str=""):
-    plotter.clear()
+tracking_outputs = [
+    wing_area_comp,
+    wing_ar_comp,
+    wing_taper_comp,
+    tail_area_comp,
+    tail_ar_comp,
+    tail_taper_comp,
+    tail_moment_arm_comp,
+    rprop_radius_comp,
+    conn_wing_rf,
+    conn_tail_rf,
+    conn_prop_rf,
+]
 
-    # 1. Initial geometry reference ghost plotted in #B6B1A9 with 0.3 opacity on all frames
-    for gm in valid_ghost_meshes:
-        plotter.add_mesh(
-            gm,
-            color="#B6B1A9",
-            opacity=0.3,
-            smooth_shading=True,
-            show_edges=False,
+jax_outputs = [f.coefficients for f in geometry.functions.values()]
+# endregion Shared Interface for Evaluation, Perturbations, and Benchmarking
+
+# region Perturbation Video Generation with JaxSimulator
+import pyvista as pv
+import shutil
+
+def generate_perturbation_video():
+    print("=== Setting up JaxSimulator for Geometric Variable Perturbations ===")
+    print("Compiling JaxSimulator for video parameter sweep...")
+    sim = csdl.experimental.JaxSimulator(
+        recorder=recorder,
+        additional_inputs=jax_inputs,
+        additional_outputs=jax_outputs,
+        gpu=False,
+    )
+    sim.run()
+    print("JaxSimulator compiled successfully!\n")
+
+    output_dir = "examples/showcase_examples/laser_powered_uav"
+    video_path = os.path.join(output_dir, "laser_powered_uav_perturbations.mp4")
+
+    pv.OFF_SCREEN = True
+    plotter = pv.Plotter(off_screen=True, window_size=[1920, 1088])
+    fps = 10
+    plotter.open_movie(video_path, framerate=fps)
+
+    camera_pos = (-25.0, -55.0, 55.0)
+    focal_pt = (18.0, 0.0, 1.0)
+    view_up = (0.0, 0.0, 1.0)
+
+    video_components = [
+        (wing, "#3498db", "Wing"),
+        (tail, "#e67e22", "Tail"),
+        (left_fuselage, "#95a5a6", "Left Fuselage"),
+        (right_fuselage, "#95a5a6", "Right Fuselage"),
+        (left_propeller, "#e74c3c", "Left Propeller"),
+        (right_propeller, "#e74c3c", "Right Propeller"),
+    ]
+
+    # Reference ghost meshes for rendering (kept unmerged to preserve smooth surface normals)
+    valid_ghost_meshes = [m for m in initial_meshes if m is not None]
+
+    def render_frame(title_str, val_str, delta_str=""):
+        plotter.clear()
+
+        # 1. Initial geometry reference ghost plotted in #B6B1A9 with 0.3 opacity on all frames
+        for gm in valid_ghost_meshes:
+            plotter.add_mesh(
+                gm,
+                color="#B6B1A9",
+                opacity=0.3,
+                smooth_shading=True,
+                show_edges=False,
+            )
+
+        # 2. Current perturbed geometry with vivid component colors (rendered without merging to preserve smooth normals)
+        for comp, col, name in video_components:
+            comp_meshes = [elem["mesh"] if isinstance(elem, dict) and "mesh" in elem else elem for elem in comp.plot(show=False)]
+            for m in comp_meshes:
+                if m is not None:
+                    plotter.add_mesh(
+                        m,
+                        color=col,
+                        smooth_shading=True,
+                        specular=0.6,
+                        specular_power=20,
+                        ambient=0.25,
+                        diffuse=0.75,
+                        show_edges=False,
+                    )
+
+        plotter.enable_lightkit()
+        plotter.set_background("#12151c", top="#1e2330")
+
+        hud_text = (
+            f"LSDO_GEO: Laser-Powered UAV Parameterization\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Design Variable: {title_str}\n"
+            f"Current Value:   {val_str}\n"
+            f"Perturbation:    {delta_str}\n"
+            f"Ghost Reference: Initial CAD Geometry (gray, 0.3 opacity)"
+        )
+        plotter.add_text(
+            hud_text,
+            position="upper_left",
+            font_size=12,
+            color="white",
+            font="courier",
+            shadow=True,
         )
 
-    # 2. Current perturbed geometry with vivid component colors (rendered without merging to preserve smooth normals)
-    for comp, col, name in video_components:
-        comp_meshes = [elem["mesh"] if isinstance(elem, dict) and "mesh" in elem else elem for elem in comp.plot(show=False)]
-        for m in comp_meshes:
-            if m is not None:
-                plotter.add_mesh(
-                    m,
-                    color=col,
-                    smooth_shading=True,
-                    specular=0.6,
-                    specular_power=20,
-                    ambient=0.25,
-                    diffuse=0.75,
-                    show_edges=False,
-                )
+        plotter.camera.position = camera_pos
+        plotter.camera.focal_point = focal_pt
+        plotter.camera.up = view_up
+        plotter.write_frame()
 
-    plotter.enable_lightkit()
-    plotter.set_background("#12151c", top="#1e2330")
+    # List of geometric design variables to loop over with nominal values and perturbation offsets
+    variables_to_sweep = [
+        {
+            'variable': wing_area_dv,
+            'name': 'Wing Area',
+            'unit': 'm²',
+            'nominal': wing_area_dv.value,
+            'offset': wing_area_dv.value*0.5,
+        },
+        {
+            'variable': wing_ar_dv,
+            'name': 'Wing Aspect Ratio',
+            'unit': '',
+            'nominal': wing_ar_dv.value,
+            'offset': wing_ar_dv.value*0.5,
+        },
+        {
+            'variable': wing_taper_dv,
+            'name': 'Wing Taper Ratio',
+            'unit': '',
+            'nominal': wing_taper_dv.value,
+            'offset': wing_taper_dv.value*0.5,
+        },
+        {
+            'variable': tail_area_dv,
+            'name': 'Tail Area',
+            'unit': 'm²',
+            'nominal': tail_area_dv.value,
+            'offset': tail_area_dv.value*0.5,
+        },
+        {
+            'variable': tail_ar_dv,
+            'name': 'Tail Aspect Ratio',
+            'unit': '',
+            'nominal': tail_ar_dv.value,
+            'offset': tail_ar_dv.value*0.5,
+        },
+        {
+            'variable': tail_taper_dv,
+            'name': 'Tail Taper Ratio',
+            'unit': '',
+            'nominal': tail_taper_dv.value,
+            'offset': tail_taper_dv.value*0.5,
+        },
+        {
+            'variable': tail_moment_arm_dv,
+            'name': 'Tail Moment Arm',
+            'unit': 'm',
+            'nominal': tail_moment_arm_dv.value,
+            'offset': tail_moment_arm_dv.value*0.5,
+        },
+        {
+            'variable': tail_incidence_angle,
+            'name': 'Tail Incidence Angle',
+            'unit': '°',
+            'nominal': tail_incidence_angle.value,
+            'offset': 20.0,
+        },
+        {
+            'variable': propeller_radius_dv,
+            'name': 'Propeller Radius',
+            'unit': 'm',
+            'nominal': propeller_radius_dv.value,
+            'offset': propeller_radius_dv.value*0.5,
+        },
+    ]
 
-    hud_text = (
-        f"LSDO_GEO: Laser-Powered UAV Parameterization\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"Design Variable: {title_str}\n"
-        f"Current Value:   {val_str}\n"
-        f"Perturbation:    {delta_str}\n"
-        f"Ghost Reference: Initial CAD Geometry (#B6B1A9, 0.3 opacity)"
-    )
-    plotter.add_text(
-        hud_text,
-        position="upper_left",
-        font_size=12,
-        color="white",
-        font="courier",
-        shadow=True,
-    )
+    def generate_sweep_values_with_hold(nominal, offset, num_osc_points=18, hold_points=3):
+        nominal = float(np.squeeze(nominal))
+        offset = float(np.squeeze(offset))
+        hold_start = np.full(hold_points, nominal)
+        osc = nominal + offset * np.sin(np.linspace(0, 2 * np.pi, num_osc_points, endpoint=False))
+        hold_end = np.full(hold_points, nominal)
+        return np.concatenate([hold_start, osc, hold_end])
 
-    plotter.camera.position = camera_pos
-    plotter.camera.focal_point = focal_pt
-    plotter.camera.up = view_up
-    plotter.write_frame()
+    print("Rendering video frames...")
 
-# List of geometric design variables to loop over with nominal values and perturbation offsets
-variables_to_sweep = [
-    {
-        'variable': wing_area_dv,
-        'name': 'Wing Area',
-        'unit': 'm²',
-        'nominal': wing_area_dv.value,
-        'offset': wing_area_dv.value*0.5,
-    },
-    {
-        'variable': wing_ar_dv,
-        'name': 'Wing Aspect Ratio',
-        'unit': '',
-        'nominal': wing_ar_dv.value,
-        'offset': wing_ar_dv.value*0.5,
-    },
-    {
-        'variable': wing_taper_dv,
-        'name': 'Wing Taper Ratio',
-        'unit': '',
-        'nominal': wing_taper_dv.value,
-        'offset': wing_taper_dv.value*0.5,
-    },
-    {
-        'variable': tail_area_dv,
-        'name': 'Tail Area',
-        'unit': 'm²',
-        'nominal': tail_area_dv.value,
-        'offset': tail_area_dv.value*0.5,
-    },
-    {
-        'variable': tail_ar_dv,
-        'name': 'Tail Aspect Ratio',
-        'unit': '',
-        'nominal': tail_ar_dv.value,
-        'offset': tail_ar_dv.value*0.5,
-    },
-    {
-        'variable': tail_moment_arm_dv,
-        'name': 'Tail Moment Arm',
-        'unit': 'm',
-        'nominal': tail_moment_arm_dv.value,
-        'offset': tail_moment_arm_dv.value*0.5,
-    },
-    {
-        'variable': tail_incidence_angle,
-        'name': 'Tail Incidence Angle',
-        'unit': '°',
-        'nominal': tail_incidence_angle.value,
-        'offset': 20.0,
-    },
-    {
-        'variable': propeller_radius_dv,
-        'name': 'Propeller Radius',
-        'unit': 'm',
-        'nominal': propeller_radius_dv.value,
-        'offset': propeller_radius_dv.value*0.5,
-    },
-]
+    # Opening hold position (8 frames = 0.4 sec)
+    for _ in range(8):
+        render_frame("Baseline Solved Configuration", "All Variables at Nominal", "Nominal Hold Position")
 
-def generate_sweep_values_with_hold(nominal, offset, num_osc_points=18, hold_points=3):
-    nominal = float(np.squeeze(nominal))
-    offset = float(np.squeeze(offset))
-    hold_start = np.full(hold_points, nominal)
-    osc = nominal + offset * np.sin(np.linspace(0, 2 * np.pi, num_osc_points, endpoint=False))
-    hold_end = np.full(hold_points, nominal)
-    return np.concatenate([hold_start, osc, hold_end])
+    # Nested loop: outer loop over variables, inner loop over perturbation values
+    for var_idx, var_info in enumerate(variables_to_sweep):
+        target_var = var_info['variable']
+        var_name = var_info['name']
+        unit_str = var_info['unit']
+        nominal_val = float(np.squeeze(var_info['nominal']))
+        offset_val = float(np.squeeze(var_info['offset']))
 
-print("Rendering video frames...")
+        print(f"  [{var_idx+1}/{len(variables_to_sweep)}] Sweeping {var_name} (nominal = {nominal_val:.2f}{unit_str}, offset = ±{offset_val:.2f}{unit_str})...")
 
-# Opening hold position (8 frames = 0.4 sec)
-for _ in range(8):
-    render_frame("Baseline Solved Configuration", "All Variables at Nominal", "Nominal Hold Position")
+        sweep_values = generate_sweep_values_with_hold(nominal_val, offset_val, num_osc_points=18, hold_points=3)
 
-# Nested loop: outer loop over variables, inner loop over perturbation values
-for var_idx, var_info in enumerate(variables_to_sweep):
-    target_var = var_info['variable']
-    var_name = var_info['name']
-    unit_str = var_info['unit']
-    nominal_val = float(np.squeeze(var_info['nominal']))
-    offset_val = float(np.squeeze(var_info['offset']))
+        for val in sweep_values:
+            sim[target_var] = np.array([val])
+            sim.run()
 
-    print(f"  [{var_idx+1}/{len(variables_to_sweep)}] Sweeping {var_name} (nominal = {nominal_val:.2f}{unit_str}, offset = ±{offset_val:.2f}{unit_str})...")
+            delta = val - nominal_val
+            val_display = f"{val:.2f} {unit_str}".strip()
+            delta_display = f"Δ = {delta:+.2f} {unit_str}".strip() if abs(delta) > 1e-4 else "Hold at Nominal"
 
-    sweep_values = generate_sweep_values_with_hold(nominal_val, offset_val, num_osc_points=18, hold_points=3)
+            render_frame(var_name, val_display, delta_display)
 
-    for val in sweep_values:
-        sim[target_var] = np.array([val])
+        # Reset this variable back to nominal before advancing to next variable
+        sim[target_var] = np.array([nominal_val])
         sim.run()
 
-        delta = val - nominal_val
-        val_display = f"{val:.2f} {unit_str}".strip()
-        delta_display = f"Δ = {delta:+.2f} {unit_str}".strip() if abs(delta) > 1e-4 else "Hold at Nominal"
+    # Closing hold position (8 frames = 0.4 sec)
+    for _ in range(8):
+        render_frame("Nominal Return", "All 9 Geometric DVs Verified", "Parameterization Complete")
 
-        render_frame(var_name, val_display, delta_display)
+    plotter.close()
+    print(f"Successfully generated video: {video_path}")
 
-    # Reset this variable back to nominal before advancing to next variable
-    sim[target_var] = np.array([nominal_val])
-    sim.run()
+    # Copy video to artifact directory
+    artifact_dir = "/home/andrewfletcher/.gemini/antigravity/brain/29740a73-aa03-496c-b841-730839d9e40d"
+    if os.path.exists(artifact_dir):
+        dest_video = os.path.join(artifact_dir, "laser_powered_uav_perturbations.mp4")
+        shutil.copy2(video_path, dest_video)
+        print(f"Copied video to artifact directory: {dest_video}")
 
-# Closing hold position (8 frames = 0.4 sec)
-for _ in range(8):
-    render_frame("Nominal Return", "All 8 Geometric DVs Verified", "Parameterization Complete")
-
-plotter.close()
-print(f"Successfully generated video: {video_path}")
-
-# Copy video to artifact directory
-artifact_dir = "/home/andrewfletcher/.gemini/antigravity/brain/29740a73-aa03-496c-b841-730839d9e40d"
-if os.path.exists(artifact_dir):
-    dest_video = os.path.join(artifact_dir, "laser_powered_uav_perturbations.mp4")
-    shutil.copy2(video_path, dest_video)
-    print(f"Copied video to artifact directory: {dest_video}")
+if __name__ == '__main__':
+    generate_perturbation_video()
 # endregion Perturbation Video Generation with JaxSimulator

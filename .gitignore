@@ -167,3 +167,4 @@ stored_files/
 *.mp4
 *.png
 !docs/src/images/*.png
+*.pdf
