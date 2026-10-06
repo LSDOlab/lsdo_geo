@@ -59,6 +59,31 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 from physics_models.ar_area_bspline import BsplineTargetRegularization
+try:
+    from physics_models.geonic_payload import (
+        PAYLOAD_LENGTH_M,
+        PAYLOAD_WIDTH_M,
+        PAYLOAD_HEIGHT_M,
+        PALLET_L_SHORT_M,
+        PALLET_L_LONG_M,
+        PALLET_WIDTH_M,
+        PALLET_HEIGHT_M,
+        PALLET_STACK_FRONT_M,
+        PALLET_STACK_REFERENCE_CG_X,
+    )
+except ImportError:
+    FT2M = 1.0 / 3.28084
+    PAYLOAD_LENGTH_M = 33.0 * FT2M
+    PAYLOAD_WIDTH_M = 13.0 * FT2M
+    PAYLOAD_HEIGHT_M = 10.0 * FT2M
+    IN2M = 1.0 / 39.3701
+    PALLET_L_SHORT_M = 88.0 * IN2M
+    PALLET_WIDTH_M = 108.0 * IN2M
+    PALLET_HEIGHT_M = 96.0 * IN2M
+    PALLET_L_LONG_M = 5.0 * PALLET_L_SHORT_M
+    PALLET_STACK_FRONT_M = 5.0
+    PALLET_STACK_REFERENCE_CG_X = 13.816617461248795
+
 
 
 @dataclass
@@ -162,6 +187,13 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
 
     # 1. Check saved metadata in output folder
     dv_names = None
+    dv_metadata = None
+    x_scaler_meta = None
+    saved_camber_max_percent = None
+    saved_camber_scaler = None
+    saved_thick_shape_scaler = None
+    saved_use_geonic = None
+    saved_geonic_payload_mode = None
     if target_dir is not None:
         for fn in ['lift_and_moment_data.npz', 'structural_data.npz']:
             fpath = os.path.join(target_dir, fn)
@@ -170,6 +202,21 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                     data = np.load(fpath, allow_pickle=True)
                     if dv_names is None and 'dv_names' in data:
                         dv_names = [str(x) for x in data['dv_names']]
+                    if dv_metadata is None and 'dv_metadata_json' in data:
+                        import json
+                        dv_metadata = json.loads(str(data['dv_metadata_json']))
+                    if x_scaler_meta is None and 'x_scaler' in data and data['x_scaler'].size > 0:
+                        x_scaler_meta = np.asarray(data['x_scaler'])
+                    if saved_camber_max_percent is None and 'camber_max_percent' in data:
+                        saved_camber_max_percent = float(data['camber_max_percent'])
+                    if saved_camber_scaler is None and 'camber_scaler' in data:
+                        saved_camber_scaler = float(data['camber_scaler'])
+                    if saved_thick_shape_scaler is None and 'thick_shape_scaler' in data:
+                        saved_thick_shape_scaler = float(data['thick_shape_scaler'])
+                    if saved_use_geonic is None and 'use_geonic' in data:
+                        saved_use_geonic = bool(data['use_geonic'])
+                    if saved_geonic_payload_mode is None and 'geonic_payload_mode' in data:
+                        saved_geonic_payload_mode = str(data['geonic_payload_mode'])
                     if formulation is None and 'formulation' in data:
                         formulation = str(data['formulation'])
                     if resolution is None and 'resolution' in data:
@@ -185,8 +232,27 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 except Exception:
                     pass
 
-    # 2. Dynamic parsing if dv_names metadata is available
-    if dv_names is not None:
+    # Read fallback scalers from ex_rectangular_wing_to_bwb.py if not present in saved metadata
+    if saved_camber_scaler is None or saved_thick_shape_scaler is None:
+        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        run_script = os.path.join(parent_dir, 'ex_rectangular_wing_to_bwb.py')
+        if os.path.exists(run_script):
+            try:
+                with open(run_script, 'r') as f:
+                    for line in f:
+                        line_s = line.strip()
+                        if saved_camber_scaler is None and (line_s.startswith('camber_scaler =') or line_s.startswith('camber_scaler=')):
+                            saved_camber_scaler = float(eval(line_s.split('=')[1].split('#')[0].strip()))
+                        elif saved_thick_shape_scaler is None and (line_s.startswith('thick_shape_scaler =') or line_s.startswith('thick_shape_scaler=')):
+                            saved_thick_shape_scaler = float(eval(line_s.split('=')[1].split('#')[0].strip()))
+            except Exception:
+                pass
+
+    # 2. Dynamic parsing if dv_metadata or dv_names metadata is available
+    if dv_metadata is not None or dv_names is not None:
+        if dv_metadata is not None and dv_names is None:
+            dv_names = list(dv_metadata.keys())
+
         if include_thickness_shape is None:
             include_thickness_shape = 'thickness_shape_dvs' in dv_names
         if include_te_thickness is None:
@@ -202,7 +268,9 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
             for res_candidate, n_stn in [('fast', 5), ('full', 8)]:
                 expected_len = 0
                 for name in dv_names:
-                    if name in ['chord_stretch_dvs', 'sweep_dvs', 'thickness_stretch_dvs', 'twist_dvs', 'ttop_dvs', 'tweb_dvs', 'tc_target_control_points']:
+                    if dv_metadata is not None and name in dv_metadata:
+                        expected_len += int(np.prod(dv_metadata[name]['shape']))
+                    elif name in ['chord_stretch_dvs', 'sweep_dvs', 'thickness_stretch_dvs', 'twist_dvs', 'ttop_dvs', 'tweb_dvs', 'tc_target_control_points']:
                         expected_len += n_stn
                     elif name in ['taper_dvs', 'taper_control_points', 'sweep_angle_dvs', 'sweep_angle_control_points']:
                         expected_len += n_stn - 1
@@ -223,71 +291,114 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
         num_chord_stations = num_stations
         initial_chord = 1.0 * scale_factor
         initial_thickness = 0.12 * initial_chord
-        camber_max_percent = 5.0
+        camber_max_percent = saved_camber_max_percent if saved_camber_max_percent is not None else 6.0
 
         curr = 0
         dv_dict = {}
-        for name in dv_names:
-            if name in ['chord_stretch_dvs', 'sweep_dvs']:
-                dv_dict[name] = x_opt[curr : curr + num_chord_stations] * scale_factor
-                curr += num_chord_stations
-            elif name == 'thickness_stretch_dvs':
-                dv_dict[name] = x_opt[curr : curr + num_chord_stations] * initial_thickness
-                curr += num_chord_stations
-            elif name == 'twist_dvs':
-                dv_dict[name] = x_opt[curr : curr + num_chord_stations] / 10.0
-                curr += num_chord_stations
-            elif name == 'span_stretch_dv':
-                dv_dict[name] = x_opt[curr : curr + 1] * scale_factor
-                curr += 1
-            elif name in ['pitch', 'pitch_ss', 'pitch_neg1g', 'payload_cg']:
-                dv_dict[name] = x_opt[curr : curr + 1] / 10.0
-                curr += 1
-            elif name == 'payload_center_x':
-                payload_cx_scaler = 1.0 / scale_factor
-                dv_dict[name] = x_opt[curr : curr + 1] / payload_cx_scaler
-                curr += 1
-            elif name in ['ttop_dvs', 'tweb_dvs']:
-                dv_dict[name] = x_opt[curr : curr + num_stations] / 5000.0
-                curr += num_stations
-            elif name == 'elevator_angle':
-                dv_dict[name] = float(x_opt[curr : curr + 1] / 10.0)
-                curr += 1
-            elif name == 'camber_dvs':
-                camber_scaler = 1.0 / camber_max_percent
-                dv_dict[name] = (x_opt[curr : curr + 3 * num_chord_stations] / camber_scaler).reshape((3, num_chord_stations))
-                curr += 3 * num_chord_stations
-            elif name in ['taper_dvs', 'taper_control_points']:
-                taper_scaler = 1.0 if name == 'taper_control_points' else 2.0
-                dv_dict['taper_dvs'] = x_opt[curr : curr + num_chord_stations - 1] / taper_scaler
-                curr += num_chord_stations - 1
-            elif name == 'aspect_ratio':
-                dv_dict[name] = x_opt[curr : curr + 1] / 0.5
-                curr += 1
-            elif name in ['sweep_angle_dvs', 'sweep_angle_control_points']:
-                dv_dict['sweep_angle_dvs'] = x_opt[curr : curr + num_chord_stations - 1] / 10.0
-                curr += num_chord_stations - 1
-            elif name == 'tc_target_control_points':
-                dv_dict[name] = x_opt[curr : curr + num_chord_stations] / 10.0
-                curr += num_chord_stations
-            elif name == 'planform_area_target':
-                dv_dict[name] = x_opt[curr : curr + 1] * (10.0 * (scale_factor ** 2))
-                curr += 1
-            elif name == 'thickness_shape_dvs':
-                n_rows_th = 5 if include_te_thickness else 4
-                thick_shape_scaler = 1.0 / 5.0
-                dv_dict[name] = (x_opt[curr : curr + n_rows_th * num_chord_stations] / thick_shape_scaler).reshape((n_rows_th, num_chord_stations))
-                curr += n_rows_th * num_chord_stations
-            else:
-                print(f"  Warning: Unrecognized DV name '{name}', assuming size 1")
-                dv_dict[name] = x_opt[curr : curr + 1]
-                curr += 1
+
+        if dv_metadata is not None:
+            # Fully dynamic unscaling using ground-truth metadata from structural_data.npz
+            for name, meta in dv_metadata.items():
+                shape = tuple(meta['shape'])
+                var_size = int(np.prod(shape)) if len(shape) > 0 else 1
+                raw_slc = x_opt[curr : curr + var_size]
+                scaler = np.asarray(meta['scaler'])
+                unscaled = raw_slc / scaler
+                dv_dict[name] = unscaled.reshape(shape) if len(shape) > 0 else float(unscaled.flatten()[0])
+                curr += var_size
+        else:
+            # Fallback legacy parsing with robust dynamic scaler detection
+            for name in dv_names:
+                if name in ['chord_stretch_dvs', 'sweep_dvs']:
+                    dv_dict[name] = x_opt[curr : curr + num_chord_stations] * scale_factor
+                    curr += num_chord_stations
+                elif name == 'thickness_stretch_dvs':
+                    dv_dict[name] = x_opt[curr : curr + num_chord_stations] * initial_thickness
+                    curr += num_chord_stations
+                elif name == 'twist_dvs':
+                    dv_dict[name] = x_opt[curr : curr + num_chord_stations] / 10.0
+                    curr += num_chord_stations
+                elif name == 'span_stretch_dv':
+                    dv_dict[name] = x_opt[curr : curr + 1] * scale_factor
+                    curr += 1
+                elif name in ['pitch', 'pitch_ss', 'pitch_neg1g', 'payload_cg']:
+                    dv_dict[name] = x_opt[curr : curr + 1] / 10.0
+                    curr += 1
+                elif name in ['payload_center_x', 'pallet_stack_center_x']:
+                    payload_cx_scaler = 1.0 / scale_factor
+                    dv_dict[name] = x_opt[curr : curr + 1] / payload_cx_scaler
+                    curr += 1
+                elif name in ['ttop_dvs', 'tweb_dvs']:
+                    dv_dict[name] = x_opt[curr : curr + num_stations] / 5000.0
+                    curr += num_stations
+                elif name == 'elevator_angle':
+                    dv_dict[name] = float(x_opt[curr : curr + 1] / 10.0)
+                    curr += 1
+                elif name == 'camber_dvs':
+                    var_len = 3 * num_chord_stations
+                    if x_scaler_meta is not None and len(x_scaler_meta) == n_dv:
+                        camber_scaler = x_scaler_meta[curr : curr + var_len].reshape((3, num_chord_stations))
+                    elif saved_camber_scaler is not None:
+                        camber_scaler = saved_camber_scaler
+                    else:
+                        cam_raw = x_opt[curr : curr + var_len]
+                        if np.max(np.abs(cam_raw)) > 1.5:
+                            camber_scaler = 1.0  # raw optimizer variable was in physical % [-6, 6]
+                        else:
+                            camber_scaler = 1.0 / camber_max_percent
+                    dv_dict[name] = (x_opt[curr : curr + var_len] / camber_scaler).reshape((3, num_chord_stations))
+                    curr += var_len
+                elif name in ['taper_dvs', 'taper_control_points']:
+                    taper_scaler = 1.0 if name == 'taper_control_points' else 2.0
+                    dv_dict['taper_dvs'] = x_opt[curr : curr + num_chord_stations - 1] / taper_scaler
+                    curr += num_chord_stations - 1
+                elif name == 'aspect_ratio':
+                    dv_dict[name] = x_opt[curr : curr + 1] / 0.5
+                    curr += 1
+                elif name in ['sweep_angle_dvs', 'sweep_angle_control_points']:
+                    dv_dict['sweep_angle_dvs'] = x_opt[curr : curr + num_chord_stations - 1] / 10.0
+                    curr += num_chord_stations - 1
+                elif name == 'tc_target_control_points':
+                    dv_dict[name] = x_opt[curr : curr + num_chord_stations] / 10.0
+                    curr += num_chord_stations
+                elif name == 'planform_area_target':
+                    dv_dict[name] = x_opt[curr : curr + 1] * (10.0 * (scale_factor ** 2))
+                    curr += 1
+                elif name == 'thickness_shape_dvs':
+                    n_rows_th = 5 if include_te_thickness else 4
+                    var_len = n_rows_th * num_chord_stations
+                    if x_scaler_meta is not None and len(x_scaler_meta) == n_dv:
+                        thick_shape_scaler = x_scaler_meta[curr : curr + var_len].reshape((n_rows_th, num_chord_stations))
+                    elif saved_thick_shape_scaler is not None:
+                        thick_shape_scaler = saved_thick_shape_scaler
+                    else:
+                        th_raw = x_opt[curr : curr + var_len]
+                        if np.max(np.abs(th_raw)) > 15.0:
+                            thick_shape_scaler = 1.0
+                        elif np.max(np.abs(th_raw)) > 1.5:
+                            thick_shape_scaler = 1.0 / 10.0
+                        else:
+                            thick_shape_scaler = 1.0 / 50.0
+                    dv_dict[name] = (x_opt[curr : curr + var_len] / thick_shape_scaler).reshape((n_rows_th, num_chord_stations))
+                    curr += var_len
+                else:
+                    print(f"  Warning: Unrecognized DV name '{name}', assuming size 1")
+                    dv_dict[name] = x_opt[curr : curr + 1]
+                    curr += 1
 
         if formulation == 'chord_span':
             include_camber = 'camber_dvs' in dv_dict
             include_elevator = 'elevator_angle' in dv_dict
             include_sweep = 'sweep_dvs' in dv_dict
             include_thickness_shape = 'thickness_shape_dvs' in dv_dict
+            payload_constraint_enforced = bool(
+                (saved_use_geonic and saved_geonic_payload_mode != 'none')
+                or ('payload_center_x' in dv_dict)
+                or ('pallet_stack_center_x' in dv_dict)
+            )
+            if saved_geonic_payload_mode == 'none':
+                payload_constraint_enforced = False
+
             parsed = {
                 'formulation': 'chord_span',
                 'resolution': resolution,
@@ -305,9 +416,15 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 'span_stretch_dv': dv_dict.get('span_stretch_dv', np.array([0.0])),
                 'pitch': dv_dict.get('pitch', np.array([0.0])),
                 'pitch_ss': dv_dict.get('pitch_ss', np.array([0.0])),
+                'payload_center_x': dv_dict.get('payload_center_x', None),
+                'pallet_stack_center_x': dv_dict.get('pallet_stack_center_x', None),
+                'payload_cg': dv_dict.get('payload_cg', np.array([0.4])),
                 'camber_dvs': dv_dict.get('camber_dvs', np.zeros((3, num_chord_stations))),
                 'thickness_shape_dvs': dv_dict.get('thickness_shape_dvs', None),
                 'elevator_angle': dv_dict.get('elevator_angle', 0.0),
+                'use_geonic': saved_use_geonic if saved_use_geonic is not None else payload_constraint_enforced,
+                'geonic_payload_mode': saved_geonic_payload_mode if saved_geonic_payload_mode is not None else ('oversized' if payload_constraint_enforced else 'none'),
+                'payload_constraint_enforced': payload_constraint_enforced,
             }
             print(f"  Detected Formulation : Chord & Span Stretch ('chord_span') [via dv_names metadata]")
             print(f"  Resolution           : {resolution} ({num_stations} design stations)")
@@ -315,15 +432,29 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
             print(f"  Camber DVs Active    : {include_camber}")
             print(f"  Elevator Active      : {include_elevator}")
             print(f"  Thick Shape Active   : {include_thickness_shape}")
+            print(f"  Payload Constraint   : {'Enforced' if payload_constraint_enforced else 'Not Enforced (None)'}")
             print(f"  Chord Stretches (m)  : {np.round(parsed['chord_stretch_dvs'], 3)}")
             print(f"  Effective Chords (m) : {np.round(initial_chord + parsed['chord_stretch_dvs'], 3)}")
             print(f"  Twist Angles (deg)   : {np.round(np.degrees(parsed['twist_dvs']), 2)}")
             print(f"  Span Stretch (m)     : {float(parsed['span_stretch_dv'][0]):.3f}")
+            if 'payload_center_x' in dv_dict:
+                print(f"  Payload Center x (m) : {float(parsed['payload_center_x'][0]):.3f}")
+            if 'pallet_stack_center_x' in dv_dict:
+                print(f"  Pallet Stack x (m)   : {float(parsed['pallet_stack_center_x'][0]):.3f}")
             return parsed
         else:
             include_camber = 'camber_dvs' in dv_dict
             include_elevator = 'elevator_angle' in dv_dict
             include_thickness_shape = 'thickness_shape_dvs' in dv_dict
+
+            payload_constraint_enforced = bool(
+                (saved_use_geonic and saved_geonic_payload_mode != 'none')
+                or ('payload_center_x' in dv_dict)
+                or ('pallet_stack_center_x' in dv_dict)
+            )
+            if saved_geonic_payload_mode == 'none':
+                payload_constraint_enforced = False
+
             parsed = {
                 'formulation': 'ar_area',
                 'resolution': resolution,
@@ -342,23 +473,30 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 'pitch': dv_dict.get('pitch', np.array([0.0])),
                 'pitch_ss': dv_dict.get('pitch_ss', np.array([0.0])),
                 'payload_cg': dv_dict.get('payload_cg', np.array([0.4])),
-                'payload_center_x': dv_dict.get('payload_center_x', np.array([0.5 * scale_factor])),
+                'payload_center_x': dv_dict.get('payload_center_x', None),
+                'pallet_stack_center_x': dv_dict.get('pallet_stack_center_x', None),
                 'ttop_dvs': dv_dict.get('ttop_dvs', np.full(num_stations, 0.001)),
                 'tweb_dvs': dv_dict.get('tweb_dvs', np.full(num_stations, 0.001)),
                 'camber_dvs': dv_dict.get('camber_dvs', np.zeros((3, num_chord_stations))),
                 'thickness_shape_dvs': dv_dict.get('thickness_shape_dvs', None),
                 'elevator_angle': dv_dict.get('elevator_angle', 0.0),
+                'use_geonic': saved_use_geonic if saved_use_geonic is not None else payload_constraint_enforced,
+                'geonic_payload_mode': saved_geonic_payload_mode if saved_geonic_payload_mode is not None else ('oversized' if payload_constraint_enforced else 'none'),
+                'payload_constraint_enforced': payload_constraint_enforced,
             }
             print(f"  Detected Formulation : Aspect Ratio & Area ('ar_area') [via dv_names metadata]")
             print(f"  Resolution           : {resolution} ({num_stations} design stations)")
             print(f"  Active DVs ({len(dv_names)}): {dv_names}")
             print(f"  Camber DVs Active    : {include_camber}")
             print(f"  Elevator Active      : {include_elevator}")
+            print(f"  Payload Constraint   : {'Enforced' if payload_constraint_enforced else 'Not Enforced (None)'}")
             print(f"  Aspect Ratio         : {float(parsed['aspect_ratio'][0]):.2f}")
             print(f"  Taper Ratios         : {np.round(parsed['taper_dvs'], 4)}")
             print(f"  Twist Angles (deg)   : {np.round(np.degrees(parsed['twist_dvs']), 2)}")
             if 'payload_center_x' in dv_dict:
                 print(f"  Payload Center x (m) : {float(parsed['payload_center_x'][0]):.3f}")
+            if 'pallet_stack_center_x' in dv_dict:
+                print(f"  Pallet Stack x (m)   : {float(parsed['pallet_stack_center_x'][0]):.3f}")
             return parsed
 
     # 3. Fallback heuristic detection from vector length if dv_names is not available
@@ -436,10 +574,16 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
         else:
             elevator_val = 0.0
 
-        camber_max_percent = 5.0
-        camber_scaler = 1.0 / camber_max_percent
         if include_camber and curr < n_dv and (curr + 3 * num_chord_stations <= n_dv):
-            camber_dvs_val = (x_opt[curr : curr + 3 * num_chord_stations] / camber_scaler).reshape((3, num_chord_stations))
+            cam_raw = x_opt[curr : curr + 3 * num_chord_stations]
+            if saved_camber_scaler is not None:
+                camber_scaler = saved_camber_scaler
+            elif np.max(np.abs(cam_raw)) > 1.5:
+                camber_scaler = 1.0
+            else:
+                camber_max_percent = saved_camber_max_percent if saved_camber_max_percent is not None else 6.0
+                camber_scaler = 1.0 / camber_max_percent
+            camber_dvs_val = (cam_raw / camber_scaler).reshape((3, num_chord_stations))
             curr += 3 * num_chord_stations
         else:
             camber_dvs_val = np.zeros((3, num_chord_stations))
@@ -501,10 +645,16 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
         tweb_val = x_opt[curr : curr + num_stations] / 5000.0 if curr < n_dv else np.full(num_stations, 0.001)
         curr += num_stations
 
-        camber_max_percent = 5.0
-        camber_scaler = 1.0 / camber_max_percent
         if include_camber and curr < n_dv and (curr + 3 * num_chord_stations <= n_dv):
-            camber_dvs_val = (x_opt[curr : curr + 3 * num_chord_stations] / camber_scaler).reshape((3, num_chord_stations))
+            cam_raw = x_opt[curr : curr + 3 * num_chord_stations]
+            if saved_camber_scaler is not None:
+                camber_scaler = saved_camber_scaler
+            elif np.max(np.abs(cam_raw)) > 1.5:
+                camber_scaler = 1.0
+            else:
+                camber_max_percent = saved_camber_max_percent if saved_camber_max_percent is not None else 6.0
+                camber_scaler = 1.0 / camber_max_percent
+            camber_dvs_val = (cam_raw / camber_scaler).reshape((3, num_chord_stations))
             curr += 3 * num_chord_stations
         else:
             camber_dvs_val = np.zeros((3, num_chord_stations))
@@ -607,7 +757,37 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     leading_edge_left = geometry.project(np.array([0.0, -5.0 * scale_factor, 0.0]))
     leading_edge_right = geometry.project(np.array([0.0, 5.0 * scale_factor, 0.0]))
 
-    chord_station_y = np.linspace(0.0, 5.0 * scale_factor, num_chord_stations)
+    include_thickness_shape = parsed_dvs.get('include_thickness_shape', False)
+    include_te_thickness = parsed_dvs.get('include_te_thickness', False)
+    num_ffd_coefficients_chordwise = 5 if (include_camber or include_thickness_shape) else 2
+    ffd_degree_chordwise = 2 if (include_camber or include_thickness_shape) else 1
+    ffd_spanwise_degree = 2 if (formulation == 'chord_span' or resolution == 'full') else 3
+    ffd_block = construct_ffd_block_around_entities(
+        entities=geometry,
+        num_coefficients=(num_ffd_coefficients_chordwise, num_ffd_sections, 2),
+        degree=(ffd_degree_chordwise, ffd_spanwise_degree, 1)
+    )
+    ffd_sectional_parameterization = SectionalParameterization(
+        name='ffd_param',
+        parameterized_points=ffd_block.coefficients,
+        principal_parametric_dimension=1
+    )
+
+    eta_stations = np.linspace(0.0, 1.0, num_chord_stations)
+    if formulation == 'ar_area':
+        v_stations = 0.5 + 0.5 * eta_stations
+        station_eval_pts = np.column_stack([
+            np.zeros(num_chord_stations),
+            v_stations,
+            np.full(num_chord_stations, 0.5),
+        ])
+        station_phys_pts = ffd_block.evaluate(station_eval_pts, non_csdl=True)
+        chord_station_y = np.clip(np.asarray(station_phys_pts)[:, 1], 0.0, 5.0 * scale_factor)
+        chord_station_y[0] = 0.0
+        chord_station_y[-1] = 5.0 * scale_factor
+    else:
+        chord_station_y = np.linspace(0.0, 5.0 * scale_factor, num_chord_stations)
+
     chord_le_projections = [geometry.project(np.array([0.0, y, 0.0])) for y in chord_station_y]
     chord_te_projections = [geometry.project(np.array([1.0 * scale_factor, y, 0.0])) for y in chord_station_y]
     quarter_chord_projections = [geometry.project(np.array([0.25 * scale_factor, y, 0.0])) for y in chord_station_y]
@@ -628,22 +808,6 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
 
     projected_area_le = geometry.project(area_le_physical, plot=False)
     projected_area_te = geometry.project(area_te_physical, plot=False)
-
-    include_thickness_shape = parsed_dvs.get('include_thickness_shape', False)
-    include_te_thickness = parsed_dvs.get('include_te_thickness', False)
-    num_ffd_coefficients_chordwise = 5 if (include_camber or include_thickness_shape) else 2
-    ffd_degree_chordwise = 2 if (include_camber or include_thickness_shape) else 1
-    ffd_spanwise_degree = 2 if (formulation == 'chord_span' or resolution == 'full') else 3
-    ffd_block = construct_ffd_block_around_entities(
-        entities=geometry,
-        num_coefficients=(num_ffd_coefficients_chordwise, num_ffd_sections, 2),
-        degree=(ffd_degree_chordwise, ffd_spanwise_degree, 1)
-    )
-    ffd_sectional_parameterization = SectionalParameterization(
-        name='ffd_param',
-        parameterized_points=ffd_block.coefficients,
-        principal_parametric_dimension=1
-    )
 
     if formulation == 'chord_span':
         print("Executing Direct Sectional FFD Parameterization ('chord_span')...")
@@ -708,7 +872,8 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
                 )
                 full_span_thick_list.append(csdl.reshape(row, (1, num_ffd_sections)))
             full_span_thick = csdl.concatenate(full_span_thick_list, axis=0)
-            thick_displacement = (full_span_thick / 100.0) * csdl.expand(section_chords, (n_rows_th, num_ffd_sections), 'j->ij')
+            section_thicknesses = ffd_coefficients[0:n_rows_th, :, 1, 2] - ffd_coefficients[0:n_rows_th, :, 0, 2]
+            thick_displacement = (full_span_thick / 100.0) * section_thicknesses
             half_dt = 0.5 * thick_displacement
             row_end = n_rows_th
             dt_pair = csdl.concatenate(
@@ -805,7 +970,8 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
                 )
                 full_span_thick_list.append(csdl.reshape(row, (1, num_ffd_sections)))
             full_span_thick = csdl.concatenate(full_span_thick_list, axis=0)
-            thick_displacement = (full_span_thick / 100.0) * csdl.expand(section_chords, (n_rows_th, num_ffd_sections), 'j->ij')
+            section_thicknesses = ffd_coefficients[0:n_rows_th, :, 1, 2] - ffd_coefficients[0:n_rows_th, :, 0, 2]
+            thick_displacement = (full_span_thick / 100.0) * section_thicknesses
             half_dt = 0.5 * thick_displacement
             row_end = n_rows_th
             dt_pair = csdl.concatenate(
@@ -842,7 +1008,11 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
         geometry_solver.add_state(span_stretch_state)
         geometry_solver.add_state(sweep_translation_states)
 
-        bspline_reg = BsplineTargetRegularization(num_chord_stations=num_chord_stations, scale_factor=scale_factor)
+        bspline_reg = BsplineTargetRegularization(
+            num_chord_stations=num_chord_stations,
+            scale_factor=scale_factor,
+            eta_stations=eta_stations,
+        )
 
         geometric_variables = GeometricVariables()
 
@@ -1108,6 +1278,7 @@ def generate_airfoil_gallery_plot(station_data: list, output_path: str, half_spa
         z_l = data['z_lo_grid']
         z_cam = data['camber_line']
         z_ch = data['chord_line']
+        y_val = data['y']
 
         # Fill profile
         ax.fill_between(x_g, z_l, z_u, color='#e6f2ff', alpha=0.7, label='Airfoil Section')
@@ -1116,25 +1287,57 @@ def generate_airfoil_gallery_plot(station_data: list, output_path: str, half_spa
         ax.plot(x_g, z_cam, '--', color=c_camber, linewidth=1.5, label='Mean Camber Line')
         ax.plot(x_g, z_ch, ':', color=c_chord, linewidth=1.2, label='Chord Line')
 
-        # Draw payload box on root section if available
-        if k == 0 and parsed_dvs and 'payload_center_x' in parsed_dvs:
+        # Draw payload boxes on intersecting stations ONLY if a payload containment constraint was enforced
+        if parsed_dvs and parsed_dvs.get('payload_constraint_enforced', False):
             from matplotlib.patches import Rectangle
-            pay_x = float(np.asarray(parsed_dvs['payload_center_x']).flatten()[0])
-            L_box = 33.0 / 3.28084
-            H_box = 10.0 / 3.28084
-            rect = Rectangle(
-                (pay_x - L_box / 2.0, -H_box / 2.0),
-                L_box,
-                H_box,
-                linewidth=1.8,
-                edgecolor='#d62728',
-                facecolor='#ff9896',
-                alpha=0.30,
-                linestyle='--',
-                label=f'TCP0 Payload ({L_box:.2f}m × {H_box:.2f}m)',
-                zorder=3,
-            )
-            ax.add_patch(rect)
+            if parsed_dvs.get('payload_center_x') is not None:
+                pay_x = float(np.asarray(parsed_dvs['payload_center_x']).flatten()[0])
+                if abs(y_val) <= 0.5 * PAYLOAD_WIDTH_M + 1e-4:
+                    rect_ov = Rectangle(
+                        (pay_x - PAYLOAD_LENGTH_M / 2.0, -0.5 * PAYLOAD_HEIGHT_M),
+                        PAYLOAD_LENGTH_M,
+                        PAYLOAD_HEIGHT_M,
+                        linewidth=1.8,
+                        edgecolor='#9467bd',
+                        facecolor='#9467bd',
+                        alpha=0.25,
+                        linestyle='--',
+                        label=f'TCP0 Oversized (x_c={pay_x:.2f}m)' if k == 0 else None,
+                        zorder=3,
+                    )
+                    ax.add_patch(rect_ov)
+
+            if parsed_dvs.get('pallet_stack_center_x') is not None:
+                pal_x = float(np.asarray(parsed_dvs['pallet_stack_center_x']).flatten()[0])
+                x_shift = pal_x - PALLET_STACK_REFERENCE_CG_X
+                half_w_pal = 0.5 * PALLET_WIDTH_M
+                half_h_pal = 0.5 * PALLET_HEIGHT_M
+                pallet_boxes_spec = [
+                    (PALLET_STACK_FRONT_M + x_shift, PALLET_L_SHORT_M, -half_w_pal, half_w_pal, 'Front Short'),
+                    (PALLET_STACK_FRONT_M + PALLET_L_SHORT_M + x_shift, PALLET_L_SHORT_M, -PALLET_WIDTH_M, 0.0, '2nd Short Left'),
+                    (PALLET_STACK_FRONT_M + PALLET_L_SHORT_M + x_shift, PALLET_L_SHORT_M, 0.0, PALLET_WIDTH_M, '2nd Short Right'),
+                    (PALLET_STACK_FRONT_M + 2.0 * PALLET_L_SHORT_M + x_shift, PALLET_L_LONG_M, -half_w_pal, half_w_pal, 'Center Long'),
+                    (PALLET_STACK_FRONT_M + 2.0 * PALLET_L_SHORT_M + x_shift, PALLET_L_LONG_M, -1.5 * PALLET_WIDTH_M, -half_w_pal, 'Outer Long Left'),
+                    (PALLET_STACK_FRONT_M + 2.0 * PALLET_L_SHORT_M + x_shift, PALLET_L_LONG_M, half_w_pal, 1.5 * PALLET_WIDTH_M, 'Outer Long Right'),
+                ]
+                drawn_pal_label = False
+                for bx_start, blength, by_min, by_max, bname in pallet_boxes_spec:
+                    if (by_min - 1e-4) <= y_val <= (by_max + 1e-4):
+                        label = f'TCP0 Pallets (x_cg={pal_x:.2f}m)' if (k == 0 and not drawn_pal_label) else None
+                        rect_pal = Rectangle(
+                            (bx_start, -half_h_pal),
+                            blength,
+                            2.0 * half_h_pal,
+                            linewidth=1.6,
+                            edgecolor='#17becf',
+                            facecolor='#17becf',
+                            alpha=0.20,
+                            linestyle='-.',
+                            label=label,
+                            zorder=3,
+                        )
+                        ax.add_patch(rect_pal)
+                        drawn_pal_label = True
 
         # Internal spar box representation (25% to 75% chord)
         x_spar_front = data['x_le'] + 0.25 * data['chord']
@@ -1172,7 +1375,7 @@ def generate_airfoil_gallery_plot(station_data: list, output_path: str, half_spa
         )
         ax.grid(True, linestyle=':', alpha=0.6)
         if k == 0:
-            ax.legend(loc='upper right', frameon=True, framealpha=0.9, fontsize=7.5)
+            ax.legend(loc='upper left', frameon=True, framealpha=0.9, fontsize=7.5)
 
     fig.suptitle(
         f"Optimized Airfoil Cross-Sections Across {n_stns} Spanwise Stations\n"
@@ -1273,6 +1476,53 @@ def generate_shape_evolution_plot(
         ax_plan.plot([data['x_le'], data['x_te']], [data['y'], data['y']], '-', color=col, linewidth=2.2)
         ax_plan.text(data['x_te'] + label_offset, data['y'], f"Stn {k+1} ($\\eta={data['eta']:.2f}$)",
                      color=col, va='center', fontsize=8, fontweight='bold')
+
+    # Draw payload planform footprints ONLY if a payload containment constraint was enforced
+    if parsed_dvs and parsed_dvs.get('payload_constraint_enforced', False):
+        from matplotlib.patches import Rectangle
+        if parsed_dvs.get('payload_center_x') is not None:
+            pay_x = float(np.asarray(parsed_dvs['payload_center_x']).flatten()[0])
+            rect_ov = Rectangle(
+                (pay_x - PAYLOAD_LENGTH_M / 2.0, 0.0),
+                PAYLOAD_LENGTH_M,
+                0.5 * PAYLOAD_WIDTH_M,
+                linewidth=1.8,
+                edgecolor='#9467bd',
+                facecolor='#9467bd',
+                alpha=0.35,
+                linestyle='--',
+                label=f'TCP0 Oversized (x_c={pay_x:.2f}m)',
+                zorder=4,
+            )
+            ax_plan.add_patch(rect_ov)
+
+        if parsed_dvs.get('pallet_stack_center_x') is not None:
+            pal_x = float(np.asarray(parsed_dvs['pallet_stack_center_x']).flatten()[0])
+            x_shift = pal_x - PALLET_STACK_REFERENCE_CG_X
+            half_w_pal = 0.5 * PALLET_WIDTH_M
+            r_boxes = [
+                (PALLET_STACK_FRONT_M + x_shift, PALLET_L_SHORT_M, 0.0, half_w_pal, 'Front Short'),
+                (PALLET_STACK_FRONT_M + PALLET_L_SHORT_M + x_shift, PALLET_L_SHORT_M, 0.0, PALLET_WIDTH_M, 'Right 2nd Short'),
+                (PALLET_STACK_FRONT_M + 2.0 * PALLET_L_SHORT_M + x_shift, PALLET_L_LONG_M, 0.0, half_w_pal, 'Center Long'),
+                (PALLET_STACK_FRONT_M + 2.0 * PALLET_L_SHORT_M + x_shift, PALLET_L_LONG_M, half_w_pal, PALLET_WIDTH_M, 'Right Outer Long'),
+            ]
+            drawn_pal_plan = False
+            for bx_start, blength, by_min, by_len, bname in r_boxes:
+                rect_pal = Rectangle(
+                    (bx_start, by_min),
+                    blength,
+                    by_len,
+                    linewidth=1.5,
+                    edgecolor='#17becf',
+                    facecolor='#17becf',
+                    alpha=0.25,
+                    linestyle='-.',
+                    label=f'TCP0 Pallets (x_cg={pal_x:.2f}m)' if not drawn_pal_plan else None,
+                    zorder=4,
+                )
+                ax_plan.add_patch(rect_pal)
+                drawn_pal_plan = True
+
 
     ax_plan.set_xlabel("Chordwise Position x [m]", fontsize=10, fontweight='bold')
     ax_plan.set_ylabel("Spanwise Position y [m]", fontsize=10, fontweight='bold')
@@ -1538,10 +1788,11 @@ def main():
     save_airfoil_telemetry(station_data, telemetry_path, half_span)
 
     # Also copy artifacts to the active agent brain directory if available
-    current_conv_id = '0ac41e2d-0335-41d9-9f48-d6791df931f1'
+    current_conv_id = 'd142ece2-fec7-466b-985d-b6e2ecf81b2d'
     candidate_ids = [
         current_conv_id,
         'ce0e9874-a39a-41db-b481-5008cc744a13',
+        '0ac41e2d-0335-41d9-9f48-d6791df931f1',
         '0c0a47e5-2e16-41bb-9139-10357c23c5ee',
         '3256dd7c-d4c8-4c73-887d-131361f9d0c3',
         '680209fd-293d-4fa0-9f6c-ae59a72a6987',

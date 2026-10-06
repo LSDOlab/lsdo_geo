@@ -7,6 +7,9 @@ via an exact Galerkin weak form in the LSDO_GEO ParameterizationSolver.
 
 The spline basis is symmetric across the root (y = 0) with zero spanwise derivative
 (f'(0) = 0), matching the full-span FFD volume parameterization.
+The geometry trial functions phi_j are cardinal symmetric cubic B-splines
+satisfying phi_j(eta_i) = delta_ij at station locations, exactly matching the
+cubic B-spline space of the FFD volume parameterization and target distributions.
 Taper enforces T_h(0) = 1 as an essential boundary condition, removing the root DOF.
 """
 
@@ -28,7 +31,13 @@ class BsplineTargetRegularization:
     Constructs the symmetric cubic B-spline spaces, static quadrature/test data,
     and CSDL-native weak residual equations for the ar_area formulation.
     """
-    def __init__(self, num_chord_stations: int, scale_factor: float = 7.5, dense_points: int = 100):
+    def __init__(
+        self,
+        num_chord_stations: int,
+        scale_factor: float = 7.5,
+        dense_points: int = 100,
+        eta_stations: Optional[np.ndarray] = None,
+    ):
         self.num_chord_stations = num_chord_stations
         self.n = num_chord_stations
         self.scale_factor = scale_factor
@@ -38,7 +47,10 @@ class BsplineTargetRegularization:
         self.sweep_control_points_count = self.n - 1
 
         # Normalized station coordinates in [0, 1]
-        self.eta_stations = np.linspace(0.0, 1.0, self.n)
+        if eta_stations is not None:
+            self.eta_stations = np.asarray(eta_stations, dtype=float)
+        else:
+            self.eta_stations = np.linspace(0.0, 1.0, self.n)
 
         # 1. Full-span FFD chord/thickness B-spline space (2n - 1 coefficients)
         num_ffd_chord = 2 * self.n - 1
@@ -77,19 +89,30 @@ class BsplineTargetRegularization:
         self.B_chord_sym = self._eval_symmetric_chord_basis(self.quad_eta)       # shape (N_q, n)
         self.B_sweep_sym = self._eval_symmetric_sweep_basis(self.quad_eta)       # shape (N_q, n - 1)
 
-        # 6. Evaluate piecewise-linear hat functions phi_j(eta_q)
-        self.phi_quad = self._eval_hat_functions(self.quad_eta)                  # shape (N_q, n)
+        # 6. Evaluate cardinal symmetric cubic B-spline basis functions phi_j(eta_q)
+        # B_stations maps B-spline control points to station values; its inverse gives the cardinal basis
+        self.B_stations = self._eval_symmetric_chord_basis(self.eta_stations)     # shape (n, n)
+        self.B_stations_inv = np.linalg.inv(self.B_stations)                     # shape (n, n)
+        self.phi_quad = self.B_chord_sym @ self.B_stations_inv                   # shape (N_q, n)
 
         # 7. Precompute Galerkin matrices
         self._precompute_taper_matrices()
         self._precompute_thickness_matrices()
         self._precompute_sweep_matrices()
+        self.B_bar_sweep = self.W_sweep.T                                        # shape (n - 1, n - 1)
 
         # 8. Setup dense evaluation matrices for diagnostics and plotting
         self.dense_eta = np.linspace(0.0, 1.0, dense_points)
         self.dense_B_chord = self._eval_symmetric_chord_basis(self.dense_eta)
         self.dense_B_sweep = self._eval_symmetric_sweep_basis(self.dense_eta)
-        self.dense_phi = self._eval_hat_functions(self.dense_eta)
+        self.dense_phi = self.dense_B_chord @ self.B_stations_inv
+
+    def _eval_cardinal_chord_basis(self, eta_vals: np.ndarray) -> np.ndarray:
+        """
+        Evaluate cardinal symmetric cubic B-spline basis functions phi_j on eta in [0, 1]
+        satisfying phi_j(eta_i) = delta_ij at station locations.
+        """
+        return self._eval_symmetric_chord_basis(eta_vals) @ self.B_stations_inv
 
     def _eval_symmetric_chord_basis(self, eta_vals: np.ndarray) -> np.ndarray:
         """
@@ -257,17 +280,15 @@ class BsplineTargetRegularization:
     ) -> csdl.Variable:
         """
         Compute normalized thickness weak residual vector of shape (n,):
-            R_thick = (K_thick @ local_thicknesses - H_thick @ local_chords) / t_ref
-        where H_thick is contracted from T_thick and tc_target_control_points.
+            R_thick = K_thick @ (local_thicknesses - local_chords * (B_stations @ tc_target_control_points)) / t_ref
         """
         local_thicknesses = _to_vec(local_thicknesses)
         local_chords = _to_vec(local_chords)
         tc_target_control_points = _to_vec(tc_target_control_points)
-        n = self.n
         geom_int = csdl.matvec(self.K_thick, local_thicknesses)
-        H_flat = csdl.matvec(self.T_thick_2d, tc_target_control_points)
-        H_thick = csdl.reshape(H_flat, (n, n))
-        target_int = csdl.matvec(H_thick, local_chords)
+        tc_target_stations = csdl.matvec(self.B_stations, tc_target_control_points)
+        target_thicknesses = local_chords * tc_target_stations
+        target_int = csdl.matvec(self.K_thick, target_thicknesses)
         res_thick = (geom_int - target_int) / t_ref
         res_thick.add_name("thickness_weak_residual")
         return res_thick
@@ -281,19 +302,16 @@ class BsplineTargetRegularization:
     ) -> csdl.Variable:
         """
         Compute normalized quarter-chord sweep weak residual vector of shape (n - 1,):
-            R_sweep = (W_sweep @ dx_qc - G_sweep @ dy_qc) / y_scale
-        where G_sweep is contracted from V_sweep and tan(sweep_angle_control_points).
+            R_sweep = (dx_qc - dy_qc * (B_bar_sweep @ tan(sweep_angle_control_points))) / y_scale
+        where B_bar_sweep is the segment-averaged symmetric sweep B-spline matrix.
         """
         dx_qc = _to_vec(dx_qc)
         dy_qc = _to_vec(dy_qc)
         sweep_angle_control_points = _to_vec(sweep_angle_control_points)
-        n_sweep = self.n - 1
-        geom_int = csdl.matvec(self.W_sweep, dx_qc)
         tan_sweep = csdl.tan(sweep_angle_control_points)
-        G_flat = csdl.matvec(self.V_sweep_2d, tan_sweep)
-        G_sweep = csdl.reshape(G_flat, (n_sweep, n_sweep))
-        target_int = csdl.matvec(G_sweep, dy_qc)
-        res_sweep = (geom_int - target_int) / y_scale
+        tan_sweep_avg = csdl.matvec(self.B_bar_sweep, tan_sweep)
+        target_dx = dy_qc * tan_sweep_avg
+        res_sweep = (dx_qc - target_dx) / y_scale
         res_sweep.add_name("sweep_weak_residual")
         return res_sweep
 

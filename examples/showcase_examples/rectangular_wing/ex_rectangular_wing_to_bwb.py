@@ -5,6 +5,9 @@ from typing import Union, Literal
 import sys
 import os
 os.environ.setdefault('JAX_PLATFORMS', 'cpu')
+SHOWCASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if SHOWCASE_DIR not in sys.path:
+    sys.path.insert(0, SHOWCASE_DIR)
 import numpy.typing as npt
 import csdl_alpha as csdl
 import numpy as np
@@ -60,13 +63,115 @@ pickle.load = lambda f, **kwargs: CompatUnpickler(f, **kwargs).load()
 recorder = csdl.Recorder(inline=True)
 recorder.start()
 
+# =============================================================================
+# TOP-LEVEL CONFIGURATION AND TOGGLES
+# =============================================================================
+
+# 1. Parameterization formulation: 'chord_span' or 'ar_area'
+#   'chord_span' -> Direct chord stretch, sweep translation, span stretch, twist, camber/thickness shape DVs
+#   'ar_area'    -> Regularized cubic B-spline taper ratios, aspect ratio, Galerkin sweep weak-form, planform area target
+ParamerizationType = Literal['ar_area', 'chord_span']
+formulation: ParamerizationType = 'chord_span'  # Options: 'chord_span' or 'ar_area'
+formulation = os.environ.get('BWB_FORMULATION', formulation)
+
+# 2. Mesh and design variable resolution: 'fast' or 'full'
+#   'fast' -> 5 design stations, 9 FFD sections, 1,272 aero quads (fast iteration/testing)
+#   'full' -> 8 design stations, 15 FFD sections, 2,872 aero quads (production resolution)
+resolution: Literal['fast', 'full'] = 'full'  # Options: 'fast' or 'full'
+resolution = os.environ.get('BWB_RESOLUTION', resolution)
+
+# 3. Geometric Non-Interference (Geonic) payload containment mode:
+#   'none'      -> Baseline behavior: unconstrained OML, legacy payload_cg DV, no BSM3 import
+#   'oversized' -> Constrain TCP0 oversized box (8 sample points, payload_center_x DV, 0.2 m buffer)
+#   'pallets'   -> Constrain TCP0 6-pallet stack (32 sample points, pallet_stack_center_x DV, 0.2 m buffer)
+#   'both'      -> Constrain both payload cases (40-point batch, equal CG consistency constraint)
+geonic_payload_mode: str = 'none'  # Options: 'none', 'oversized', 'pallets', 'both'
+geonic_payload_mode = os.environ.get('GEONIC_PAYLOAD_MODE', geonic_payload_mode)
+if 'GEONIC_PAYLOAD_MODE' not in os.environ and 'USE_GEONIC' in os.environ:
+    geonic_payload_mode = 'oversized' if str(os.environ['USE_GEONIC']).strip() == '1' else 'none'
+
+# 4. Viscous drag mode:
+#   'ibl'          -> Integral boundary layer drag model & attachment constraint H_max <= 2.4
+#   'constant_cd0' -> Legacy fixed baseline profile drag (CD0_base = 0.0080)
+viscous_drag_mode: Literal['ibl', 'constant_cd0'] = 'ibl'  # Options: 'ibl' or 'constant_cd0'
+viscous_drag_mode = os.environ.get('VISCOUS_DRAG_MODE', viscous_drag_mode)
+
+# 5. Sizing condition toggle: -1.0g push-down maneuver
+#   True  -> includes -1.0g sizing maneuver (Flight condition Node 3)
+#   False -> drops Node 3, pitch_neg1g DV, lift_neg1g trim constraint for ~25% speedup
+include_neg1g_sizing: bool = False  # Options: True or False
+
+# 5b. Structural wingbox depth factor:
+#   Effective structural height factor relative to OML (accounts for spar cap flange
+#   centroid recession beneath OML skins/stringers, shear lag, and internal cutouts)
+box_height_factor: float = 0.7     # Options: 0.50 - 0.70 (standard preliminary design factor)
+box_height_factor = float(os.environ.get('BOX_HEIGHT_FACTOR', box_height_factor))
+
+# 6. Airfoil shape & control surface options:
+include_camber: bool = True           # Mean camber line deformation (3 rows of control points)
+include_thickness_shape: bool = True  # Airfoil thickness distribution deformation
+include_te_thickness: bool = False    # True: blunt TE (5 rows); False: pinned sharp TE (4 rows)
+include_elevator: bool = False        # Trailing-edge elevator deflection DV
+
+# 7. Aerodynamics and drag formulation:
+induced_drag_objective: Literal['trefftz', 'fourier', 'mixed'] = 'mixed'  # Options: 'trefftz', 'fourier', 'mixed'
+include_cl_polar: bool = False        # Apply quadratic drag polar bucket k_polar * (Cl - Cl_ideal)^2
+include_stall_drag: bool = True       # Apply smooth aerodynamic stall penalty when Cl > Cl_crit
+
+# 8. Scale factor & warm start:
+scale_factor: float = 7.5             # Scale factor (7.5 for 50 m full-scale BWB; 1.0 for wind-tunnel scale)
+warm_start: bool = False              # Warm start DVs from prior run
+
+# 9. Diagnostics & pre-flight verification:
+run_pre_diagnostics: bool = True      # Run initial JAX evaluation and print comprehensive diagnostic report before optimization
+# =============================================================================
+
+# Validate viscous drag mode
+if viscous_drag_mode not in ('ibl', 'constant_cd0'):
+    raise ValueError(f"Unknown viscous_drag_mode: '{viscous_drag_mode}'. Must be 'ibl' or 'constant_cd0'.")
+
+from optimization_analyses.bwb_viscous_ibl import (
+    build_ibl_mesh_topology,
+    evaluate_bwb_viscous_ibl,
+)
+
+# Parse and validate geonic payload mode
+from physics_models.geonic_payload import (
+    VALID_GEONIC_PAYLOAD_MODES,
+    parse_geonic_payload_mode,
+)
+geonic_payload_mode, use_geonic = parse_geonic_payload_mode(mode=geonic_payload_mode)
+
+if use_geonic:
+    try:
+        import bsm3
+    except ImportError as e:
+        raise ImportError(
+            f"geonic_payload_mode='{geonic_payload_mode}' requires 'bsm3' to be installed. "
+            "Please install the repaired checkout at /home/andrew/optimization/BSM3 "
+            "via `pip install -e /home/andrew/optimization/BSM3 --no-deps`."
+        ) from e
+    from physics_models.geonic_payload import (
+        GEONIC_CLEARANCE_M,
+        PAYLOAD_LENGTH_M,
+        PAYLOAD_WIDTH_M,
+        PAYLOAD_HEIGHT_M,
+        PALLET_L_SHORT_M,
+        PALLET_WIDTH_M,
+        PALLET_HEIGHT_M,
+        PALLET_L_LONG_M,
+        PALLET_STACK_FRONT_M,
+        PALLET_STACK_REFERENCE_CG_X,
+        build_geonic_payload_sample_points,
+        build_geonic_pallet_sample_points,
+        compute_geonic_clearance_and_margin,
+        get_full_payload_box_corners,
+        get_full_pallet_boxes_corners,
+    )
+
 # Import initial geometry that will be deformed
 geometry_directory = "examples/example_geometries/"
 file_name = "rectangular_wing_naca0012_10ar"
-
-# Resolution toggle: 'fast' (5 spanwise DVs, coarse mesh ~1,272 quads) vs 'full' (8 spanwise DVs, refined mesh 2,872 quads)
-# resolution = 'fast'  # Options: 'fast' or 'full'
-resolution = 'full'  # Options: 'fast' or 'full'
 
 if resolution == 'fast':
     num_stations = 5
@@ -79,63 +184,19 @@ elif resolution == 'full':
 else:
     raise ValueError(f"Unknown resolution: {resolution}. Must be 'fast' or 'full'.")
 
-# Diagnostic-only override: retain the active FFD parameterization while evaluating
-# the aerodynamic solver on a different surface/wake mesh in an isolated worker.
+# Diagnostic-only override: retain active FFD parameterization while evaluating aero on different mesh
 aero_mesh_file_name = os.environ.get('BWB_AERO_MESH_FILE', mesh_file_name)
-
 num_chord_stations = num_stations
 num_thickness_stations = num_stations
 
-# Sizing condition toggle: -1.0g push-down maneuver
-# When False, drops flight condition Node 3, pitch_neg1g DV, lift_neg1g trim constraint,
-# and beam_neg1g FEA solve, accelerating optimization iterations by ~20-25%.
-include_neg1g_sizing = False
-
-# Induced drag objective formulation: 'fourier' (Prandtl lifting-line Fourier sine series, e <= 1.0)
-# vs 'trefftz' (VortexAD Trefftz-plane integration)
-induced_drag_objective = 'mixed'  # Options: 'fourier' or 'trefftz' or 'mixed
-# induced_drag_objective = 'trefftz'  # Options: 'fourier' or 'trefftz' or 'mixed
-
 # Geometric CAD control points are kept equivalent across resolutions (15 spanwise)
-num_spanwise_cp_target = 25     # was using 15 for the longest time, but I think this may help the geometry fit the desired profiles better
-
-# Toggleable geometric non-interference comparison (Geonic)
-# Default is False (baseline behavior preserved unchanged).
-use_geonic_default = True
-use_geonic = os.environ.get('USE_GEONIC', '0') == '1' if 'USE_GEONIC' in os.environ else use_geonic_default
-
-if use_geonic:
-    try:
-        import bsm3
-    except ImportError as e:
-        raise ImportError(
-            "use_geonic=True requires 'bsm3' to be installed. "
-            "Please install the repaired checkout at /home/andrew/optimization/BSM3 "
-            "via `pip install -e /home/andrew/optimization/BSM3 --no-deps`."
-        ) from e
-    from physics_models.geonic_payload import (
-        GEONIC_CLEARANCE_M,
-        PAYLOAD_LENGTH_M,
-        PAYLOAD_WIDTH_M,
-        PAYLOAD_HEIGHT_M,
-        build_geonic_payload_sample_points,
-        compute_geonic_clearance_and_margin,
-        get_full_payload_box_corners,
-    )
+num_spanwise_cp_target = 25
 
 geometry = import_geometry(
     geometry_directory + file_name + ".stp",
     name='imported_geometry',
     parallelize=False,
 )
-
-# Scale CAD geometry from baseline 10 m^2 wing to 1.0 m^2 tactical UAV wing
-# scale_factor = 1.0 / np.sqrt(10.0)  # = 0.31622776601683794
-
-# scale_factor = 1.0  # No scaling for initial testing
-
-# Scale CAD geometry from baseline 10 m span to 50 m span full-scale BWB size
-scale_factor = 7.5
 
 for function in geometry.functions.values():
     function.coefficients = function.coefficients * scale_factor
@@ -213,8 +274,42 @@ quarter_chord_right = geometry.project(np.array([0.25 * scale_factor, 5.0 * scal
 quarter_chord_center = geometry.project(np.array([0.25 * scale_factor, 0.0, 0.0]))
 elevator_hinge = geometry.project(np.array([0.80 * scale_factor, 0.0, 0.0]))
 
-# Project chord measurement points across the right half-span (y = 0.0 to 5.0 * scale_factor)
-chord_station_y = np.linspace(0.0, 5.0 * scale_factor, num_chord_stations)
+# Construct a Free Form Deformation (FFD) block around the geometry
+# 5 chordwise control points when camber or thickness shape is active (excluding LE & TE gives 3 interior points)
+num_ffd_coefficients_chordwise = 5 if (include_camber or include_thickness_shape) else 2
+ffd_degree_chordwise = 2 if (include_camber or include_thickness_shape) else 1
+# num_ffd_sections is dynamically set by resolution ('fast': 9, 'full': 15)
+ffd_block = construct_ffd_block_around_entities(
+    entities=geometry, 
+    num_coefficients=(num_ffd_coefficients_chordwise, num_ffd_sections, 2),
+    degree=(ffd_degree_chordwise, 3, 1),
+)
+# Define an axial sectional parameterization for the FFD volume.
+ffd_sectional_parameterization = SectionalParameterization(
+    name="ffd_sectional_parameterization",
+    parameterized_points=ffd_block.coefficients,
+    principal_parametric_dimension=1,
+)
+
+# Project chord, thickness, and sweep measurement points across the right half-span (y = 0.0 to 5.0 * scale_factor).
+# In 'ar_area', map stations directly from uniform parametric spanwise coordinates eta in [0, 1] of the cubic B-spline FFD volume.
+# This ensures the physical geometry evaluation stations exactly match the cubic B-spline basis collocation stations
+# for all 3 spanwise distribution variables (taper, thickness, sweep: T = inv(B_actual) @ B_stations = I),
+# preventing coordinate mismatch distortion from producing negative FFD control point stretches and mid-span inversion.
+eta_stations = np.linspace(0.0, 1.0, num_chord_stations)
+if formulation == 'ar_area':
+    v_stations = 0.5 + 0.5 * eta_stations
+    station_eval_pts = np.column_stack([
+        np.zeros(num_chord_stations),
+        v_stations,
+        np.full(num_chord_stations, 0.5),
+    ])
+    station_phys_pts = ffd_block.evaluate(station_eval_pts, non_csdl=True)
+    chord_station_y = np.clip(np.asarray(station_phys_pts)[:, 1], 0.0, 5.0 * scale_factor)
+    chord_station_y[0] = 0.0
+    chord_station_y[-1] = 5.0 * scale_factor
+else:
+    chord_station_y = np.linspace(0.0, 5.0 * scale_factor, num_chord_stations)
 chord_le_projections = []
 chord_te_projections = []
 quarter_chord_projections = []
@@ -283,10 +378,10 @@ te_line_physical[:, 1] = y_beam_span
 te_line_physical[:, 2] = 0.0
 projected_te_mesh = geometry.project(te_line_physical, plot=False)
 
-# Sample wingbox upper/lower surfaces at 5 chordwise stations across 20% to 60% chord
+# Sample wingbox upper/lower surfaces at 5 chordwise stations across 20% to 70% chord
 # Using composite Simpson's rule: weights = [1, 4, 2, 4, 1] / 12
 # Integrates quadratic B-spline thickness profiles with zero algebraic truncation error
-x_fracs_box = np.array([0.20, 0.30, 0.40, 0.50, 0.60])
+x_fracs_box = np.array([0.20, 0.325, 0.45, 0.575, 0.70])
 num_box_samples = len(x_fracs_box)
 simpson_weights_box = np.array([1.0, 4.0, 2.0, 4.0, 1.0]) / 12.0
 
@@ -418,6 +513,15 @@ projected_panel_centers = geometry.project(panel_centers,
                             plot=False,
                             )
 
+# Build static IBL mesh topology index maps and interpolation matrix
+ibl_topology = build_ibl_mesh_topology(
+    points=points_orig,
+    cells_dict=cells_dict,
+    scale_factor=1.0,  # points_orig is already scaled by scale_factor at line 451
+    num_drag_strips=num_drag_strips,
+    y_drag_centers=y_drag_centers_init,
+)
+
 # Filter panels for right half of wing (y > 0)
 right_panel_indices = np.where(panel_centers[:, 1] > 0.0)[0]
 num_right_panels = len(right_panel_indices)
@@ -545,61 +649,27 @@ for i in range(num_stations):
 
 # endregion
 
-# region Create Parameterization Objects
-# Construct a Free Form Deformation (FFD) block around the geometry
-# region Create Parameterization Objects
-# Camber formulation option: adds 3x5 (fast) or 3x8 (full) FFD camber DVs
-include_camber = True  # Options: True or False
-
-# Airfoil thickness shape option: adds 4x5/4x8 (LE + 3 interior) or 5x5/5x8 (LE + 3 interior + TE) FFD thickness DVs
-include_thickness_shape = True  # Options: True or False
-include_te_thickness = False  # Options: True (5 rows: LE + 3 interior + TE) or False (4 rows: LE + 3 interior, TE pinned)
-
-# Elevator formulation option: default off when camber is on
-# include_elevator = False if include_camber else True  # Options: True or False
-include_elevator = False  # Options: True or False
-
-# Construct a Free Form Deformation (FFD) block around the geometry
-# 5 chordwise control points when camber or thickness shape is active (excluding LE & TE gives 3 interior points)
-num_ffd_coefficients_chordwise = 5 if (include_camber or include_thickness_shape) else 2
-ffd_degree_chordwise = 2 if (include_camber or include_thickness_shape) else 1
-# num_ffd_sections is dynamically set by resolution ('fast': 9, 'full': 15)
-# Note: This FFD block construction is one of a few helper functions that can be used to create a FFD block.
-#       The "manual" method is to use construct_ffd_block_from_corners, which allows for defining the coefficients directly.
-ffd_block = construct_ffd_block_around_entities(entities=geometry, 
-                                                num_coefficients=(num_ffd_coefficients_chordwise, num_ffd_sections, 2),
-                                                degree=(ffd_degree_chordwise, 3, 1))
-# Define an axial sectional parameterization for the FFD volume. 
-# This views the FFD volume as a series of 2D sections (as defined by the control points) 
-# that can be allowed to stretch, translate, and rotate independently.
-# The sectional parameterization is chosen to have the spanwise direction as the principal 
-# parametric dimension (0,1,2 corresponds to u,v,w of the FFD block, which in this case corresponds to x,y,z).
-ffd_sectional_parameterization = SectionalParameterization(
-    name="ffd_sectional_parameterization",
-    parameterized_points=ffd_block.coefficients,
-    principal_parametric_dimension=1,
-)
-# ffd_sectional_parameterization.plot()
+# region Parameterization Objects (ffd_block and ffd_sectional_parameterization constructed above)
+# endregion
 
 # region Define Design Variables and CSDL Parameterization Map
 # # Formulation flag:
 # 'ar_area'   -> Design variables: chord DVs, Aspect Ratio (AR), and pitch (planform area fixed at 10)
 # 'chord_span' -> Design variables: chord stretch DVs, sweep DVs, span stretch DV, elevator angle, pitch, pitch_3g
-ParamerizationType = Literal['ar_area', 'chord_span']
-# formulation = 'chord_span'  # Options: 'ar_area' or 'chord_span'
-# formulation = 'ar_area'  # Options: 'ar_area' or 'chord_span'
-formulation : ParamerizationType = 'chord_span'  # Options: 'ar_area' or 'chord_span'
 
 pitch = csdl.Variable(value=5.*np.pi/180) # pitch angle in radians
 elevator_angle = csdl.Variable(value=0.0) # elevator deflection angle in radians
 pitch_ss = csdl.Variable(value=10.0*np.pi/180) # pitch angle for pull-up structural sizing maneuver in radians
 if include_neg1g_sizing:
     pitch_neg1g = csdl.Variable(value=-5.0*np.pi/180) # pitch angle for -1.0g push-down sizing maneuver in radians
-if use_geonic:
+if geonic_payload_mode == 'none':
+    payload_cg = csdl.Variable(value=0.25, name='payload_cg') # payload CG location as fraction of root chord (0.05 to 0.95)
+if geonic_payload_mode in {'oversized', 'both'}:
     # Undeformed root mid-chord = 0.5 * scale_factor (3.75 m for scale_factor = 7.5)
     payload_center_x = csdl.Variable(value=0.5 * scale_factor, name='payload_center_x')
-else:
-    payload_cg = csdl.Variable(value=0.25, name='payload_cg') # payload CG location as fraction of root chord (0.05 to 0.95)
+if geonic_payload_mode in {'pallets', 'both'}:
+    # Pallet stack volume-weighted CG DV
+    pallet_stack_center_x = csdl.Variable(value=0.5 * scale_factor, name='pallet_stack_center_x')
 
 @dataclass
 class DVInfo:
@@ -619,23 +689,22 @@ twist_lower[0] = 0.0  # fix root twist to 0
 twist_upper = np.full(num_chord_stations, 15.0 * np.pi / 180.0)
 twist_upper[0] = 0.0
 
-camber_max_percent = 5.0  # 5.0% chord max camber displacement
+camber_max_percent = 6.0  # 6.0% chord max camber displacement
 camber_lower = -camber_max_percent
 camber_upper = camber_max_percent
-camber_scaler = 1.0 / camber_max_percent  # Scales DVs in [-5.0, 5.0] to [-1, 1] range for optimizer
+camber_scaler = 1.0  # Scales DVs with unit scaler (dampens aggressive optimizer camber updates)
 
 num_chordwise_thick_dvs = 5 if include_te_thickness else 4
-thick_shape_lower = np.full((num_chordwise_thick_dvs, num_chord_stations), -3.0)
-thick_shape_lower[0, :] = 0.0  # LE cannot have negative thickness change
+thick_shape_lower = np.full((num_chordwise_thick_dvs, num_chord_stations), -50.0)  # Max -50% thickness reduction
+thick_shape_lower[0, :] = -10.0  # LE cannot have negative thickness change
 if include_te_thickness:
     thick_shape_lower[-1, :] = 0.0  # TE cannot have negative thickness change
 
-thick_shape_upper = np.full((num_chordwise_thick_dvs, num_chord_stations), 5.0)
+thick_shape_upper = np.full((num_chordwise_thick_dvs, num_chord_stations), 50.0)  # Max +50% thickness increase
 if include_te_thickness:
-    thick_shape_upper[-1, :] = 0.5  # Max 0.5% chord blunt TE
+    thick_shape_upper[-1, :] = 10.0  # Max blunt TE
 
-thick_shape_scaler = 1.0 / 5.0  # Scales [-5.0, 5.0] to [-1, 1] range for optimizer
-warm_start = False
+thick_shape_scaler = 1.0 / 10.0  # Scales [-50.0, 50.0] with 1/10 scaler (dampens aggressive thickness updates)
 
 if formulation == 'ar_area':
     # Formulation 1: Cubic B-spline Target Regularization
@@ -661,20 +730,25 @@ if formulation == 'ar_area':
         'pitch': DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
         'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
     }
-    if use_geonic:
+    if geonic_payload_mode == 'none':
+        design_variables['payload_cg'] = DVInfo(
+            variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1
+        )
+    if geonic_payload_mode in {'oversized', 'both'}:
         design_variables['payload_center_x'] = DVInfo(
             variable=payload_center_x, lower=0.0, upper=10.0, scaler=1.0 / scale_factor
         )
+    if geonic_payload_mode in {'pallets', 'both'}:
+        design_variables['pallet_stack_center_x'] = DVInfo(
+            variable=pallet_stack_center_x, lower=0.0, upper=10.0, scaler=1.0 / scale_factor
+        )
+    if use_geonic:
         planform_area_target = csdl.Variable(value=10.0 * scale_factor**2, name='planform_area_target')
         area_lower = 1.0 * scale_factor**2   # 56.25 m^2 (vs 562.5 m^2 baseline)
         area_upper = 30.0 * scale_factor**2  # 1687.5 m^2
         area_scaler = 1.0 / (10.0 * scale_factor**2)
         design_variables['planform_area_target'] = DVInfo(
             variable=planform_area_target, lower=area_lower, upper=area_upper, scaler=area_scaler
-        )
-    else:
-        design_variables['payload_cg'] = DVInfo(
-            variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1
         )
     design_variables['ttop_dvs'] = DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.5, scaler=5.e1)
     design_variables['tweb_dvs'] = DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.5, scaler=5.e1)
@@ -737,8 +811,6 @@ elif formulation == 'chord_span':
     init_ttop_val = np.ones(num_thickness_stations) * 0.02
     init_tweb_val = np.ones(num_thickness_stations) * 0.02
 
-    warm_start = False
-
     chord_stretch_dvs = csdl.Variable(shape=(num_chord_stations,), value=init_chord)
     sweep_dvs = csdl.Variable(shape=(num_chord_stations,), value=init_sweep)
     thickness_stretch_dvs = csdl.Variable(shape=(num_chord_stations,), value=init_thick)
@@ -778,13 +850,17 @@ elif formulation == 'chord_span':
         'pitch': DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
         'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
     }
-    if use_geonic:
+    if geonic_payload_mode == 'none':
+        design_variables['payload_cg'] = DVInfo(
+            variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1
+        )
+    if geonic_payload_mode in {'oversized', 'both'}:
         design_variables['payload_center_x'] = DVInfo(
             variable=payload_center_x, lower=0.0, upper=10.0, scaler=1.0 / scale_factor
         )
-    else:
-        design_variables['payload_cg'] = DVInfo(
-            variable=payload_cg, lower=0.05, upper=0.95, scaler=1.e1
+    if geonic_payload_mode in {'pallets', 'both'}:
+        design_variables['pallet_stack_center_x'] = DVInfo(
+            variable=pallet_stack_center_x, lower=0.0, upper=10.0, scaler=1.0 / scale_factor
         )
     design_variables['ttop_dvs'] = DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.5, scaler=5.e1)
     design_variables['tweb_dvs'] = DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.5, scaler=5.e1)
@@ -862,10 +938,11 @@ if include_camber or include_thickness_shape:
             full_span_thick_list.append(csdl.reshape(row, (1, num_ffd_sections)))
         full_span_thick = csdl.concatenate(full_span_thick_list, axis=0)  # shape (num_chordwise_thick_dvs, num_ffd_sections)
 
-        # Convert chord percentage to physical vertical displacement for each section (half-thickness delta)
-        thick_displacement = (full_span_thick / 100.0) * csdl.expand(section_chords, (num_chordwise_thick_dvs, num_ffd_sections), 'j->ij')
-        half_dt = 0.5 * thick_displacement
+        # Convert thickness percentage to physical vertical displacement for each section (half-thickness delta)
         row_end = 5 if include_te_thickness else 4
+        section_thicknesses = ffd_coefficients[0:row_end, :, 1, 2] - ffd_coefficients[0:row_end, :, 0, 2]
+        thick_displacement = (full_span_thick / 100.0) * section_thicknesses
+        half_dt = 0.5 * thick_displacement
 
         # Combine lower (-0.5 * dt) and upper (+0.5 * dt) shifts into single atomic FFD slice update
         dt_pair = csdl.concatenate(
@@ -933,7 +1010,11 @@ if formulation == 'ar_area':
     geometry_solver.add_state(span_stretch_state)
     geometry_solver.add_state(sweep_translation_states)
 
-    bspline_reg = BsplineTargetRegularization(num_chord_stations=num_chord_stations, scale_factor=scale_factor)
+    bspline_reg = BsplineTargetRegularization(
+        num_chord_stations=num_chord_stations,
+        scale_factor=scale_factor,
+        eta_stations=eta_stations,
+    )
 
     geometric_variables = GeometricVariables()
 
@@ -1029,9 +1110,25 @@ quarter_chord_sweep_margin = (60.0 * np.pi / 180.0) - max_quarter_chord_sweep
 quarter_chord_rot_origin = geometry.evaluate(quarter_chord_center)
 
 if use_geonic:
-    # Construct 8 CSDL sample points for TCP0 oversized payload in body frame
-    payload_sample_points = build_geonic_payload_sample_points(payload_center_x)
-    payload_sample_points.name = 'payload_sample_points'
+    # Build sample points according to mode
+    if geonic_payload_mode == 'oversized':
+        payload_sample_points = build_geonic_payload_sample_points(payload_center_x)
+        payload_sample_points.name = 'payload_sample_points'
+        active_sample_points = payload_sample_points
+    elif geonic_payload_mode == 'pallets':
+        pallet_stack_x_shift = pallet_stack_center_x - PALLET_STACK_REFERENCE_CG_X
+        pallet_stack_x_shift.name = 'pallet_stack_x_shift'
+        pallet_sample_points = build_geonic_pallet_sample_points(pallet_stack_center_x)
+        pallet_sample_points.name = 'pallet_sample_points'
+        active_sample_points = pallet_sample_points
+    elif geonic_payload_mode == 'both':
+        pallet_stack_x_shift = pallet_stack_center_x - PALLET_STACK_REFERENCE_CG_X
+        pallet_stack_x_shift.name = 'pallet_stack_x_shift'
+        payload_sample_points = build_geonic_payload_sample_points(payload_center_x)
+        payload_sample_points.name = 'payload_sample_points'
+        pallet_sample_points = build_geonic_pallet_sample_points(pallet_stack_center_x)
+        pallet_sample_points.name = 'pallet_sample_points'
+        active_sample_points = csdl.concatenate([payload_sample_points, pallet_sample_points])
 
     # Complete geometry function set passed for enclosed-volume signed distance
     projection_model = bsm3.FunctionSetProjectionModel(
@@ -1042,39 +1139,107 @@ if use_geonic:
         sdf_sign_mode='enclosed',
     )
     sdf_op = bsm3.FunctionSetClosestDistanceOperation(model=projection_model)
-    payload_signed_distance = sdf_op.evaluate(
+    all_signed_distance = sdf_op.evaluate(
         coefficients=geometry.stack_coefficients(),
-        points=payload_sample_points,
+        points=active_sample_points,
     )
-    payload_signed_distance.name = 'payload_signed_distance'
 
-    geonic_constraint_values, geonic_clearance_per_point, geonic_margin = (
-        compute_geonic_clearance_and_margin(payload_signed_distance, clearance_buffer=GEONIC_CLEARANCE_M, rho=50.0)
-    )
-    geonic_constraint_values.name = 'geonic_payload_oml_clearance'
-    geonic_clearance_per_point.name = 'geonic_clearance_per_point'
-    geonic_margin.name = 'geonic_margin'
+    if geonic_payload_mode == 'oversized':
+        payload_signed_distance = all_signed_distance
+        payload_signed_distance.name = 'payload_signed_distance'
+        geonic_constraint_values, geonic_clearance_per_point, geonic_margin = (
+            compute_geonic_clearance_and_margin(payload_signed_distance, clearance_buffer=GEONIC_CLEARANCE_M, rho=50.0)
+        )
+        geonic_constraint_values.name = 'geonic_payload_oml_clearance'
+        geonic_clearance_per_point.name = 'geonic_clearance_per_point'
+        geonic_margin.name = 'geonic_margin'
+        geonic_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
 
-    geonic_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
+    elif geonic_payload_mode == 'pallets':
+        pallet_signed_distance = all_signed_distance
+        pallet_signed_distance.name = 'pallet_signed_distance'
+        pallet_constraint_values, pallet_clearance_per_point, pallet_margin = (
+            compute_geonic_clearance_and_margin(pallet_signed_distance, clearance_buffer=GEONIC_CLEARANCE_M, rho=50.0)
+        )
+        pallet_constraint_values.name = 'geonic_pallet_oml_clearance'
+        pallet_clearance_per_point.name = 'pallet_clearance_per_point'
+        pallet_margin.name = 'pallet_margin'
+        pallet_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
+        geonic_margin = pallet_margin
 
-    # Payload center in body frame: (payload_center_x, 0, 0)
-    payload_center_body = csdl.reshape(
-        csdl.concatenate([
-            csdl.reshape(payload_center_x, (1,)),
-            csdl.Variable(value=np.array([0.0])),
-            csdl.Variable(value=np.array([0.0])),
-        ]),
-        (1, 3),
-    )
-    # When BWB geometry rotates for pitch, rotate payload center about the same quarter-chord origin
-    payload_center_inertial = rotate(
-        points=payload_center_body,
-        rotation_origin=quarter_chord_rot_origin,
-        axis_vector=np.array([0., 1., 0.]),
-        angles=pitch,
-        units='radians',
-    )
-    payload_center_inertial = csdl.reshape(payload_center_inertial, (3,))
+    elif geonic_payload_mode == 'both':
+        num_pay_pts = int(payload_sample_points.shape[0])
+        payload_signed_distance = all_signed_distance[:num_pay_pts]
+        payload_signed_distance.name = 'payload_signed_distance'
+        pallet_signed_distance = all_signed_distance[num_pay_pts:]
+        pallet_signed_distance.name = 'pallet_signed_distance'
+
+        geonic_constraint_values, geonic_clearance_per_point, geonic_margin = (
+            compute_geonic_clearance_and_margin(payload_signed_distance, clearance_buffer=GEONIC_CLEARANCE_M, rho=50.0)
+        )
+        geonic_constraint_values.name = 'geonic_payload_oml_clearance'
+        geonic_clearance_per_point.name = 'geonic_clearance_per_point'
+        geonic_margin.name = 'geonic_margin'
+        geonic_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
+
+        pallet_constraint_values, pallet_clearance_per_point, pallet_margin = (
+            compute_geonic_clearance_and_margin(pallet_signed_distance, clearance_buffer=GEONIC_CLEARANCE_M, rho=50.0)
+        )
+        pallet_constraint_values.name = 'geonic_pallet_oml_clearance'
+        pallet_clearance_per_point.name = 'pallet_clearance_per_point'
+        pallet_margin.name = 'pallet_margin'
+        pallet_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
+
+        # Overall diagnostic margin
+        all_constraint_values = all_signed_distance + GEONIC_CLEARANCE_M
+        overall_geonic_margin = -csdl.maximum(all_constraint_values, axes=(0,), rho=50.0)
+        overall_geonic_margin.name = 'overall_geonic_margin'
+
+        # CG consistency equality constraint: payload_center_x - pallet_stack_center_x = 0
+        payload_cg_consistency = payload_center_x - pallet_stack_center_x
+        payload_cg_consistency.name = 'payload_cg_consistency_constraint'
+        payload_cg_consistency.set_as_constraint(equals=0.0, scaler=1.0 / scale_factor)
+
+    # Compute rotated inertial CGs for active cases
+    if geonic_payload_mode in {'oversized', 'both'}:
+        payload_center_body = csdl.reshape(
+            csdl.concatenate([
+                csdl.reshape(payload_center_x, (1,)),
+                csdl.Variable(value=np.array([0.0])),
+                csdl.Variable(value=np.array([0.0])),
+            ]),
+            (1, 3),
+        )
+        payload_center_body.name = 'payload_center_body'
+        payload_center_inertial = rotate(
+            points=payload_center_body,
+            rotation_origin=quarter_chord_rot_origin,
+            axis_vector=np.array([0., 1., 0.]),
+            angles=pitch,
+            units='radians',
+        )
+        payload_center_inertial = csdl.reshape(payload_center_inertial, (3,))
+        payload_center_inertial.name = 'payload_center_inertial'
+
+    if geonic_payload_mode in {'pallets', 'both'}:
+        pallet_stack_center_body = csdl.reshape(
+            csdl.concatenate([
+                csdl.reshape(pallet_stack_center_x, (1,)),
+                csdl.Variable(value=np.array([0.0])),
+                csdl.Variable(value=np.array([0.0])),
+            ]),
+            (1, 3),
+        )
+        pallet_stack_center_body.name = 'pallet_stack_center_body'
+        pallet_stack_center_inertial = rotate(
+            points=pallet_stack_center_body,
+            rotation_origin=quarter_chord_rot_origin,
+            axis_vector=np.array([0., 1., 0.]),
+            angles=pitch,
+            units='radians',
+        )
+        pallet_stack_center_inertial = csdl.reshape(pallet_stack_center_inertial, (3,))
+        pallet_stack_center_inertial.name = 'pallet_stack_center_inertial'
 
 geometry.rotate(rotation_origin=quarter_chord_rot_origin, axis_vector=np.array([0., 1., 0.]), angles=pitch, units='radians')
 
@@ -1096,10 +1261,12 @@ elif scale_factor == 7.5:
     payload_weight = csdl.Variable(value=160000.*4.44822)  # 711.86 kN = 160,000 lbf (4.44822 N/lbf) payload weight
     # misc_weight scaled with (q_M0.70 / q_M0.75) = (0.70/0.75)^2 to keep cruise CL consistent:
     # Total fixed weight: 500,000 lbf * (0.70/0.75)^2 = 574,933.33 lbf -> misc = 414,933.33 lbf
-    misc_weight = csdl.Variable(value=(500000. * (0.70 / 0.75)**2 - 160000.) * 4.44822)
+    # misc_weight = csdl.Variable(value=(500000. * (0.70 / 0.75)**2 - 160000.) * 4.44822)
+    misc_weight = csdl.Variable(value=6.e5)  # Total payload + misc should be roughly around 130k kg
     # for now, just add misc weight to payload weight cause it's easier, but separate these out later
     payload_weight = payload_weight + misc_weight
     load_factor = csdl.Variable(value=2.5)  # 2.5g load factor for sizing maneuver
+    # load_factor = csdl.Variable(value=3.0)  # 3.0g load factor for sizing maneuver
 else:
     raise Exception("Cruise speed not defined for scale factor = {}. Set the cruise speed for this scale factor.".format(scale_factor))
 
@@ -1200,15 +1367,15 @@ strip_lower_mesh = geometry.evaluate(projected_strip_lower_skin, plot=False)
 node_chords = te_mesh[:,0] - le_mesh[:,0]
 local_chord = 0.5 * (node_chords[:-1] + node_chords[1:])
 
-# Compute area-weighted wingbox height across 20% to 60% chord via composite Simpson's rule
+# Compute area-weighted wingbox height across 20% to 70% chord via composite Simpson's rule
 box_diff_z = upper_beam_mesh[:, 2] - lower_beam_mesh[:, 2]
 node_heights = csdl.matvec(W_box_mat, box_diff_z)
 local_height = 0.5 * (node_heights[:-1] + node_heights[1:])
 
 # Define wingbox cross-section along the span
-# Wingbox width is 40% of local chord; height is the full area-weighted torque box height
-box_width = 0.40 * local_chord
-box_height = local_height
+# Wingbox width is 50% of local chord; height is scaled by box_height_factor
+box_width = 0.50 * local_chord
+box_height = box_height_factor * local_height
 
 # Evaluate B-spline thickness parameterization at element midpoints
 num_beam_elements = num_beam_nodes - 1
@@ -1247,9 +1414,16 @@ x_te_root = te_mesh[0, 0]
 root_chord = x_te_root - x_le_root
 if use_geonic:
     # Use rotated inertial payload center for mass/CG consistency
-    x_payload = payload_center_inertial[0]
-    y_payload = payload_center_inertial[1]
-    z_payload = payload_center_inertial[2]
+    if geonic_payload_mode == 'oversized':
+        active_inertial_cg = payload_center_inertial
+    elif geonic_payload_mode == 'pallets':
+        active_inertial_cg = pallet_stack_center_inertial
+    elif geonic_payload_mode == 'both':
+        # Arithmetic mean of the two inertial CGs during optimization; equals both at feasibility
+        active_inertial_cg = 0.5 * (payload_center_inertial + pallet_stack_center_inertial)
+    x_payload = active_inertial_cg[0]
+    y_payload = active_inertial_cg[1]
+    z_payload = active_inertial_cg[2]
 else:
     x_payload = x_le_root + payload_cg * root_chord
     y_payload = csdl.Variable(value=np.array([0.0]))
@@ -1580,11 +1754,59 @@ strip_delta_M_eff_cruise = wave_drag_results[0]['delta_M_eff']
 min_strip_mach_margin_cruise = -csdl.maximum(strip_delta_M_cruise, axes=(0,), rho=50.0)  # min(Mcrit - M)
 
 # Base parasite drag coefficient (NACA 0012 base skin friction + form drag: CD0 = 0.0080)
+# Viscous drag mode evaluation: 'ibl' (direct integral boundary layer) vs 'constant_cd0' (legacy CD0_base = 0.0080)
 CD0_base = 0.0080
 
-# Options for profile drag polar and stall penalty:
-include_cl_polar = False      # Apply quadratic drag polar bucket k_polar * (Cl - Cl_ideal)^2
-include_stall_drag = True   # Apply smooth aerodynamic stall penalty when Cl > Cl_crit
+ibl_results = evaluate_bwb_viscous_ibl(
+    cp_node0=Cp[0],
+    dynamic_panel_centers=dynamic_panel_centers,
+    topology=ibl_topology,
+    v_cruise=cruise_speed,
+    rho_cruise=rho_array[0],
+    mu_air=csdl.Variable(value=cruise_cond['viscosity_Pa_s']),
+    q_inf=q_inf,
+    strip_area=strip_area,
+    total_strip_area=total_strip_area,
+)
+
+CD_viscous_ibl = ibl_results['CD_viscous']
+D_viscous_ibl = ibl_results['D_viscous']
+CD_ibl_section = ibl_results['CD_ibl_section']
+H_max_ibl = ibl_results['H_max_ibl']
+ibl_attachment_margin = ibl_results['ibl_attachment_margin']
+ibl_min_cp = ibl_results['ibl_min_cp']
+ibl_cp_cutoff_margin = ibl_results['ibl_cp_cutoff_margin']
+theta_te_upper = ibl_results['theta_te_upper']
+theta_te_lower = ibl_results['theta_te_lower']
+H_strip = ibl_results['H_strip']
+H_section_upper = ibl_results['H_section_upper']
+H_section_lower = ibl_results['H_section_lower']
+H_section_both = ibl_results['H_section_both']
+
+if viscous_drag_mode == 'ibl':
+    cd_viscous_elem = ibl_results['cd_viscous_elem']
+    CD_viscous = CD_viscous_ibl
+    D_viscous = D_viscous_ibl
+
+    # Fit 101-CP cubic B-spline with root symmetry S'(0)=0 to the 100 drag strip section max H values
+    # Reuses the exact precomputed matrix inverse M_cl_ss_inv and B-spline space cl_ss_fit_space
+    H_rhs = csdl.concatenate([H_strip, csdl.Variable(value=np.array([0.0]))])
+    H_coeffs_flat = csdl.matvec(csdl.Variable(value=M_cl_ss_inv), H_rhs)
+    H_coeffs = csdl.reshape(H_coeffs_flat, (101, 1))
+    H_func = lfs.Function(space=cl_ss_fit_space, coefficients=H_coeffs)
+
+    # Evaluate at the num_stations design variable station peaks (5 in fast, 8 in full)
+    dv_H_stations = H_func.evaluate(station_cl_peaks.reshape((-1, 1)))
+    dv_H_stations.name = 'dv_H_stations'
+
+    # Enforce active attachment constraint at each station individually: H <= 2.4, scaled by 0.15
+    dv_H_stations.set_as_constraint(upper=2.4, scaler=0.15)
+else:
+    cd_viscous_elem = CD0_base
+    CD_viscous = csdl.Variable(value=CD0_base, name='CD_viscous')
+    D_viscous = CD0_base * q_inf * total_strip_area
+    D_viscous.name = 'D_viscous'
+    dv_H_stations = csdl.Variable(value=np.full((num_stations,), 1.4), name='dv_H_stations')
 
 # 1. Sectional Cl drag polar bucket: regularizes planform by penalizing extreme section Cl
 k_polar = 0.010              # Curvature of polar bucket
@@ -1605,6 +1827,7 @@ cd_stall_elem = k_stall_drag * ((softplus_cl_val / delta_cl_ref) ** 2) if includ
 
 # Total profile drag coefficient per strip
 cd_profile_elem = CD0_base + cd_polar_elem + cd_stall_elem
+cd_profile_elem = cd_viscous_elem + cd_polar_elem + cd_stall_elem
 
 # Sectional and total profile drag [N]
 # Normalized strictly by total_strip_area to prevent area-shrinkage numerical loopholes
@@ -1696,7 +1919,7 @@ neutral_point_x = x_cg - dMy_stab / dL_stab
 static_margin = (neutral_point_x - x_cg) / mean_chord
 # static_margin.set_as_constraint(lower=0.1, scaler=1.e1)
 # static_margin.set_as_constraint(lower=0.00, scaler=2.e1)
-static_margin.set_as_constraint(lower=0.05, scaler=2.e1)
+static_margin.set_as_constraint(lower=0.02, scaler=2.e1)
 # static_margin.set_as_constraint(equals=0.05, scaler=2.e1)
 
 # # 16-CP Cubic B-spline Fit to Beam Twist under 4.0g Maneuver Load
@@ -1854,17 +2077,41 @@ additional_outs = [
     strip_delta_M_cruise, strip_delta_M_eff_cruise, min_strip_mach_margin_cruise,
     global_mdd_excess, dv_mdd_excess, min_strip_mdd_margin_cruise, mdd_coeffs,
     local_chord_drag, dy_strip, strip_area,
+    # Viscous drag outputs:
+    CD_viscous, D_viscous, CD_ibl_section, theta_te_upper,
+    theta_te_lower, H_max_ibl, ibl_attachment_margin,
+    ibl_min_cp, ibl_cp_cutoff_margin, dv_H_stations, H_strip, H_section_upper,
+    H_section_lower, H_section_both,
 ]
 if use_geonic:
-    additional_outs += [
-        payload_center_x,
-        payload_sample_points,
-        payload_signed_distance,
-        geonic_constraint_values,
-        geonic_clearance_per_point,
-        geonic_margin,
-        payload_center_inertial,
-    ]
+    if geonic_payload_mode in {'oversized', 'both'}:
+        additional_outs += [
+            payload_center_x,
+            payload_sample_points,
+            payload_signed_distance,
+            geonic_constraint_values,
+            geonic_clearance_per_point,
+            geonic_margin,
+            payload_center_inertial,
+            payload_center_body,
+        ]
+    if geonic_payload_mode in {'pallets', 'both'}:
+        additional_outs += [
+            pallet_stack_center_x,
+            pallet_stack_x_shift,
+            pallet_sample_points,
+            pallet_signed_distance,
+            pallet_constraint_values,
+            pallet_clearance_per_point,
+            pallet_margin,
+            pallet_stack_center_inertial,
+            pallet_stack_center_body,
+        ]
+    if geonic_payload_mode == 'both':
+        additional_outs += [
+            payload_cg_consistency,
+            overall_geonic_margin,
+        ]
 else:
     additional_outs += [payload_cg]
 if include_camber:
@@ -1895,8 +2142,6 @@ for dv_info in design_variables.values():
     if val is not None:
         jax_sim[dv_info.variable] = np.asarray(val)
 
-# Optional initial diagnostic pass (disabled by default to avoid slow initial JAX compilation)
-run_pre_diagnostics = False
 if run_pre_diagnostics:
     jax_sim.run()
     # print(f"Final Lift (Cruise Node 0): Effective = {float(np.asarray(jax_sim[lift_effective_cruise]).flatten()[0]):.2f} N (VLM: {float(np.asarray(jax_sim[L]).flatten()[0]):.2f} N, Loss: {float(np.asarray(jax_sim[L_loss_cruise]).flatten()[0]):.2f} N, Total Weight W: {float(np.asarray(jax_sim[W_total]).flatten()[0]):.2f} N)")
@@ -1990,23 +2235,69 @@ if run_pre_diagnostics:
     print(f"Global M_dd margin min(M_dd - M_inf): {-global_mdd_excess_val:.4f} (Status: {'FEASIBLE' if global_mdd_excess_val <= 0.0 else 'VIOLATED'})\n")
 
     if use_geonic:
-        pay_cx_val = float(np.asarray(jax_sim[payload_center_x]).flatten()[0])
-        clearance_vals = np.asarray(jax_sim[geonic_clearance_per_point]).flatten()
-        min_clearance = float(np.min(clearance_vals))
-        g_margin = float(np.asarray(jax_sim[geonic_margin]).flatten()[0])
-        g_status = "FEASIBLE" if g_margin >= 0.0 else "VIOLATED"
         print(f"================ GEONIC PAYLOAD NON-INTERFERENCE DIAGNOSTIC ================")
-        print(f"Mode: ENABLED | Payload Center x: {pay_cx_val:.3f} m (Inertial: [{float(np.asarray(jax_sim[x_payload]).flatten()[0]):.3f}, {float(np.asarray(jax_sim[y_payload]).flatten()[0]):.3f}, {float(np.asarray(jax_sim[z_payload]).flatten()[0]):.3f}] m)")
-        print(f"Buffer Requirement: {GEONIC_CLEARANCE_M:.2f} m | Min Clearance: {min_clearance:.4f} m | Geonic Margin: {g_margin:+.4f} m | Status: {g_status}")
-        print(f"{'Sample Point':14s} | {'SDF [m]':10s} | {'Clearance [m]':14s} | {'Buffer [m]':12s} | {'Status':8s}")
-        print("-" * 65)
-        for pt_i in range(len(clearance_vals)):
-            c_val = clearance_vals[pt_i]
-            pt_status = "FEASIBLE" if c_val >= GEONIC_CLEARANCE_M else "VIOLATED"
-            print(f"Point {pt_i:2d}       | {-c_val:10.4f} | {c_val:14.4f} | {GEONIC_CLEARANCE_M:12.2f} | {pt_status:8s}")
+        print(f"Mode: {geonic_payload_mode.upper()} | Buffer Requirement: {GEONIC_CLEARANCE_M:.2f} m")
+
+        if geonic_payload_mode in {'oversized', 'both'}:
+            pay_cx_val = float(np.asarray(jax_sim[payload_center_x]).flatten()[0])
+            clearance_vals = np.asarray(jax_sim[geonic_clearance_per_point]).flatten()
+            min_clearance = float(np.min(clearance_vals))
+            g_margin = float(np.asarray(jax_sim[geonic_margin]).flatten()[0])
+            g_status = "FEASIBLE" if g_margin >= 0.0 else "VIOLATED"
+            pay_inertial_val = np.asarray(jax_sim[payload_center_inertial]).flatten()
+            print(f"--- OVERSIZED PAYLOAD ---")
+            print(f"Payload Center x: {pay_cx_val:.3f} m (Inertial: [{pay_inertial_val[0]:.3f}, {pay_inertial_val[1]:.3f}, {pay_inertial_val[2]:.3f}] m)")
+            print(f"Min Clearance: {min_clearance:.4f} m | Geonic Margin: {g_margin:+.4f} m | Status: {g_status}")
+            print(f"{'Sample Point':14s} | {'SDF [m]':10s} | {'Clearance [m]':14s} | {'Buffer [m]':12s} | {'Status':8s}")
+            print("-" * 65)
+            for pt_i in range(len(clearance_vals)):
+                c_val = clearance_vals[pt_i]
+                pt_status = "FEASIBLE" if c_val >= GEONIC_CLEARANCE_M else "VIOLATED"
+                print(f"Oversized Pt {pt_i:2d} | {-c_val:10.4f} | {c_val:14.4f} | {GEONIC_CLEARANCE_M:12.2f} | {pt_status:8s}")
+
+        if geonic_payload_mode in {'pallets', 'both'}:
+            pal_cx_val = float(np.asarray(jax_sim[pallet_stack_center_x]).flatten()[0])
+            pal_shift_val = float(np.asarray(jax_sim[pallet_stack_x_shift]).flatten()[0])
+            pal_clearance_vals = np.asarray(jax_sim[pallet_clearance_per_point]).flatten()
+            min_pal_clearance = float(np.min(pal_clearance_vals))
+            pal_margin_val = float(np.asarray(jax_sim[pallet_margin]).flatten()[0])
+            pal_status = "FEASIBLE" if pal_margin_val >= 0.0 else "VIOLATED"
+            pal_inertial_val = np.asarray(jax_sim[pallet_stack_center_inertial]).flatten()
+            print(f"--- PALLET STACK (6 PALLETS) ---")
+            print(f"Pallet Stack CG x: {pal_cx_val:.3f} m (Shift: {pal_shift_val:+.3f} m, Inertial: [{pal_inertial_val[0]:.3f}, {pal_inertial_val[1]:.3f}, {pal_inertial_val[2]:.3f}] m)")
+            print(f"Min Clearance: {min_pal_clearance:.4f} m | Pallet Margin: {pal_margin_val:+.4f} m | Status: {pal_status}")
+            print(f"{'Sample Point':14s} | {'SDF [m]':10s} | {'Clearance [m]':14s} | {'Buffer [m]':12s} | {'Status':8s}")
+            print("-" * 65)
+            for pt_i in range(len(pal_clearance_vals)):
+                c_val = pal_clearance_vals[pt_i]
+                pt_status = "FEASIBLE" if c_val >= GEONIC_CLEARANCE_M else "VIOLATED"
+                print(f"Pallet Pt {pt_i:2d}    | {-c_val:10.4f} | {c_val:14.4f} | {GEONIC_CLEARANCE_M:12.2f} | {pt_status:8s}")
+
+        if geonic_payload_mode == 'both':
+            cg_diff_val = float(np.asarray(jax_sim[payload_cg_consistency]).flatten()[0])
+            cg_status = "FEASIBLE (COINCIDENT)" if abs(cg_diff_val) <= 1e-4 else "VIOLATED"
+            ov_margin_val = float(np.asarray(jax_sim[overall_geonic_margin]).flatten()[0])
+            ov_status = "FEASIBLE" if ov_margin_val >= 0.0 else "VIOLATED"
+            print(f"--- BOTH-MODE CONSISTENCY ---")
+            print(f"CG Consistency (pay_x - pal_x): {cg_diff_val:+.6f} m | Status: {cg_status}")
+            print(f"Overall Diagnostic Margin: {ov_margin_val:+.4f} m | Overall Status: {ov_status}")
         print()
     else:
         print(f"Geonic Mode: DISABLED (Legacy payload_cg active)\n")
+
+    # Viscous Drag & Attachment Diagnostic
+    cd_visc_val = float(np.asarray(jax_sim[CD_viscous]).flatten()[0])
+    d_visc_val = float(np.asarray(jax_sim[D_viscous]).flatten()[0])
+    hmax_val = float(np.asarray(jax_sim[H_max_ibl]).flatten()[0])
+    att_margin_val = float(np.asarray(jax_sim[ibl_attachment_margin]).flatten()[0])
+    min_cp_val = float(np.asarray(jax_sim[ibl_min_cp]).flatten()[0])
+    cp_cut_margin = float(np.asarray(jax_sim[ibl_cp_cutoff_margin]).flatten()[0])
+    att_status = "ATTACHED (FEASIBLE)" if att_margin_val >= 0.0 else "SEPARATED (VIOLATED)"
+    cutoff_status = "VALID" if cp_cut_margin >= 0.1 else "CUTOFF WARNING"
+    print(f"================ VISCOUS DRAG & IBL ATTACHMENT DIAGNOSTIC ================")
+    print(f"Mode: {viscous_drag_mode.upper()} | CD_viscous: {cd_visc_val*1e4:.2f} counts ({cd_visc_val:.6f}) | D_viscous: {d_visc_val:.1f} N")
+    print(f"H_max_ibl: {hmax_val:.4f} (Limit: 2.40) | Attachment Margin: {att_margin_val:+.4f} ({att_status})")
+    print(f"Min Cp (Node 0): {min_cp_val:.4f} (Cutoff: -5.0) | Cutoff Margin: {cp_cut_margin:+.4f} ({cutoff_status})\n")
 
 
 if __name__ == '__main__':
@@ -2045,16 +2336,40 @@ if __name__ == '__main__':
     
     # Read design variable history from x.out (preferred) or record.hdf5
     x_out_path = os.path.join(latest_folder, 'x.out')
+    expected_dvs = sum(int(np.prod(dv_info.variable.shape)) for dv_info in design_variables.values())
     if os.path.exists(x_out_path):
         x_history = np.loadtxt(x_out_path)
         if len(x_history.shape) == 1:
             x_history = x_history.reshape(1, -1)
-        print(f"Loaded {x_history.shape[0]} iterations from current run x.out")
-    
+        if x_history.shape[1] != expected_dvs:
+            print(f"Warning: {x_out_path} has {x_history.shape[1]} DVs, expected {expected_dvs}. Searching for matching run...")
+            matching_folders = []
+            for f in valid_folders:
+                try:
+                    f_x = np.loadtxt(os.path.join(f, 'x.out'))
+                    if len(f_x.shape) == 1:
+                        f_x = f_x.reshape(1, -1)
+                    if f_x.shape[1] == expected_dvs:
+                        matching_folders.append(f)
+                except Exception:
+                    pass
+            if matching_folders:
+                latest_folder = max(matching_folders, key=os.path.getmtime)
+                x_out_path = os.path.join(latest_folder, 'x.out')
+                x_history = np.loadtxt(x_out_path)
+                if len(x_history.shape) == 1:
+                    x_history = x_history.reshape(1, -1)
+                print(f"Loaded matching history from: {latest_folder} ({x_history.shape[0]} iters)")
+            else:
+                print(f"No previous run found matching {expected_dvs} DVs. Post-processing animation replay skipped.")
+                x_history = np.array([])
+        else:
+            print(f"Loaded {x_history.shape[0]} iterations from current run x.out")
+
         # If warm-started from prior file, prepend all previous iterations so video & summary show the full trajectory
-        if warm_start and os.path.exists(init_file):
+        if warm_start and os.path.exists(init_file) and len(x_history) > 0:
             x_prior = np.loadtxt(init_file)
-            if len(x_prior.shape) > 1 and x_prior.shape[0] > 0:
+            if len(x_prior.shape) > 1 and x_prior.shape[0] > 0 and x_prior.shape[1] == expected_dvs:
                 x_history = np.vstack([x_prior[:-1], x_history])
                 print(f"Combined total: {x_history.shape[0]} iterations from initial rectangular wing to converged optimum")
     else:
@@ -2224,7 +2539,13 @@ if __name__ == '__main__':
         cl_history.append(cl_val)
         sref_history.append(sref_val)
         if use_geonic:
-            geonic_margin_history.append(float(np.asarray(jax_sim[geonic_margin]).flatten()[0]))
+            if geonic_payload_mode == 'both':
+                margin_record = float(np.asarray(jax_sim[overall_geonic_margin]).flatten()[0])
+            elif geonic_payload_mode == 'pallets':
+                margin_record = float(np.asarray(jax_sim[pallet_margin]).flatten()[0])
+            else:
+                margin_record = float(np.asarray(jax_sim[geonic_margin]).flatten()[0])
+            geonic_margin_history.append(margin_record)
     
         # Get plotting elements from geometry.plot (returns list of pyvista objects)
         plotting_elements = geometry.plot(show=False)
@@ -2324,7 +2645,7 @@ if __name__ == '__main__':
         if 'thickness_shape_dvs' in unscaled_values:
             th_vals = unscaled_values['thickness_shape_dvs']
             max_th_pct = np.max(np.abs(th_vals))
-            dv_str += (f"\nmax thick shape={max_th_pct:.2f}% chord" if dv_str else f"max thick shape={max_th_pct:.2f}% chord")
+            dv_str += (f"\nmax thick shape={max_th_pct:.2f}% thickness" if dv_str else f"max thick shape={max_th_pct:.2f}% thickness")
         if 'tc_target_control_points' in unscaled_values:
             tc_vals = np.asarray(unscaled_values['tc_target_control_points']).flatten()
             dv_str += (f"\nt/c=[{tc_vals[0]:.3f}..{tc_vals[-1]:.3f}]" if dv_str else f"t/c=[{tc_vals[0]:.3f}..{tc_vals[-1]:.3f}]")
@@ -2344,25 +2665,8 @@ if __name__ == '__main__':
         xpay_val = float(np.asarray(jax_sim[x_payload]).flatten()[0])
 
         if use_geonic:
-            pay_cx_val = float(np.asarray(unscaled_values['payload_center_x']).flatten()[0]) if 'payload_center_x' in unscaled_values else float(np.asarray(jax_sim[payload_center_x]).flatten()[0])
-            clearance_vals = np.asarray(jax_sim[geonic_clearance_per_point]).flatten()
-            min_clearance = float(np.min(clearance_vals))
-            g_margin = float(np.asarray(jax_sim[geonic_margin]).flatten()[0])
-            g_status = "FEAS" if g_margin >= 0.0 else "VIOL"
-            geonic_hud_str = f"Geonic: ON | pay_x={pay_cx_val:.2f}m | min_clr={min_clearance:.3f}m | margin={g_margin:+.3f}m ({g_status})\n"
-            pay_cg_str = f"x_pay={xpay_val:.3f}m (pay_x={pay_cx_val:.3f}m)"
-
-            box_corners_body = get_full_payload_box_corners(pay_cx_val, 0.0, 0.0)
-            pay_inertial_val = np.asarray(jax_sim[payload_center_inertial]).flatten()
             cos_p = np.cos(pitch_val)
             sin_p = np.sin(pitch_val)
-            box_corners_rot = np.empty_like(box_corners_body)
-            dx = box_corners_body[:, 0] - pay_cx_val
-            dz = box_corners_body[:, 2]
-            box_corners_rot[:, 0] = pay_inertial_val[0] + dx * cos_p + dz * sin_p
-            box_corners_rot[:, 1] = box_corners_body[:, 1]
-            box_corners_rot[:, 2] = pay_inertial_val[2] - dx * sin_p + dz * cos_p
-
             box_faces = [
                 4, 0, 1, 3, 2,  # front
                 4, 4, 6, 7, 5,  # rear
@@ -2371,20 +2675,78 @@ if __name__ == '__main__':
                 4, 0, 2, 6, 4,  # bottom
                 4, 1, 5, 7, 3,  # top
             ]
-            payload_poly = pv.PolyData(box_corners_rot, box_faces)
-            plotter.add_mesh(payload_poly, color='cyan', opacity=0.4, style='wireframe', line_width=2.0)
-            plotter.add_mesh(payload_poly, color='cyan', opacity=0.15, style='surface')
+
+            if geonic_payload_mode in {'oversized', 'both'}:
+                pay_cx_val = float(np.asarray(unscaled_values['payload_center_x']).flatten()[0]) if 'payload_center_x' in unscaled_values else float(np.asarray(jax_sim[payload_center_x]).flatten()[0])
+                clearance_vals = np.asarray(jax_sim[geonic_clearance_per_point]).flatten()
+                min_clearance = float(np.min(clearance_vals))
+                g_margin = float(np.asarray(jax_sim[geonic_margin]).flatten()[0])
+                g_status = "FEAS" if g_margin >= 0.0 else "VIOL"
+
+                box_corners_body = get_full_payload_box_corners(pay_cx_val, 0.0, 0.0)
+                pay_inertial_val = np.asarray(jax_sim[payload_center_inertial]).flatten()
+                box_corners_rot = np.empty_like(box_corners_body)
+                dx = box_corners_body[:, 0] - pay_cx_val
+                dz = box_corners_body[:, 2]
+                box_corners_rot[:, 0] = pay_inertial_val[0] + dx * cos_p + dz * sin_p
+                box_corners_rot[:, 1] = box_corners_body[:, 1]
+                box_corners_rot[:, 2] = pay_inertial_val[2] - dx * sin_p + dz * cos_p
+                payload_poly = pv.PolyData(box_corners_rot, box_faces)
+                plotter.add_mesh(payload_poly, color='#9467bd', opacity=0.4, style='wireframe', line_width=2.0)
+                plotter.add_mesh(payload_poly, color='#9467bd', opacity=0.15, style='surface')
+
+            if geonic_payload_mode in {'pallets', 'both'}:
+                pal_cx_val = float(np.asarray(unscaled_values['pallet_stack_center_x']).flatten()[0]) if 'pallet_stack_center_x' in unscaled_values else float(np.asarray(jax_sim[pallet_stack_center_x]).flatten()[0])
+                pal_clearance_vals = np.asarray(jax_sim[pallet_clearance_per_point]).flatten()
+                min_pal_clearance = float(np.min(pal_clearance_vals))
+                pal_margin = float(np.asarray(jax_sim[pallet_margin]).flatten()[0])
+                pal_status = "FEAS" if pal_margin >= 0.0 else "VIOL"
+
+                pallet_boxes = get_full_pallet_boxes_corners(pal_cx_val)
+                pal_inertial_val = np.asarray(jax_sim[pallet_stack_center_inertial]).flatten()
+                for p_box in pallet_boxes:
+                    p_box_rot = np.empty_like(p_box)
+                    dx = p_box[:, 0] - pal_cx_val
+                    dz = p_box[:, 2]
+                    p_box_rot[:, 0] = pal_inertial_val[0] + dx * cos_p + dz * sin_p
+                    p_box_rot[:, 1] = p_box[:, 1]
+                    p_box_rot[:, 2] = pal_inertial_val[2] - dx * sin_p + dz * cos_p
+                    pal_poly = pv.PolyData(p_box_rot, box_faces)
+                    plotter.add_mesh(pal_poly, color='cyan', opacity=0.35, style='wireframe', line_width=1.5)
+                    plotter.add_mesh(pal_poly, color='cyan', opacity=0.12, style='surface')
+
+            if geonic_payload_mode == 'oversized':
+                geonic_hud_str = f"Geonic: OVERSIZED | pay_x={pay_cx_val:.2f}m | min_clr={min_clearance:.3f}m | margin={g_margin:+.3f}m ({g_status})\n"
+                pay_cg_str = f"x_pay={xpay_val:.3f}m (pay_x={pay_cx_val:.3f}m)"
+            elif geonic_payload_mode == 'pallets':
+                geonic_hud_str = f"Geonic: PALLETS | pal_x={pal_cx_val:.2f}m | min_clr={min_pal_clearance:.3f}m | margin={pal_margin:+.3f}m ({pal_status})\n"
+                pay_cg_str = f"x_pay={xpay_val:.3f}m (pal_x={pal_cx_val:.3f}m)"
+            elif geonic_payload_mode == 'both':
+                cg_diff_val = float(np.asarray(jax_sim[payload_cg_consistency]).flatten()[0])
+                ov_margin_val = float(np.asarray(jax_sim[overall_geonic_margin]).flatten()[0])
+                ov_st = "FEAS" if ov_margin_val >= 0.0 else "VIOL"
+                geonic_hud_str = f"Geonic: BOTH | pay_x={pay_cx_val:.2f}m, pal_x={pal_cx_val:.2f}m (Δ={cg_diff_val:+.3f}m) | margin={ov_margin_val:+.3f}m ({ov_st})\n"
+                pay_cg_str = f"x_pay={xpay_val:.3f}m (pay={pay_cx_val:.2f}m, pal={pal_cx_val:.2f}m)"
         else:
             pay_cg_val = float(np.asarray(unscaled_values['payload_cg']).flatten()[0]) if 'payload_cg' in unscaled_values else 0.40
             geonic_hud_str = ""
             pay_cg_str = f"x_pay={xpay_val:.3f}m [{pay_cg_val*100:.1f}%]"
     
+        if viscous_drag_mode == 'ibl':
+            cd_visc_val_iter = float(np.asarray(jax_sim[CD_viscous]).flatten()[0])
+            att_m_iter = float(np.asarray(jax_sim[ibl_attachment_margin]).flatten()[0])
+            att_st_iter = "FEAS" if att_m_iter >= 0.0 else "VIOL"
+            viscous_hud_str = f"Viscous: IBL | CD_visc={cd_visc_val_iter*1e4:.1f} cts | Att_margin={att_m_iter:+.3f} ({att_st_iter})\n"
+        else:
+            viscous_hud_str = f"Viscous: CONST_CD0 (CD0=80.0 cts)\n"
+
         # Add iteration counter label using unscaled physical values
         plotter.add_text(
             f"Iteration {iteration}/{num_iterations - 1}\n"
             f"Formulation: {formulation} | Res: {resolution} | Obj: {induced_drag_objective}\n"
             f"CD_tot={cd_active_val*1e4:.1f} cts (CDi={(cdi_fourier_val if induced_drag_objective=='fourier' else cd_trefftz_val)*1e4:.1f}, CDprof={cd_profile_val*1e4:.1f}, CDwave={cd_wave_val*1e4:.1f})\n"
             f"D_tot={d_total_val:.1f} N | Λ_qc_max={max_qc_sw_deg:.1f}° | Λ_0.5_max={max_hc_sw_deg:.1f}° | min(Mdd-M)={min_mdd_margin:+.4f}\n"
+            f"{viscous_hud_str}"
             f"{geonic_hud_str}"
             f"{dv_str}\n"
             f"{elev_str}Pitch={np.degrees(pitch_val):.1f}°  Pitch_ss={np.degrees(pitch_ss_val):.1f}°{pitch_neg1g_str}\n"
@@ -2493,6 +2855,7 @@ if __name__ == '__main__':
                     include_elevator=bool(include_elevator),
                     scale_factor=float(scale_factor),
                     use_geonic=bool(use_geonic),
+                    geonic_payload_mode=str(geonic_payload_mode),
                     num_chord_stations=int(num_chord_stations),
                     num_stations=int(num_stations),
                     dv_names=np.array(list(design_variables.keys()), dtype=str),
@@ -2500,15 +2863,42 @@ if __name__ == '__main__':
                 for dv_name, dv_info in design_variables.items():
                     cache_dict[f'dv_opt_{dv_name}'] = np.asarray(jax_sim[dv_info.variable])
 
+                cache_dict['geonic_payload_mode'] = str(geonic_payload_mode)
                 if use_geonic:
-                    cache_dict['payload_center_x'] = float(np.asarray(jax_sim[payload_center_x]).flatten()[0])
-                    cache_dict['payload_sample_points'] = np.asarray(jax_sim[payload_sample_points])
-                    cache_dict['payload_signed_distance'] = np.asarray(jax_sim[payload_signed_distance]).flatten()
-                    cache_dict['geonic_margin'] = float(np.asarray(jax_sim[geonic_margin]).flatten()[0])
-                    cache_dict['geonic_clearance_per_point'] = np.asarray(jax_sim[geonic_clearance_per_point]).flatten()
-                    cache_dict['payload_center_inertial'] = np.asarray(jax_sim[payload_center_inertial]).flatten()
+                    if geonic_payload_mode in {'oversized', 'both'}:
+                        cache_dict['payload_center_x'] = float(np.asarray(jax_sim[payload_center_x]).flatten()[0])
+                        cache_dict['payload_sample_points'] = np.asarray(jax_sim[payload_sample_points])
+                        cache_dict['payload_signed_distance'] = np.asarray(jax_sim[payload_signed_distance]).flatten()
+                        cache_dict['geonic_margin'] = float(np.asarray(jax_sim[geonic_margin]).flatten()[0])
+                        cache_dict['geonic_clearance_per_point'] = np.asarray(jax_sim[geonic_clearance_per_point]).flatten()
+                        cache_dict['payload_center_inertial'] = np.asarray(jax_sim[payload_center_inertial]).flatten()
+                    if geonic_payload_mode in {'pallets', 'both'}:
+                        cache_dict['pallet_stack_center_x'] = float(np.asarray(jax_sim[pallet_stack_center_x]).flatten()[0])
+                        cache_dict['pallet_stack_x_shift'] = float(np.asarray(jax_sim[pallet_stack_x_shift]).flatten()[0])
+                        cache_dict['pallet_sample_points'] = np.asarray(jax_sim[pallet_sample_points])
+                        cache_dict['pallet_signed_distance'] = np.asarray(jax_sim[pallet_signed_distance]).flatten()
+                        cache_dict['pallet_margin'] = float(np.asarray(jax_sim[pallet_margin]).flatten()[0])
+                        cache_dict['pallet_clearance_per_point'] = np.asarray(jax_sim[pallet_clearance_per_point]).flatten()
+                        cache_dict['pallet_stack_center_inertial'] = np.asarray(jax_sim[pallet_stack_center_inertial]).flatten()
+                    if geonic_payload_mode == 'both':
+                        cache_dict['payload_cg_consistency'] = float(np.asarray(jax_sim[payload_cg_consistency]).flatten()[0])
+                        cache_dict['overall_geonic_margin'] = float(np.asarray(jax_sim[overall_geonic_margin]).flatten()[0])
                 else:
                     cache_dict['payload_cg'] = float(np.asarray(jax_sim[payload_cg]).flatten()[0])
+
+                cache_dict['viscous_drag_mode'] = str(viscous_drag_mode)
+                cache_dict['cd_viscous_val'] = float(np.asarray(jax_sim[CD_viscous]).flatten()[0])
+                cache_dict['d_viscous_val'] = float(np.asarray(jax_sim[D_viscous]).flatten()[0])
+                cache_dict['cd_ibl_section'] = np.asarray(jax_sim[CD_ibl_section]).flatten()
+                cache_dict['theta_te_upper'] = np.asarray(jax_sim[theta_te_upper]).flatten()
+                cache_dict['theta_te_lower'] = np.asarray(jax_sim[theta_te_lower]).flatten()
+                cache_dict['h_max_ibl'] = float(np.asarray(jax_sim[H_max_ibl]).flatten()[0])
+                cache_dict['ibl_attachment_margin'] = float(np.asarray(jax_sim[ibl_attachment_margin]).flatten()[0])
+                cache_dict['ibl_min_cp'] = float(np.asarray(jax_sim[ibl_min_cp]).flatten()[0])
+                cache_dict['ibl_cp_cutoff_margin'] = float(np.asarray(jax_sim[ibl_cp_cutoff_margin]).flatten()[0])
+                cache_dict['dv_H_stations'] = np.asarray(jax_sim[dv_H_stations]).flatten()
+                if viscous_drag_mode == 'ibl':
+                    cache_dict['H_section_upper'] = np.asarray(jax_sim[H_section_upper]).flatten()
 
                 np.savez_compressed(cache_file_opt, **cache_dict)
                 print(f"Cached panel telemetry saved to: {cache_file_opt}")
@@ -2544,6 +2934,20 @@ if __name__ == '__main__':
             # Cache structural telemetry for generate_structural_plots.py
             struct_cache_opt = os.path.join(latest_folder, 'structural_data.npz')
             try:
+                import json
+                dv_metadata = {}
+                for dv_k, dv_v in design_variables.items():
+                    dv_metadata[dv_k] = {
+                        'shape': list(dv_v.variable.shape),
+                        'scaler': dv_v.scaler.tolist() if isinstance(dv_v.scaler, np.ndarray) else float(dv_v.scaler),
+                        'lower': dv_v.lower.tolist() if isinstance(dv_v.lower, np.ndarray) else float(dv_v.lower),
+                        'upper': dv_v.upper.tolist() if isinstance(dv_v.upper, np.ndarray) else float(dv_v.upper),
+                    }
+                dv_metadata_json = json.dumps(dv_metadata)
+                x_scaler_opt = np.asarray(optimization_problem.x_scaler).flatten() if 'optimization_problem' in locals() and hasattr(optimization_problem, 'x_scaler') else np.array([])
+                x_lower_opt = np.asarray(optimization_problem.x_lower).flatten() if 'optimization_problem' in locals() and hasattr(optimization_problem, 'x_lower') else np.array([])
+                x_upper_opt = np.asarray(optimization_problem.x_upper).flatten() if 'optimization_problem' in locals() and hasattr(optimization_problem, 'x_upper') else np.array([])
+
                 np.savez_compressed(
                     struct_cache_opt,
                     beam_pts_opt=np.asarray(jax_sim[beam_mesh]),
@@ -2551,6 +2955,8 @@ if __name__ == '__main__':
                     allowable_stress=float(allowable_stress),
                     chords_opt=np.asarray(jax_sim[local_chord]).flatten(),
                     heights_opt=np.asarray(jax_sim[local_height]).flatten(),
+                    box_heights_opt=np.asarray(jax_sim[box_height]).flatten(),
+                    box_height_factor=float(box_height_factor),
                     widths_opt=np.asarray(jax_sim[box_width]).flatten(),
                     ttop_elem_opt=np.asarray(jax_sim[ttop_elem]).flatten(),
                     tweb_elem_opt=np.asarray(jax_sim[tweb_elem]).flatten(),
@@ -2566,7 +2972,15 @@ if __name__ == '__main__':
                     num_chord_stations=int(num_chord_stations),
                     num_stations=int(num_stations),
                     use_geonic=bool(use_geonic),
+                    geonic_payload_mode=str(geonic_payload_mode),
                     dv_names=np.array(list(design_variables.keys()), dtype=str),
+                    dv_metadata_json=str(dv_metadata_json),
+                    x_scaler=x_scaler_opt,
+                    x_lower=x_lower_opt,
+                    x_upper=x_upper_opt,
+                    camber_max_percent=float(camber_max_percent) if 'camber_max_percent' in globals() else 6.0,
+                    camber_scaler=float(np.mean(camber_scaler)) if 'camber_scaler' in globals() else 1.0,
+                    thick_shape_scaler=float(np.mean(thick_shape_scaler)) if 'thick_shape_scaler' in globals() else 1.0,
                     load_factor_val=float(load_factor_val) if 'load_factor_val' in globals() else 2.5,
                 )
                 print(f"Cached structural telemetry saved to: {struct_cache_opt}")
@@ -2702,6 +3116,23 @@ if __name__ == '__main__':
         print(f"Wake-circulation closure figure saved to: {closure_figure_path}")
     except Exception as exc:
         print(f"Warning: unable to save wake-circulation closure diagnostic: {exc}")
+
+    # Viscous Drag Mode and Attachment Final Summary
+    cd_visc_final = float(np.asarray(jax_sim[CD_viscous]).flatten()[0])
+    d_visc_final = float(np.asarray(jax_sim[D_viscous]).flatten()[0])
+    hmax_final = float(np.asarray(jax_sim[H_max_ibl]).flatten()[0])
+    att_margin_final = float(np.asarray(jax_sim[ibl_attachment_margin]).flatten()[0])
+    min_cp_final = float(np.asarray(jax_sim[ibl_min_cp]).flatten()[0])
+    cp_cut_margin_final = float(np.asarray(jax_sim[ibl_cp_cutoff_margin]).flatten()[0])
+    att_st_final = "ATTACHED (FEASIBLE)" if att_margin_final >= 0.0 else "SEPARATED (VIOLATED)"
+    print(f"\n================ VISCOUS DRAG FINAL SUMMARY ================")
+    print(f"Selected Mode: {viscous_drag_mode.upper()}")
+    print(f"CD_viscous:    {cd_visc_final*1e4:.2f} counts ({cd_visc_final:.6f})")
+    print(f"D_viscous:     {d_visc_final:.1f} N")
+    print(f"H_max_ibl:     {hmax_final:.4f} (Limit: 2.40)")
+    print(f"Attach Margin: {att_margin_final:+.4f} ({att_st_final})")
+    print(f"Min Cp:        {min_cp_final:.4f} (Cutoff Margin: {cp_cut_margin_final:+.4f})")
+    print(f"============================================================\n")
     
     import shutil
     current_conv_id = '0ac41e2d-0335-41d9-9f48-d6791df931f1'
@@ -2826,7 +3257,7 @@ if __name__ == '__main__':
             gal_path = os.path.join(latest_folder, "airfoil_cross_sections_gallery.png")
             evo_path = os.path.join(latest_folder, "airfoil_shape_evolution.png")
             tel_path = os.path.join(latest_folder, "airfoil_cross_sections_data.npz")
-            generate_airfoil_gallery_plot(stn_data, gal_path, half_span_m)
+            generate_airfoil_gallery_plot(stn_data, gal_path, half_span_m, parsed_dvs=p_dvs)
             generate_shape_evolution_plot(stn_data, evo_path, half_span_m, p_dvs, l_chords, c_stretches, cad_prof)
             save_airfoil_telemetry(stn_data, tel_path, half_span_m)
             if os.path.exists(artifact_dir):
