@@ -1,0 +1,18 @@
+{
+    "iterations": {
+        "mdf_mean": 5.0,
+        "sand_mean": 5.52,
+        "mdf_median": 5.0,
+        "sand_median": 6.0
+    },
+    "solve_time": {
+        "mdf_mean": 19.725746024920227,
+        "sand_mean": 20.86014130963973,
+        "mdf_median": 20.260732957001892,
+        "sand_median": 20.046888801000023
+    },
+    "convergence_rate": {
+        "mdf": 1.0,
+        "sand": 1.0
+    }
+}

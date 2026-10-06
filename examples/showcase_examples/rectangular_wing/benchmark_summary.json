@@ -1,0 +1,24 @@
+{
+    "iterations": {
+        "implicit_mean": 2.0,
+        "explicit_mean": 5.25,
+        "implicit_median": 2.0,
+        "explicit_median": 5.0
+    },
+    "function_evals": {
+        "implicit_mean": 2.0,
+        "explicit_mean": 5.39,
+        "implicit_median": 2.0,
+        "explicit_median": 5.0
+    },
+    "solve_time": {
+        "implicit_mean": 5.468875806754222,
+        "explicit_mean": 14.172221105190692,
+        "implicit_median": 5.546632117941044,
+        "explicit_median": 14.28962529351702
+    },
+    "convergence_rate": {
+        "implicit": 1.0,
+        "explicit": 1.0
+    }
+}

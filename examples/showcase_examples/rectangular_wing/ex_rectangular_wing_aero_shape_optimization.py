@@ -74,8 +74,9 @@ for idx in list(geometry.functions.keys()):
     )
     geometry.functions[idx] = lfs.Function(space=new_space, coefficients=new_coeffs)
 
-geometry = lsdo_geo.Geometry(functions=geometry.functions, function_names=geometry.function_names,
+geometry = Geometry(functions=geometry.functions, function_names=geometry.function_names,
                              name=geometry.name, space=geometry.space)
+base_geometry_coefficients = {idx: (func.coefficients.value.copy() if hasattr(func.coefficients, 'value') else np.array(func.coefficients).copy()) for idx, func in geometry.functions.items()}
 # geometry.plot()
 # geometry.plot(point_types=['coefficients'], plot_types=['point_cloud'])
 # exit()
@@ -199,36 +200,7 @@ num_right_panels = len(right_panel_indices)
 
 # endregion
 
-# region Create Parameterization Objects
-# Construct a Free Form Deformation (FFD) block around the geometry
-num_ffd_coefficients_chordwise = 2
-num_ffd_sections = 2
-# Note: This FFD block construction is one of a few helper functions that can be used to create a FFD block.
-#       The "manual" method is to use construct_ffd_block_from_corners, which allows for defining the coefficients directly.
-ffd_block = construct_ffd_block_around_entities(entities=geometry, 
-                                                num_coefficients=(num_ffd_coefficients_chordwise, num_ffd_sections, 2), degree=(1,1,1))
-# ffd_block.plot()
-
-# Define an axial sectional parameterization for the FFD volume. 
-# This views the FFD volume as a series of 2D sections (as defined by the control points) 
-# that can be allowed to stretch, translate, and rotate independently.
-# The sectional parameterization is chosen to have the spanwise direction as the principal 
-# parametric dimension (0,1,2 corresponds to u,v,w of the FFD block, which in this case corresponds to x,y,z).
-ffd_sectional_parameterization = SectionalParameterization(
-    name="ffd_sectional_parameterization",
-    parameterized_points=ffd_block.coefficients,
-    principal_parametric_dimension=1,
-)
-# ffd_sectional_parameterization.plot()
-
-# region Define Design Variables and CSDL Parameterization Map
-# Formulation flag:
-# 'ar_area'   -> Design variables: Aspect Ratio (AR) and Planform Area (S), enforced directly via ParameterizationSolver
-# 'chord_span' -> Design variables: Chord stretch and Span stretch applied directly without ParameterizationSolver
-# formulation = 'ar_area'  # Options: 'ar_area' or 'chord_span'
-formulation = 'chord_span'  # Options: 'ar_area' or 'chord_span'
-
-pitch = csdl.Variable(value=5.*np.pi/180) # pitch angle in radians
+# region Create Parameterization Objects and Model Builder
 
 @dataclass
 class DVInfo:
@@ -237,213 +209,303 @@ class DVInfo:
     upper: float
     scaler: float = 1.0
 
-space_of_linear_2_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
 
-if formulation == 'ar_area':
-    # Formulation 1: Aspect Ratio (AR) and Planform Area (S) design variables
-    aspect_ratio = csdl.Variable(shape=(1,), value=np.array([10.0]))
-    planform_area_dv = csdl.Variable(shape=(1,), value=np.array([10.0]))
+def build_optimization_model(formulation='chord_span',
+                             obj_scaler=1.e3,
+                             cl_scaler=1.e1,
+                             area_scaler=1.e-1,
+                             ar_scaler=1.e-1,
+                             dv_scalers=None,
+                             include_cl_constraint=False,
+                             include_pitch_dv=False):
+    """
+    Builds the CSDL computational graph, VortexAD aerodynamic panel solver,
+    parameterization and constraints, and compiles the JaxSimulator.
 
-    design_variables: dict[str, DVInfo] = {
-        'aspect_ratio': DVInfo(variable=aspect_ratio, lower=2.0, upper=15.0, scaler=1.e-1),
-        # 'planform_area_dv': DVInfo(variable=planform_area_dv, lower=1.0, upper=50.0, scaler=1.e-1),
-        'pitch': DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
-    }
+    Parameters
+    ----------
+    formulation : str
+        'ar_area' or 'mdf' (implicit method via ParameterizationSolver),
+        'sand' (Simultaneous Analysis and Design with optimizer solving parameterization constraints), or
+        'chord_span' (explicit method with direct stretch DVs and constraints).
+    obj_scaler : float
+        Objective scaling factor for CDi (default 1e3).
+    cl_scaler : float
+        Constraint scaling factor for CL (default 1e1).
+    area_scaler : float
+        Constraint scaling factor for planform area (default 1e-1).
+    ar_scaler : float
+        Constraint scaling factor for aspect ratio (default 1e-1).
+    dv_scalers : dict, optional
+        Custom design variable scalers dict.
+    include_cl_constraint : bool
+        Whether to add CL == 0.5 constraint (default False).
+    include_pitch_dv : bool
+        Whether to include pitch as an active design variable (default False).
 
-    # ParameterizationSolver states
-    chord_stretch_state = csdl.Variable(value=0.0)
-    span_stretch_state = csdl.Variable(value=0.0)
+    Returns
+    -------
+    tuple
+        (jax_sim, design_variables, outputs_dict, geometry, ffd_block)
+    """
+    if dv_scalers is None:
+        dv_scalers = {}
 
-    chord_coeffs = csdl.expand(chord_stretch_state, (num_ffd_sections,))
-    wingspan_coeffs = csdl.concatenate([-span_stretch_state, span_stretch_state])
+    recorder = csdl.Recorder(inline=True)
+    recorder.start()
 
-elif formulation == 'chord_span':
-    # Formulation 2: Chord stretch and Span stretch design variables (no ParameterizationSolver)
-    chord_stretch_dv = csdl.Variable(shape=(1,), value=np.array([0.0]))
-    span_stretch_dv = csdl.Variable(shape=(1,), value=np.array([0.0]))
+    # Reset geometry coefficients to un-deformed base geometry for this recorder
+    for idx, coeff_val in base_geometry_coefficients.items():
+        geometry.functions[idx].coefficients = csdl.Variable(value=coeff_val.copy())
 
-    design_variables: dict[str, DVInfo] = {
-        'chord_stretch_dv': DVInfo(variable=chord_stretch_dv, lower=-0.85, upper=4.0, scaler=1.0),
-        'span_stretch_dv': DVInfo(variable=span_stretch_dv, lower=-4.5, upper=20.0, scaler=1.e-1),
-        'pitch': DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
-    }
+    # Construct Free Form Deformation (FFD) block around the geometry
+    num_ffd_coefficients_chordwise = 2
+    num_ffd_sections = 2
+    ffd_block = construct_ffd_block_around_entities(
+        entities=geometry, 
+        num_coefficients=(num_ffd_coefficients_chordwise, num_ffd_sections, 2),
+        degree=(1, 1, 1)
+    )
 
-    chord_coeffs = csdl.expand(chord_stretch_dv, (num_ffd_sections,))
-    wingspan_coeffs = csdl.concatenate([-span_stretch_dv, span_stretch_dv])
+    ffd_sectional_parameterization = SectionalParameterization(
+        name="ffd_sectional_parameterization",
+        parameterized_points=ffd_block.coefficients,
+        principal_parametric_dimension=1,
+    )
 
-chord_stretching_b_spline = lfs.Function(
-    space=space_of_linear_2_dof_b_splines,
-    coefficients=chord_coeffs,
-    name='chord_stretching_b_spline_coefficients'
-)
+    pitch = csdl.Variable(value=5.*np.pi/180) # pitch angle in radians
+    pitch_scaler = dv_scalers.get('pitch', 1.e1)
 
-wingspan_stretching_b_spline = lfs.Function(
-    space=space_of_linear_2_dof_b_splines,
-    coefficients=wingspan_coeffs,
-    name='wingspan_stretching_b_spline_coefficients'
-)
+    space_of_linear_2_dof_b_splines = lfs.BSplineSpace(num_parametric_dimensions=1, degree=1, coefficients_shape=(2,))
 
-parametric_b_spline_inputs = np.linspace(0.0, 1.0, num_ffd_sections).reshape((-1, 1))
-chord_stretch_sectional_parameters = chord_stretching_b_spline.evaluate(parametric_b_spline_inputs)
-wingspan_stretch_sectional_parameters = wingspan_stretching_b_spline.evaluate(parametric_b_spline_inputs)
+    if formulation in ['ar_area', 'mdf']:
+        # Formulation 1 (Implicit / MDF): Aspect Ratio (AR) and Planform Area (S)
+        aspect_ratio = csdl.Variable(shape=(1,), value=np.array([10.0]))
+        planform_area_dv = csdl.Variable(shape=(1,), value=np.array([10.0]))
+        ar_dv_scaler = dv_scalers.get('aspect_ratio', 1.e-1)
 
-sectional_parameters = SectionalParameters()
-sectional_parameters.add_stretch(axis=0, stretch=chord_stretch_sectional_parameters)
-sectional_parameters.add_translation(axis=1, translation=wingspan_stretch_sectional_parameters)
+        design_variables: dict[str, DVInfo] = {
+            'aspect_ratio': DVInfo(variable=aspect_ratio, lower=2.0, upper=15.0, scaler=ar_dv_scaler),
+        }
+        if include_pitch_dv:
+            design_variables['pitch'] = DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=pitch_scaler)
 
-ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=False)
+        # ParameterizationSolver states
+        chord_stretch_state = csdl.Variable(value=0.0)
+        span_stretch_state = csdl.Variable(value=0.0)
 
-geometry_coefficients = ffd_block.evaluate_ffd(coefficients=ffd_coefficients, plot=False)
-geometry.set_coefficients(geometry_coefficients) # type: ignore
+        chord_coeffs = csdl.expand(chord_stretch_state, (num_ffd_sections,))
+        wingspan_coeffs = csdl.concatenate([-span_stretch_state, span_stretch_state])
 
-wingspan = geometry.evaluate(leading_edge_right)[1] - geometry.evaluate(leading_edge_left)[1] # type: ignore
-chord_root = geometry.evaluate(chord_te_projections[0])[0] - geometry.evaluate(chord_le_projections[0])[0] # type: ignore
+    elif formulation == 'sand':
+        # Formulation 3 (SAND): Optimizer solves parameterization states with equality constraints
+        aspect_ratio = csdl.Variable(shape=(1,), value=np.array([10.0]))
+        ar_dv_scaler = dv_scalers.get('aspect_ratio', 1.e-1)
 
-if formulation == 'ar_area':
-    # Directly enforce Aspect Ratio and Planform Area as variables in ParameterizationSolver
+        chord_stretch_state = csdl.Variable(shape=(1,), value=np.array([0.0]))
+        span_stretch_state = csdl.Variable(shape=(1,), value=np.array([0.0]))
+        cs_scaler = dv_scalers.get('chord_stretch_state', 1.0)
+        ss_scaler = dv_scalers.get('span_stretch_state', 1.e-1)
+
+        design_variables: dict[str, DVInfo] = {
+            'aspect_ratio': DVInfo(variable=aspect_ratio, lower=2.0, upper=15.0, scaler=ar_dv_scaler),
+            'chord_stretch_state': DVInfo(variable=chord_stretch_state, lower=-0.85, upper=4.0, scaler=cs_scaler),
+            'span_stretch_state': DVInfo(variable=span_stretch_state, lower=-4.5, upper=20.0, scaler=ss_scaler),
+        }
+        if include_pitch_dv:
+            design_variables['pitch'] = DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=pitch_scaler)
+
+        chord_coeffs = csdl.expand(chord_stretch_state, (num_ffd_sections,))
+        wingspan_coeffs = csdl.concatenate([-span_stretch_state, span_stretch_state])
+
+    elif formulation == 'chord_span':
+        # Formulation 2 (Explicit): Chord stretch and Span stretch DVs
+        chord_stretch_dv = csdl.Variable(shape=(1,), value=np.array([0.0]))
+        span_stretch_dv = csdl.Variable(shape=(1,), value=np.array([0.0]))
+        cs_dv_scaler = dv_scalers.get('chord_stretch_dv', 1.0)
+        ss_dv_scaler = dv_scalers.get('span_stretch_dv', 1.e-1)
+
+        design_variables: dict[str, DVInfo] = {
+            'chord_stretch_dv': DVInfo(variable=chord_stretch_dv, lower=-0.85, upper=4.0, scaler=cs_dv_scaler),
+            'span_stretch_dv': DVInfo(variable=span_stretch_dv, lower=-4.5, upper=20.0, scaler=ss_dv_scaler),
+        }
+        if include_pitch_dv:
+            design_variables['pitch'] = DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=pitch_scaler)
+
+        chord_coeffs = csdl.expand(chord_stretch_dv, (num_ffd_sections,))
+        wingspan_coeffs = csdl.concatenate([-span_stretch_dv, span_stretch_dv])
+
+    chord_stretching_b_spline = lfs.Function(
+        space=space_of_linear_2_dof_b_splines,
+        coefficients=chord_coeffs,
+        name='chord_stretching_b_spline_coefficients'
+    )
+
+    wingspan_stretching_b_spline = lfs.Function(
+        space=space_of_linear_2_dof_b_splines,
+        coefficients=wingspan_coeffs,
+        name='wingspan_stretching_b_spline_coefficients'
+    )
+
+    parametric_b_spline_inputs = np.linspace(0.0, 1.0, num_ffd_sections).reshape((-1, 1))
+    chord_stretch_sectional_parameters = chord_stretching_b_spline.evaluate(parametric_b_spline_inputs)
+    wingspan_stretch_sectional_parameters = wingspan_stretching_b_spline.evaluate(parametric_b_spline_inputs)
+
+    sectional_parameters = SectionalParameters()
+    sectional_parameters.add_stretch(axis=0, stretch=chord_stretch_sectional_parameters)
+    sectional_parameters.add_translation(axis=1, translation=wingspan_stretch_sectional_parameters)
+
+    ffd_coefficients = ffd_sectional_parameterization.evaluate(sectional_parameters, plot=False)
+
+    geometry_coefficients = ffd_block.evaluate_ffd(coefficients=ffd_coefficients, plot=False)
+    geometry.set_coefficients(geometry_coefficients)
+
+    wingspan = geometry.evaluate(leading_edge_right)[1] - geometry.evaluate(leading_edge_left)[1]
+    chord_root = geometry.evaluate(chord_te_projections[0])[0] - geometry.evaluate(chord_le_projections[0])[0]
+
     planform_area_geom = wingspan * chord_root
     aspect_ratio_geom = wingspan / chord_root
 
-    geometry_solver = ParameterizationSolver()
-    geometry_solver.add_state(chord_stretch_state)
-    geometry_solver.add_state(span_stretch_state)
+    if formulation in ['ar_area', 'mdf']:
+        # ParameterizationSolver explicitly enforces geometry to match aspect_ratio and planform_area_dv
+        geometry_solver = ParameterizationSolver()
+        geometry_solver.add_state(chord_stretch_state)
+        geometry_solver.add_state(span_stretch_state)
 
-    geometric_variables = GeometricVariables()
-    geometric_variables.add_variable(planform_area_geom, planform_area_dv, penalty_value=None)
-    geometric_variables.add_variable(aspect_ratio_geom, aspect_ratio, penalty_value=None)
+        geometric_variables = GeometricVariables()
+        geometric_variables.add_variable(planform_area_geom, planform_area_dv, penalty_value=None)
+        geometric_variables.add_variable(aspect_ratio_geom, aspect_ratio, penalty_value=None)
 
-    geometry_solver.evaluate(geometric_variables)
+        geometry_solver.evaluate(geometric_variables)
 
-geometry.rotate(rotation_origin=geometry.evaluate(quarter_chord_center), axis_vector=np.array([0., 1., 0.]), angles=pitch, units='radians')
+    geometry.rotate(rotation_origin=geometry.evaluate(quarter_chord_center), axis_vector=np.array([0., 1., 0.]), angles=pitch, units='radians')
 
+    cruise_speed = csdl.Variable(value=1.)
+    velocity = csdl.concatenate([cruise_speed, csdl.Variable(value=0.), csdl.Variable(value=0.)])
 
+    num_nodes = 1
+    panel_mesh = geometry.evaluate(projected_panel_mesh, plot=False)
+    panel_mesh = panel_mesh.expand((1,) + panel_mesh.shape, 'ij->aij')
 
-cruise_speed = csdl.Variable(value=1.)
-# cruise_speed = csdl.Variable(value=20.)
-velocity = csdl.concatenate([cruise_speed, csdl.Variable(value=0.), csdl.Variable(value=0.)])
+    point_velocities = csdl.expand(velocity, (num_nodes,) + panel_mesh.shape[1:], 'j->iaj')
+    rho_array = csdl.Variable(shape=(num_nodes,), value=np.array([1.225]))
+    sos_array = csdl.Variable(shape=(num_nodes,), value=np.array([343.0]))
 
-# region Aerodynamic solver (panel method)
-num_nodes = 1
+    upper_skin_pts = geometry.evaluate(projected_upper_skin, plot=False)
+    lower_skin_pts = geometry.evaluate(projected_lower_skin, plot=False)
+    chord_surface_pts = 0.5 * (upper_skin_pts + lower_skin_pts)
 
-panel_mesh = geometry.evaluate(projected_panel_mesh, plot=False)
-panel_mesh = panel_mesh.expand((1,) + panel_mesh.shape, 'ij->aij')
+    chord_surface_grid = csdl.reshape(chord_surface_pts, (nx_area, ny_area, 3))
+    v_x = chord_surface_grid[1:, :-1, :] - chord_surface_grid[:-1, :-1, :]
+    v_y = chord_surface_grid[:-1, 1:, :] - chord_surface_grid[:-1, :-1, :]
+    area_vectors = csdl.cross(v_x, v_y, axis=2)
+    element_areas = csdl.norm(area_vectors, axes=(2,))
+    planform_area = csdl.sum(element_areas)
 
-point_velocities = csdl.expand(velocity, (num_nodes,) + panel_mesh.shape[1:], 'j->iaj')
-rho_array = csdl.Variable(shape=(num_nodes,), value=np.array([1.225]))
-sos_array = csdl.Variable(shape=(num_nodes,), value=np.array([343.0]))
+    pm_solver_inputs = {
+        'V_inf': -point_velocities,
+        'rho': rho_array,
+        'sos': sos_array,
+        'compressibility': True,
+        'Cp cutoff': -5.,
+        'partition_size': 1,
+        'reuse_AIC': True,
+        'ref_area': planform_area
+    }
 
-# Planform area computed from upper and lower skin wireframes:
-# 1. Evaluate matching wireframes on upper and lower wing skins to get the chord surface
-upper_skin_pts = geometry.evaluate(projected_upper_skin, plot=False)
-lower_skin_pts = geometry.evaluate(projected_lower_skin, plot=False)
-chord_surface_pts = 0.5 * (upper_skin_pts + lower_skin_pts)
+    panel_method = VortexAD.PanelMethod(
+        solver_input_dict=pm_solver_inputs,
+        skip_geometry=True
+    )
+    panel_method.insert_grid_data(
+        mesh=panel_mesh[0,:],
+        cell_adjacency_data=cell_adjacency_data,
+        TE_properties=TE_properties
+    )
 
-# 2. Reshape into structured 3D grid (nx_area, ny_area, 3)
-chord_surface_grid = csdl.reshape(chord_surface_pts, (nx_area, ny_area, 3))
+    panel_method.declare_outputs([
+        'Cp', 'L', 'Di', 'M', 'panel_forces', 'CL', 'CDi', 'CDi_Trefftz', 'CM',
+    ])
 
-# 3. Compute element edge vectors along chordwise (x) and spanwise (y) directions
-v_x = chord_surface_grid[1:, :-1, :] - chord_surface_grid[:-1, :-1, :]
-v_y = chord_surface_grid[:-1, 1:, :] - chord_surface_grid[:-1, :-1, :]
+    recorder.inline = False
+    outputs = panel_method.evaluate()
 
-# 4. Cross product of element edge vectors (v_x x v_y)
-area_vectors = csdl.cross(v_x, v_y, axis=2)
+    CL = outputs['CL']
+    CDi = outputs['CDi_Trefftz']
+    L = outputs['L']
+    Di = outputs['Di']
+    Cp = outputs['Cp']
 
-# 5. Sum of the norm of the cross product of each quad element
-element_areas = csdl.norm(area_vectors, axes=(2,))
-planform_area = csdl.sum(element_areas)
-print("Planform area:", planform_area.value)
+    dynamic_panel_centers = geometry.evaluate(projected_panel_centers, plot=False)
+    dynamic_panel_centers_right = dynamic_panel_centers[:num_right_panels, :]
+    panel_forces_right = outputs['panel_forces'][0, :num_right_panels, :]
 
-pm_solver_inputs = {
-    'V_inf': -point_velocities,
-    'rho': rho_array,
-    'sos': sos_array,
-    'compressibility': True,
-    'Cp cutoff': -5.,
-    'partition_size': 1,
-    'reuse_AIC': True,
-    # 'mesh_path': file_path+file_name, # already done externally
-    'ref_area': planform_area # does not matter bc we don't use the coefficients,
-}
-# we leave out the mesh path because we need FFD to move the mesh
+    aspect_ratio_calc = (wingspan**2) / planform_area
 
-panel_method = VortexAD.PanelMethod(
-    solver_input_dict=pm_solver_inputs,
-    skip_geometry=True # not running geometry
+    objective = CDi
+    objective.set_as_objective(scaler=obj_scaler)
+
+    if include_cl_constraint:
+        CL.set_as_constraint(equals=0.5, scaler=cl_scaler)
+
+    if formulation == 'chord_span':
+        planform_area.set_as_constraint(equals=10.0, scaler=area_scaler)
+        aspect_ratio_calc.set_as_constraint(upper=15.0, scaler=ar_scaler)
+    elif formulation == 'sand':
+        planform_area_geom.set_as_constraint(equals=10.0, scaler=area_scaler)
+        (aspect_ratio_geom - aspect_ratio).set_as_constraint(equals=0.0, scaler=ar_scaler)
+
+    for dv_info in design_variables.values():
+        dv_info.variable.set_as_design_variable(lower=dv_info.lower, upper=dv_info.upper, scaler=dv_info.scaler)
+
+    geom_coeffs = [geometry_function.coefficients for geometry_function in geometry.functions.values()]
+
+    additional_outputs_list = [
+        Di, L, CL, CDi, Cp, panel_mesh, planform_area, aspect_ratio_calc,
+        dynamic_panel_centers_right, panel_forces_right, planform_area_geom, aspect_ratio_geom
+    ] + geom_coeffs
+
+    jax_sim = csdl.experimental.JaxSimulator(
+        recorder=recorder,
+        additional_inputs=[dv_info.variable for dv_info in design_variables.values()],
+        additional_outputs=additional_outputs_list,
+        gpu=False
+    )
+
+    outputs_dict = {
+        'CL': CL,
+        'CDi': CDi,
+        'L': L,
+        'Di': Di,
+        'Cp': Cp,
+        'panel_mesh': panel_mesh,
+        'planform_area': planform_area,
+        'planform_area_geom': planform_area_geom,
+        'aspect_ratio_geom': aspect_ratio_geom,
+        'aspect_ratio_calc': aspect_ratio_calc,
+        'wingspan': wingspan,
+        'chord_root': chord_root,
+        'dynamic_panel_centers_right': dynamic_panel_centers_right,
+        'panel_forces_right': panel_forces_right,
+    }
+
+    return jax_sim, design_variables, outputs_dict, geometry, ffd_block
+
+# Default formulation when running standalone: 'chord_span' or 'ar_area'
+formulation = 'chord_span'
+jax_sim, design_variables, outputs_dict, geometry, ffd_block = build_optimization_model(
+    formulation=formulation, include_cl_constraint=True, include_pitch_dv=True
 )
-# inserting grid data from above
-panel_method.insert_grid_data(
-    mesh=panel_mesh[0,:],
-    cell_adjacency_data=cell_adjacency_data,
-    TE_properties=TE_properties
-)
-
-panel_method.declare_outputs([
-    'Cp',
-    'L',
-    'Di',
-    'M',
-    'panel_forces',
-    'CL',
-    'CDi',
-    'CDi_Trefftz',
-    'CM',
-])
-
-recorder.inline = False
-
-outputs = panel_method.evaluate()
-
-
-CL = outputs['CL']
-CDi = outputs['CDi_Trefftz']
-L = outputs['L']
-Di = outputs['Di']
-Cp = outputs['Cp']
-
-dynamic_panel_centers = geometry.evaluate(projected_panel_centers, plot=False)
-dynamic_panel_centers_right = dynamic_panel_centers[:num_right_panels, :]
-panel_forces_right = outputs['panel_forces'][0, :num_right_panels, :]
-
-# endregion Aerodynamic solver (panel method)
-
-# region Structural solver (beam model)
-# TODO: I will come back to this
-
-# endregion Structural solver (beam model)
-
-
-# Compute calculated aspect ratio from geometry (wingspan and planform area)
-aspect_ratio_calc = (wingspan**2) / planform_area
-
-# Define design variables, constraints, and objective for optimization problem
-objective = CDi
-objective.set_as_objective(scaler=1.e4)
-
-CL.set_as_constraint(equals=0.5, scaler=1.e1)
-
-# Aspect ratio inequality constraint (AR <= 15.0) for both formulations
-
-if formulation == 'chord_span':
-    # For chord and span stretch formulation (no ParameterizationSolver),
-    # keep planform area as an optimization constraint
-    planform_area.set_as_constraint(equals=10.0, scaler=1.e-1)
-    aspect_ratio_calc.set_as_constraint(upper=15.0, scaler=1.e-1)
-else:
-    # For AR and Area formulation, ParameterizationSolver explicitly enforces
-    # geometry to match aspect_ratio and planform_area_dv
-    pass
-
-for dv_info in design_variables.values():
-    dv_info.variable.set_as_design_variable(lower=dv_info.lower, upper=dv_info.upper, scaler=dv_info.scaler)
-
-geometry_coefficients = [geometry_function.coefficients for geometry_function in geometry.functions.values()]
-
-jax_sim = csdl.experimental.JaxSimulator(
-    recorder=recorder,
-    additional_inputs=[dv_info.variable for dv_info in design_variables.values()],
-    additional_outputs=[Di, L, CL, CDi, Cp, panel_mesh, planform_area, aspect_ratio_calc, dynamic_panel_centers_right, panel_forces_right] + geometry_coefficients,
-    gpu=False
-)
+CL = outputs_dict['CL']
+CDi = outputs_dict['CDi']
+L = outputs_dict['L']
+Di = outputs_dict['Di']
+Cp = outputs_dict['Cp']
+panel_mesh = outputs_dict['panel_mesh']
+planform_area = outputs_dict['planform_area']
+aspect_ratio_calc = outputs_dict['aspect_ratio_calc']
+dynamic_panel_centers_right = outputs_dict['dynamic_panel_centers_right']
+panel_forces_right = outputs_dict['panel_forces_right']
 
 # Run and plot panel method solution to make sure simulation is working
 # -- This does not need to be run for optimization, but is useful for debugging
