@@ -77,7 +77,7 @@ formulation = os.environ.get('BWB_FORMULATION', formulation)
 # 2. Mesh and design variable resolution: 'fast' or 'full'
 #   'fast' -> 5 design stations, 9 FFD sections, 1,272 aero quads (fast iteration/testing)
 #   'full' -> 8 design stations, 15 FFD sections, 2,872 aero quads (production resolution)
-resolution: Literal['fast', 'full'] = 'full'  # Options: 'fast' or 'full'
+resolution: Literal['fast', 'full'] = 'fast'  # Options: 'fast' or 'full'
 resolution = os.environ.get('BWB_RESOLUTION', resolution)
 
 # 3. Geometric Non-Interference (Geonic) payload containment mode:
@@ -85,7 +85,7 @@ resolution = os.environ.get('BWB_RESOLUTION', resolution)
 #   'oversized' -> Constrain TCP0 oversized box (8 sample points, payload_center_x DV, 0.2 m buffer)
 #   'pallets'   -> Constrain TCP0 6-pallet stack (32 sample points, pallet_stack_center_x DV, 0.2 m buffer)
 #   'both'      -> Constrain both payload cases (40-point batch, equal CG consistency constraint)
-geonic_payload_mode: str = 'none'  # Options: 'none', 'oversized', 'pallets', 'both'
+geonic_payload_mode: str = 'oversized'  # Options: 'none', 'oversized', 'pallets', 'both'
 geonic_payload_mode = os.environ.get('GEONIC_PAYLOAD_MODE', geonic_payload_mode)
 if 'GEONIC_PAYLOAD_MODE' not in os.environ and 'USE_GEONIC' in os.environ:
     geonic_payload_mode = 'oversized' if str(os.environ['USE_GEONIC']).strip() == '1' else 'none'
@@ -104,7 +104,7 @@ include_neg1g_sizing: bool = False  # Options: True or False
 # 5b. Structural wingbox depth factor:
 #   Effective structural height factor relative to OML (accounts for spar cap flange
 #   centroid recession beneath OML skins/stringers, shear lag, and internal cutouts)
-box_height_factor: float = 0.7     # Options: 0.50 - 0.70 (standard preliminary design factor)
+box_height_factor: float = 1.0     # Options: 0.50 - 0.70 (standard preliminary design factor)
 box_height_factor = float(os.environ.get('BOX_HEIGHT_FACTOR', box_height_factor))
 
 # 6. Airfoil shape & control surface options:
@@ -133,6 +133,10 @@ if viscous_drag_mode not in ('ibl', 'constant_cd0'):
 from optimization_analyses.bwb_viscous_ibl import (
     build_ibl_mesh_topology,
     evaluate_bwb_viscous_ibl,
+)
+from optimization_analyses.stratford_separation import (
+    build_stratford_topology,
+    evaluate_stratford_separation,
 )
 
 # Parse and validate geonic payload mode
@@ -522,6 +526,15 @@ ibl_topology = build_ibl_mesh_topology(
     y_drag_centers=y_drag_centers_init,
 )
 
+# Build static 2D B-spline Stratford separation topology
+stratford_topology = build_stratford_topology(
+    points=points_orig,
+    cells_dict=cells_dict,
+    num_ffd_stations=num_stations,
+    scale_factor=1.0,
+    b_tip_ref=b_tip_ref,
+)
+
 # Filter panels for right half of wing (y > 0)
 right_panel_indices = np.where(panel_centers[:, 1] > 0.0)[0]
 num_right_panels = len(right_panel_indices)
@@ -670,6 +683,9 @@ if geonic_payload_mode in {'oversized', 'both'}:
 if geonic_payload_mode in {'pallets', 'both'}:
     # Pallet stack volume-weighted CG DV
     pallet_stack_center_x = csdl.Variable(value=0.5 * scale_factor, name='pallet_stack_center_x')
+if use_geonic:
+    # Misc weight CG location as fraction of root chord (bounded equivalently to payload_cg: 0.05 to 0.95)
+    misc_cg = csdl.Variable(value=0.25, name='misc_cg')
 
 @dataclass
 class DVInfo:
@@ -692,7 +708,8 @@ twist_upper[0] = 0.0
 camber_max_percent = 6.0  # 6.0% chord max camber displacement
 camber_lower = -camber_max_percent
 camber_upper = camber_max_percent
-camber_scaler = 1.0  # Scales DVs with unit scaler (dampens aggressive optimizer camber updates)
+# camber_scaler = 1.0  # Scales DVs with unit scaler (dampens aggressive optimizer camber updates)
+camber_scaler = 1/2  # Scales DVs with unit scaler (dampens aggressive optimizer camber updates)
 
 num_chordwise_thick_dvs = 5 if include_te_thickness else 4
 thick_shape_lower = np.full((num_chordwise_thick_dvs, num_chord_stations), -50.0)  # Max -50% thickness reduction
@@ -704,7 +721,8 @@ thick_shape_upper = np.full((num_chordwise_thick_dvs, num_chord_stations), 50.0)
 if include_te_thickness:
     thick_shape_upper[-1, :] = 10.0  # Max blunt TE
 
-thick_shape_scaler = 1.0 / 10.0  # Scales [-50.0, 50.0] with 1/10 scaler (dampens aggressive thickness updates)
+# thick_shape_scaler = 1.0 / 10.0  # Scales [-50.0, 50.0] with 1/10 scaler (dampens aggressive thickness updates)
+thick_shape_scaler = 1.0 / 20.0  # Scales [-50.0, 50.0] with 1/10 scaler (dampens aggressive thickness updates)
 
 if formulation == 'ar_area':
     # Formulation 1: Cubic B-spline Target Regularization
@@ -743,6 +761,9 @@ if formulation == 'ar_area':
             variable=pallet_stack_center_x, lower=0.0, upper=10.0, scaler=1.0 / scale_factor
         )
     if use_geonic:
+        design_variables['misc_cg'] = DVInfo(
+            variable=misc_cg, lower=0.05, upper=0.95, scaler=1.e1
+        )
         planform_area_target = csdl.Variable(value=10.0 * scale_factor**2, name='planform_area_target')
         area_lower = 1.0 * scale_factor**2   # 56.25 m^2 (vs 562.5 m^2 baseline)
         area_upper = 30.0 * scale_factor**2  # 1687.5 m^2
@@ -861,6 +882,10 @@ elif formulation == 'chord_span':
     if geonic_payload_mode in {'pallets', 'both'}:
         design_variables['pallet_stack_center_x'] = DVInfo(
             variable=pallet_stack_center_x, lower=0.0, upper=10.0, scaler=1.0 / scale_factor
+        )
+    if use_geonic:
+        design_variables['misc_cg'] = DVInfo(
+            variable=misc_cg, lower=0.05, upper=0.95, scaler=1.e1
         )
     design_variables['ttop_dvs'] = DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.5, scaler=5.e1)
     design_variables['tweb_dvs'] = DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.5, scaler=5.e1)
@@ -1250,10 +1275,12 @@ if scale_factor == 1.0 or scale_factor == 1.0/np.sqrt(10.0):
     if scale_factor == 1.0/np.sqrt(10.0):
         # Fixed positive payload weight of 100.0 N (10.19 kg tactical UAV payload)
         payload_weight = csdl.Variable(value=100.0)
+        misc_weight = csdl.Variable(value=0.0)
         load_factor = csdl.Variable(value=4.0)  # 4.0g load factor for sizing maneuver
     elif scale_factor == 1.0:
         # Fixed positive payload weight of 1000.0 N
         payload_weight = csdl.Variable(value=1000.0)
+        misc_weight = csdl.Variable(value=0.0)
         load_factor = csdl.Variable(value=3.0)  # 3.0g load factor for sizing maneuver
 elif scale_factor == 7.5:
     cruise_speed = csdl.Variable(value=140.)    # This is matching normal dynamic pressure without going to altitude
@@ -1262,9 +1289,8 @@ elif scale_factor == 7.5:
     # misc_weight scaled with (q_M0.70 / q_M0.75) = (0.70/0.75)^2 to keep cruise CL consistent:
     # Total fixed weight: 500,000 lbf * (0.70/0.75)^2 = 574,933.33 lbf -> misc = 414,933.33 lbf
     # misc_weight = csdl.Variable(value=(500000. * (0.70 / 0.75)**2 - 160000.) * 4.44822)
-    misc_weight = csdl.Variable(value=6.e5)  # Total payload + misc should be roughly around 130k kg
-    # for now, just add misc weight to payload weight cause it's easier, but separate these out later
-    payload_weight = payload_weight + misc_weight
+    # misc_weight = csdl.Variable(value=6.e5)  # Total payload + misc should be roughly around 130k kg
+    misc_weight = csdl.Variable(value=1.e6)  # Miscellaneous systems / fuel weight
     load_factor = csdl.Variable(value=2.5)  # 2.5g load factor for sizing maneuver
     # load_factor = csdl.Variable(value=3.0)  # 3.0g load factor for sizing maneuver
 else:
@@ -1374,7 +1400,8 @@ local_height = 0.5 * (node_heights[:-1] + node_heights[1:])
 
 # Define wingbox cross-section along the span
 # Wingbox width is 50% of local chord; height is scaled by box_height_factor
-box_width = 0.50 * local_chord
+# box_width = 0.50 * local_chord
+box_width = 0.40 * local_chord
 box_height = box_height_factor * local_height
 
 # Evaluate B-spline thickness parameterization at element midpoints
@@ -1424,18 +1451,28 @@ if use_geonic:
     x_payload = active_inertial_cg[0]
     y_payload = active_inertial_cg[1]
     z_payload = active_inertial_cg[2]
+
+    # Misc weight CG is normalized by root chord: x_misc = x_le_root + misc_cg * root_chord
+    # Fixed in y (symmetry plane, y=0) and z (beam midplane):
+    x_misc = x_le_root + misc_cg * root_chord
+    y_misc = csdl.Variable(value=np.array([0.0]))
+    z_misc = 0.5 * (upper_beam_mesh[0, 2] + lower_beam_mesh[0, 2])
 else:
     x_payload = x_le_root + payload_cg * root_chord
     y_payload = csdl.Variable(value=np.array([0.0]))
     z_payload = 0.5 * (upper_beam_mesh[0, 2] + lower_beam_mesh[0, 2])
+    x_misc = x_payload
+    y_misc = y_payload
+    z_misc = z_payload
 
-payload_mass = payload_weight / 9.81
-W_total = structural_mass * 9.81 + payload_weight
-total_mass = structural_mass + payload_mass
+cargo_mass = payload_weight / 9.81
+misc_mass = misc_weight / 9.81
+W_total = structural_mass * 9.81 + payload_weight + misc_weight
+total_mass = structural_mass + cargo_mass + misc_mass
 
 # Dynamic composite aircraft Center of Mass (CG) updated each iteration
-x_cg = (structural_mass * x_struct + payload_mass * x_payload) / total_mass
-z_cg = (structural_mass * z_struct + payload_mass * z_payload) / total_mass
+x_cg = (structural_mass * x_struct + cargo_mass * x_payload + misc_mass * x_misc) / total_mass
+z_cg = (structural_mass * z_struct + cargo_mass * z_payload + misc_mass * z_misc) / total_mass
 r_cg = csdl.concatenate([csdl.reshape(x_cg, (1,)), csdl.reshape(y_payload, (1,)), csdl.reshape(z_cg, (1,))])
 # endregion Structural beam model geometry and Center of Mass calculation
 
@@ -1782,6 +1819,7 @@ H_strip = ibl_results['H_strip']
 H_section_upper = ibl_results['H_section_upper']
 H_section_lower = ibl_results['H_section_lower']
 H_section_both = ibl_results['H_section_both']
+H_upper_matrix = ibl_results['H_upper_matrix']
 
 if viscous_drag_mode == 'ibl':
     cd_viscous_elem = ibl_results['cd_viscous_elem']
@@ -1808,17 +1846,45 @@ if viscous_drag_mode == 'ibl':
         aggregated_H_list.append(csdl.reshape(grp_H_max, (1,)))
 
     # dv_H_stations has shape (num_stations,) -> exactly 5 in fast, 8 in full
+    # Retained as diagnostic telemetry
     dv_H_stations = csdl.concatenate(aggregated_H_list)
     dv_H_stations.name = 'dv_H_stations'
 
-    # Enforce active attachment constraint at each station sector: H <= 2.4, scaled by 0.15
-    dv_H_stations.set_as_constraint(upper=2.4, scaler=0.15)
+    # Differentiable 2D B-spline surface Stratford separation constraint
+    # Regional centers correspond to camber DV peak influences (Greville abscissae) + TE chordwise,
+    # and spanwise FFD variable stations (4 x num_stations constraints: 20 in fast, 32 in full).
+    stratford_results = evaluate_stratford_separation(
+        cp_node0=Cp[0],
+        dynamic_panel_centers=dynamic_panel_centers,
+        v_cruise=cruise_speed,
+        rho_cruise=rho_array[0],
+        mu_air=csdl.Variable(value=cruise_cond['viscosity_Pa_s']),
+        stratford_topology=stratford_topology,
+    )
+    dv_stratford_constraints = stratford_results['dv_stratford_constraints']
+    max_stratford = stratford_results['max_stratford']
+    stratford_margin = stratford_results['stratford_margin']
+    S_grid = stratford_results['S_grid']
+    S_dense_2d = stratford_results['S_dense_2d']
+
+    # Enforce active attachment constraint across all 4 x num_stations regional sectors:
+    # S <= 0.39, scaled by 1.0 / 0.39 ~ 2.564
+    dv_stratford_constraints.set_as_constraint(upper=0.39, scaler=1.0 / 0.39)
 else:
     cd_viscous_elem = CD0_base
     CD_viscous = csdl.Variable(value=CD0_base, name='CD_viscous')
     D_viscous = CD0_base * q_inf * total_strip_area
     D_viscous.name = 'D_viscous'
     dv_H_stations = csdl.Variable(value=np.full((num_stations,), 1.4), name='dv_H_stations')
+    dv_stratford_constraints = csdl.Variable(
+        value=np.full((stratford_topology['num_constraints'],), 0.20),
+        name='dv_stratford_constraints',
+    )
+    max_stratford = csdl.Variable(value=0.20, name='max_stratford')
+    stratford_margin = csdl.Variable(value=0.19, name='stratford_margin')
+    H_upper_matrix = csdl.Variable(value=np.full((20, stratford_topology['num_mesh_stations']), 1.4), name='H_upper_matrix')
+    S_grid = csdl.Variable(value=np.zeros((20, stratford_topology['num_mesh_stations'])), name='S_grid')
+    S_dense_2d = csdl.Variable(value=np.zeros((31, 41)), name='S_dense_2d')
 
 # 1. Sectional Cl drag polar bucket: regularizes planform by penalizing extreme section Cl
 k_polar = 0.010              # Curvature of polar bucket
@@ -1843,7 +1909,7 @@ cd_profile_elem = cd_viscous_elem + cd_polar_elem + cd_stall_elem
 
 # Sectional and total profile drag [N]
 # Normalized strictly by total_strip_area to prevent area-shrinkage numerical loopholes
-CD_profile = csdl.sum(cd_profile_elem * strip_area) / total_strip_area
+CD_profile = csdl.sum(cd_profile_elem * strip_area) / total_strip_area# + 0.002
 D_profile_elem = cd_profile_elem * q_inf * strip_area
 D_profile = csdl.sum(D_profile_elem)
 
@@ -1860,7 +1926,9 @@ D_total = Di_chosen + D_profile + D_wave_cruise
 
 # Reference values for scaling constraints and objective function
 payload_weight_val = float(np.asarray(payload_weight.value).flatten()[0]) if hasattr(payload_weight, 'value') else float(payload_weight)
-W_ref = 2.0 * payload_weight_val  # reference cruise weight [N] (~1.15x payload weight)
+misc_weight_val = float(np.asarray(misc_weight.value).flatten()[0]) if hasattr(misc_weight, 'value') else float(misc_weight)
+total_fixed_weight_val = payload_weight_val + misc_weight_val
+W_ref = 2.0 * total_fixed_weight_val  # reference cruise weight [N]
 D_ref = W_ref / 50. # reference drag [N] (~1/20 of payload weight if we assume L/D ~ 20)
 c_ref = scale_factor * 1.0 # Initial chord length
 
@@ -2094,6 +2162,8 @@ additional_outs = [
     theta_te_lower, H_max_ibl, ibl_attachment_margin,
     ibl_min_cp, ibl_cp_cutoff_margin, dv_H_stations, H_strip, H_section_upper,
     H_section_lower, H_section_both,
+    dv_stratford_constraints, max_stratford, stratford_margin,
+    H_upper_matrix, S_grid, S_dense_2d,
 ]
 if use_geonic:
     if geonic_payload_mode in {'oversized', 'both'}:
@@ -2123,6 +2193,11 @@ if use_geonic:
         additional_outs += [
             payload_cg_consistency,
             overall_geonic_margin,
+        ]
+    if use_geonic:
+        additional_outs += [
+            misc_cg,
+            x_misc,
         ]
 else:
     additional_outs += [payload_cg]
@@ -2293,6 +2368,11 @@ if run_pre_diagnostics:
             print(f"--- BOTH-MODE CONSISTENCY ---")
             print(f"CG Consistency (pay_x - pal_x): {cg_diff_val:+.6f} m | Status: {cg_status}")
             print(f"Overall Diagnostic Margin: {ov_margin_val:+.4f} m | Overall Status: {ov_status}")
+        if use_geonic:
+            misc_cg_val = float(np.asarray(jax_sim[misc_cg]).flatten()[0])
+            x_misc_val = float(np.asarray(jax_sim[x_misc]).flatten()[0])
+            print(f"--- MISC WEIGHT CG ---")
+            print(f"Misc Weight: {misc_weight_val:.1f} N | Misc CG: {misc_cg_val*100:.2f}% root chord (x = {x_misc_val:.3f} m)")
         print()
     else:
         print(f"Geonic Mode: DISABLED (Legacy payload_cg active)\n")
@@ -2308,8 +2388,19 @@ if run_pre_diagnostics:
     cutoff_status = "VALID" if cp_cut_margin >= 0.1 else "CUTOFF WARNING"
     print(f"================ VISCOUS DRAG & IBL ATTACHMENT DIAGNOSTIC ================")
     print(f"Mode: {viscous_drag_mode.upper()} | CD_viscous: {cd_visc_val*1e4:.2f} counts ({cd_visc_val:.6f}) | D_viscous: {d_visc_val:.1f} N")
-    print(f"H_max_ibl: {hmax_val:.4f} (Limit: 2.40) | Attachment Margin: {att_margin_val:+.4f} ({att_status})")
-    print(f"Min Cp (Node 0): {min_cp_val:.4f} (Cutoff: -5.0) | Cutoff Margin: {cp_cut_margin:+.4f} ({cutoff_status})\n")
+    print(f"H_max_ibl: {hmax_val:.4f} (Informational) | Attachment Margin: {att_margin_val:+.4f} ({att_status})")
+    print(f"Min Cp (Node 0): {min_cp_val:.4f} (Cutoff: -5.0) | Cutoff Margin: {cp_cut_margin:+.4f} ({cutoff_status})")
+
+    if viscous_drag_mode == 'ibl':
+        strat_arr = np.asarray(jax_sim[dv_stratford_constraints]).flatten()
+        max_s_diag = float(np.asarray(jax_sim[max_stratford]).flatten()[0])
+        margin_s_diag = float(np.asarray(jax_sim[stratford_margin]).flatten()[0])
+        strat_status = "ATTACHED (FEASIBLE)" if max_s_diag <= 0.39 else "SEPARATED (VIOLATED)"
+        print(f"================ 2D B-SPLINE STRATFORD SEPARATION CONSTRAINTS ({len(strat_arr)} Regions, S_crit = 0.39) ================")
+        print(f"Max Stratford S: {max_s_diag:.4f} (Limit: 0.3900) | Separation Margin: {margin_s_diag:+.4f} ({strat_status})")
+        print(f"Regional Constraints: {np.round(strat_arr, 4)}\n")
+    else:
+        print()
 
 
 if __name__ == '__main__':
@@ -2727,18 +2818,25 @@ if __name__ == '__main__':
                     plotter.add_mesh(pal_poly, color='cyan', opacity=0.35, style='wireframe', line_width=1.5)
                     plotter.add_mesh(pal_poly, color='cyan', opacity=0.12, style='surface')
 
+            if use_geonic:
+                misc_cg_val_iter = float(np.asarray(unscaled_values['misc_cg']).flatten()[0]) if 'misc_cg' in unscaled_values else float(np.asarray(jax_sim[misc_cg]).flatten()[0])
+                x_misc_val_iter = float(np.asarray(jax_sim[x_misc]).flatten()[0])
+                misc_cg_str = f" | misc_cg={misc_cg_val_iter*100:.1f}% ({x_misc_val_iter:.2f}m)"
+            else:
+                misc_cg_str = ""
+
             if geonic_payload_mode == 'oversized':
                 geonic_hud_str = f"Geonic: OVERSIZED | pay_x={pay_cx_val:.2f}m | min_clr={min_clearance:.3f}m | margin={g_margin:+.3f}m ({g_status})\n"
-                pay_cg_str = f"x_pay={xpay_val:.3f}m (pay_x={pay_cx_val:.3f}m)"
+                pay_cg_str = f"x_pay={xpay_val:.3f}m (pay_x={pay_cx_val:.3f}m){misc_cg_str}"
             elif geonic_payload_mode == 'pallets':
                 geonic_hud_str = f"Geonic: PALLETS | pal_x={pal_cx_val:.2f}m | min_clr={min_pal_clearance:.3f}m | margin={pal_margin:+.3f}m ({pal_status})\n"
-                pay_cg_str = f"x_pay={xpay_val:.3f}m (pal_x={pal_cx_val:.3f}m)"
+                pay_cg_str = f"x_pay={xpay_val:.3f}m (pal_x={pal_cx_val:.3f}m){misc_cg_str}"
             elif geonic_payload_mode == 'both':
                 cg_diff_val = float(np.asarray(jax_sim[payload_cg_consistency]).flatten()[0])
                 ov_margin_val = float(np.asarray(jax_sim[overall_geonic_margin]).flatten()[0])
                 ov_st = "FEAS" if ov_margin_val >= 0.0 else "VIOL"
                 geonic_hud_str = f"Geonic: BOTH | pay_x={pay_cx_val:.2f}m, pal_x={pal_cx_val:.2f}m (Δ={cg_diff_val:+.3f}m) | margin={ov_margin_val:+.3f}m ({ov_st})\n"
-                pay_cg_str = f"x_pay={xpay_val:.3f}m (pay={pay_cx_val:.2f}m, pal={pal_cx_val:.2f}m)"
+                pay_cg_str = f"x_pay={xpay_val:.3f}m (pay={pay_cx_val:.2f}m, pal={pal_cx_val:.2f}m){misc_cg_str}"
         else:
             pay_cg_val = float(np.asarray(unscaled_values['payload_cg']).flatten()[0]) if 'payload_cg' in unscaled_values else 0.40
             geonic_hud_str = ""
@@ -2775,6 +2873,7 @@ if __name__ == '__main__':
         plotter.camera.up = camera['viewup']
     
         frame_file = os.path.join(frames_dir, f"frame_{iteration:04d}.png")
+        os.makedirs(frames_dir, exist_ok=True)
         plotter.screenshot(frame_file)
         print(f"  Frame {iteration}/{num_iterations - 1} rendered")
     
@@ -2895,6 +2994,8 @@ if __name__ == '__main__':
                     if geonic_payload_mode == 'both':
                         cache_dict['payload_cg_consistency'] = float(np.asarray(jax_sim[payload_cg_consistency]).flatten()[0])
                         cache_dict['overall_geonic_margin'] = float(np.asarray(jax_sim[overall_geonic_margin]).flatten()[0])
+                    cache_dict['misc_cg'] = float(np.asarray(jax_sim[misc_cg]).flatten()[0])
+                    cache_dict['x_misc'] = float(np.asarray(jax_sim[x_misc]).flatten()[0])
                 else:
                     cache_dict['payload_cg'] = float(np.asarray(jax_sim[payload_cg]).flatten()[0])
 
@@ -2909,11 +3010,37 @@ if __name__ == '__main__':
                 cache_dict['ibl_min_cp'] = float(np.asarray(jax_sim[ibl_min_cp]).flatten()[0])
                 cache_dict['ibl_cp_cutoff_margin'] = float(np.asarray(jax_sim[ibl_cp_cutoff_margin]).flatten()[0])
                 cache_dict['dv_H_stations'] = np.asarray(jax_sim[dv_H_stations]).flatten()
+                cache_dict['dv_stratford_constraints'] = np.asarray(jax_sim[dv_stratford_constraints]).flatten()
+                cache_dict['max_stratford'] = float(np.asarray(jax_sim[max_stratford]).flatten()[0])
+                cache_dict['stratford_margin'] = float(np.asarray(jax_sim[stratford_margin]).flatten()[0])
                 if viscous_drag_mode == 'ibl':
                     cache_dict['H_section_upper'] = np.asarray(jax_sim[H_section_upper]).flatten()
+                    cache_dict['H_upper_matrix'] = np.asarray(jax_sim[H_upper_matrix])
+                    cache_dict['S_grid'] = np.asarray(jax_sim[S_grid])
+                    cache_dict['S_dense_2d'] = np.asarray(jax_sim[S_dense_2d])
 
                 np.savez_compressed(cache_file_opt, **cache_dict)
                 print(f"Cached panel telemetry saved to: {cache_file_opt}")
+
+                # Dedicated cache for plot_separation_diagnostics.py
+                sep_cache_opt = os.path.join(latest_folder, 'separation_diagnostics_data.npz')
+                np.savez_compressed(
+                    sep_cache_opt,
+                    dv_stratford_constraints=cache_dict['dv_stratford_constraints'],
+                    max_stratford=cache_dict['max_stratford'],
+                    stratford_margin=cache_dict['stratford_margin'],
+                    h_max_ibl=cache_dict['h_max_ibl'],
+                    ibl_attachment_margin=cache_dict['ibl_attachment_margin'],
+                    dv_H_stations=cache_dict['dv_H_stations'],
+                    H_section_upper=cache_dict.get('H_section_upper', None),
+                    H_upper_matrix=cache_dict.get('H_upper_matrix', None),
+                    S_grid=cache_dict.get('S_grid', None),
+                    S_dense_2d=cache_dict.get('S_dense_2d', None),
+                    panel_centers_right=cache_dict['panel_centers_right'],
+                    scale_factor=scale_factor,
+                    num_stations=num_stations,
+                )
+                print(f"Cached separation diagnostics telemetry saved to: {sep_cache_opt}")
 
                 # Dedicated cache for extract_wave_drag_distribution.py
                 wave_cache_opt = os.path.join(latest_folder, 'wave_drag_distribution_data.npz')
@@ -3278,6 +3405,20 @@ if __name__ == '__main__':
             print("Airfoil cross-section analysis completed automatically.")
     except Exception as e:
         print(f"Warning: automatic airfoil cross-section analysis skipped: {e}")
+    # endregion
+
+    # region Automatic Boundary Layer Separation Analysis
+    try:
+        from optimization_analyses.plot_separation_diagnostics import plot_separation_diagnostics
+        plot_separation_diagnostics(
+            output_folder=latest_folder,
+            artifact_dir=artifact_dir,
+            jax_sim=jax_sim,
+            main_script=sys.modules.get('__main__'),
+        )
+        print("Automatic boundary layer separation analysis completed successfully.")
+    except Exception as exc:
+        print(f"Warning: automatic separation diagnostics failed: {exc}")
     # endregion
     
     # endregion Plot Summary Figure

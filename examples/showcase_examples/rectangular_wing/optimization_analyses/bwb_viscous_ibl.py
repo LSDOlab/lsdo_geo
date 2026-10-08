@@ -342,7 +342,9 @@ def evaluate_bwb_viscous_ibl(
     # Local chordwise smooth-max per IBL station over upper and lower surfaces
     # Reshaping to (20, num_stations) allows chordwise smooth-max along axis 0
     H_upper_matrix = csdl.reshape(csdl.concatenate(H_upper_steps), (20, num_stations))
+    H_upper_matrix.name = 'H_upper_matrix'
     H_lower_matrix = csdl.reshape(csdl.concatenate(H_lower_steps), (20, num_stations))
+    H_lower_matrix.name = 'H_lower_matrix'
     H_section_upper = csdl.maximum(H_upper_matrix, axes=(0,), rho=20.0)
     H_section_upper.name = 'H_section_upper'
     H_section_lower = csdl.maximum(H_lower_matrix, axes=(0,), rho=20.0)
@@ -384,6 +386,7 @@ def evaluate_bwb_viscous_ibl(
         'ibl_cp_cutoff_margin': ibl_cp_cutoff_margin,
         'theta_te_upper': theta_te_upper,
         'theta_te_lower': theta_te_lower,
+        'H_upper_matrix': H_upper_matrix,
         'H_section_upper': H_section_upper,
         'H_section_lower': H_section_lower,
         'H_section_both': H_section_both,

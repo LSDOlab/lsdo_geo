@@ -321,7 +321,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 elif name == 'span_stretch_dv':
                     dv_dict[name] = x_opt[curr : curr + 1] * scale_factor
                     curr += 1
-                elif name in ['pitch', 'pitch_ss', 'pitch_neg1g', 'payload_cg']:
+                elif name in ['pitch', 'pitch_ss', 'pitch_neg1g', 'payload_cg', 'misc_cg']:
                     dv_dict[name] = x_opt[curr : curr + 1] / 10.0
                     curr += 1
                 elif name in ['payload_center_x', 'pallet_stack_center_x']:
@@ -419,6 +419,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 'payload_center_x': dv_dict.get('payload_center_x', None),
                 'pallet_stack_center_x': dv_dict.get('pallet_stack_center_x', None),
                 'payload_cg': dv_dict.get('payload_cg', np.array([0.4])),
+                'misc_cg': dv_dict.get('misc_cg', None),
                 'camber_dvs': dv_dict.get('camber_dvs', np.zeros((3, num_chord_stations))),
                 'thickness_shape_dvs': dv_dict.get('thickness_shape_dvs', None),
                 'elevator_angle': dv_dict.get('elevator_angle', 0.0),
@@ -441,6 +442,8 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 print(f"  Payload Center x (m) : {float(parsed['payload_center_x'][0]):.3f}")
             if 'pallet_stack_center_x' in dv_dict:
                 print(f"  Pallet Stack x (m)   : {float(parsed['pallet_stack_center_x'][0]):.3f}")
+            if 'misc_cg' in dv_dict:
+                print(f"  Misc Weight CG       : {float(parsed['misc_cg'][0])*100:.1f}% root chord")
             return parsed
         else:
             include_camber = 'camber_dvs' in dv_dict
@@ -473,6 +476,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 'pitch': dv_dict.get('pitch', np.array([0.0])),
                 'pitch_ss': dv_dict.get('pitch_ss', np.array([0.0])),
                 'payload_cg': dv_dict.get('payload_cg', np.array([0.4])),
+                'misc_cg': dv_dict.get('misc_cg', None),
                 'payload_center_x': dv_dict.get('payload_center_x', None),
                 'pallet_stack_center_x': dv_dict.get('pallet_stack_center_x', None),
                 'ttop_dvs': dv_dict.get('ttop_dvs', np.full(num_stations, 0.001)),
@@ -497,6 +501,8 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 print(f"  Payload Center x (m) : {float(parsed['payload_center_x'][0]):.3f}")
             if 'pallet_stack_center_x' in dv_dict:
                 print(f"  Pallet Stack x (m)   : {float(parsed['pallet_stack_center_x'][0]):.3f}")
+            if 'misc_cg' in dv_dict:
+                print(f"  Misc Weight CG       : {float(parsed['misc_cg'][0])*100:.1f}% root chord")
             return parsed
 
     # 3. Fallback heuristic detection from vector length if dv_names is not available
