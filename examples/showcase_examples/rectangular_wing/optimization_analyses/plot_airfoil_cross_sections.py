@@ -45,6 +45,7 @@ pickle.load = lambda f, **kwargs: CompatUnpickler(f, **kwargs).load()
 
 import csdl_alpha as csdl
 import lsdo_function_spaces as lfs
+lfs.num_workers = 1
 import lsdo_geo
 from lsdo_geo import (
     import_geometry,

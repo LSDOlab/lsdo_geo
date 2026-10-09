@@ -9,6 +9,8 @@ from typing import Any
 
 import numpy as np
 
+_trapezoid = getattr(np, 'trapezoid', getattr(np, 'trapz', None))
+
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
@@ -32,7 +34,7 @@ def _curve_on_grid(x, values, b, grid, total):
     eta = np.concatenate(([0.0], eta, [1.0]))
     values = np.concatenate(([values[0]], values, [0.0]))
     curve = np.interp(grid, eta, values)
-    integral = b * np.trapz(curve, grid)
+    integral = b * _trapezoid(curve, grid)
     if not np.isfinite(integral) or integral <= 0.0:
         raise ValueError("sectional loading has a non-positive integral")
     return curve * (total / integral)
@@ -122,14 +124,14 @@ def extract_signed_wake_loading(panel_mesh, mu_w, te_edges):
 
 
 def _relative_l2(reference, candidate, b):
-    denominator = b * np.trapz(reference ** 2, dx=1.0 / (reference.size - 1))
+    denominator = b * _trapezoid(reference ** 2, dx=1.0 / (reference.size - 1))
     if not np.isfinite(denominator) or denominator <= 0.0:
         raise ValueError("reference loading has zero L2 norm")
-    return float(np.sqrt(b * np.trapz((reference - candidate) ** 2, dx=1.0 / (reference.size - 1)) / denominator))
+    return float(np.sqrt(b * _trapezoid((reference - candidate) ** 2, dx=1.0 / (reference.size - 1)) / denominator))
 
 
 def _shape_curve(curve, b):
-    total = b * np.trapz(curve, dx=1.0 / (curve.size - 1))
+    total = b * _trapezoid(curve, dx=1.0 / (curve.size - 1))
     if not np.isfinite(total) or abs(total) <= 1e-12:
         raise ValueError("sectional loading has a zero signed integral")
     return curve / total
@@ -156,7 +158,7 @@ class WakeLoadConsistencyHistory:
             pressure = _curve_on_grid(yp, dp, b, self.eta, pressure_lift)
             wake = _curve_on_grid(yw, dw, b, self.eta, 1.0) * pressure_lift
             difference = pressure - wake
-            denominator = b * np.trapz(pressure ** 2, self.eta)
+            denominator = b * _trapezoid(pressure ** 2, self.eta)
             wake_lift_incomp = float(rho_inf * velocity_inf * wake_measure)
             beta = 1.0
             if sound_speed is not None and float(sound_speed) > 0.0:
@@ -179,7 +181,7 @@ class WakeLoadConsistencyHistory:
                 # Exact solver value: L_incomp / (L_wake + 1e-8), before squaring.
                 trefftz_lift_ratio_correction=solver_lift_ratio,
                 reconstructed_lift_ratio_correction=reconstructed_lift_ratio,
-                mismatch_l2=float(np.sqrt(b * np.trapz(difference ** 2, self.eta) / denominator)),
+                mismatch_l2=float(np.sqrt(b * _trapezoid(difference ** 2, self.eta) / denominator)),
                 mismatch_max=float(np.max(np.abs(difference)) / np.max(np.abs(pressure))),
                 pressure_curve=pressure,
                 wake_curve=wake,
@@ -260,8 +262,8 @@ class WakeLoadConsistencyHistory:
         h2, l2 = ax_right.get_legend_handles_labels()
         ax_hist.legend(h1 + h2, l1 + l2, loc="best")
         if final["valid"]:
-            p_excess = np.trapz(np.maximum(final["pressure_curve"] - final["wake_curve"], 0.0), self.eta)
-            w_excess = np.trapz(np.maximum(final["wake_curve"] - final["pressure_curve"], 0.0), self.eta)
+            p_excess = _trapezoid(np.maximum(final["pressure_curve"] - final["wake_curve"], 0.0), self.eta)
+            w_excess = _trapezoid(np.maximum(final["wake_curve"] - final["pressure_curve"], 0.0), self.eta)
             dominant = "pressure loading exceeds wake loading" if p_excess >= w_excess else "wake loading exceeds pressure loading"
             ax_load.text(0.02, 0.96, f"Final L2 mismatch = {final['mismatch_l2']:.3g}; {dominant}", transform=ax_load.transAxes, va="top")
         else:

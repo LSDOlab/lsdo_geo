@@ -20,6 +20,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import CubicSpline
 
+_trapezoid = getattr(np, 'trapezoid', getattr(np, 'trapz', None))
+
 # Compatibility shim for stored geometry caches pickled under NumPy 2.x
 if 'numpy._core' not in sys.modules:
     sys.modules['numpy._core'] = np.core
@@ -129,7 +131,7 @@ def compute_fourier_trefftz(spl_Lc, b_tip, num_terms=15):
     n_odd = np.arange(1, 2 * num_terms, 2)
     A = []
     for n in n_odd:
-        val = (2.0 / np.pi) * np.trapz(dL * np.sin(n * theta), theta)
+        val = (2.0 / np.pi) * _trapezoid(dL * np.sin(n * theta), theta)
         A.append(val)
     A = np.array(A)
     if A[0] <= 1e-12:
