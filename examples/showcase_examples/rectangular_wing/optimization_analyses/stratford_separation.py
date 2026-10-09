@@ -16,7 +16,7 @@ from .bwb_viscous_ibl import build_ibl_mesh_topology, sp_floor
 
 # Numerical constants
 S_CRIT = 0.39            # Canonical Stratford turbulent separation threshold
-RHO_SMOOTH_MAX = 30.0   # Sharpness for smooth maximum aggregations
+RHO_SMOOTH_MAX = 50.0   # Sharpness for smooth maximum aggregations
 NU_DENSE = 31           # Chordwise dense evaluation points
 NV_DENSE = 41           # Spanwise dense evaluation points
 N_CP_U = 6              # Chordwise control points (degree 2)
@@ -184,6 +184,7 @@ def evaluate_stratford_separation(
     rho_cruise: csdl.Variable,
     mu_air: csdl.Variable,
     stratford_topology: Dict[str, Any],
+    rho_smooth_max: float = RHO_SMOOTH_MAX,
 ) -> Dict[str, csdl.Variable]:
     """Evaluate CSDL-native Stratford separation criterion and 2D regional constraints.
 
@@ -201,6 +202,8 @@ def evaluate_stratford_separation(
         Dynamic air viscosity [Pa*s].
     stratford_topology : dict
         Static topology dictionary from build_stratford_topology.
+    rho_smooth_max : float, optional
+        Kreisselmeier-Steinhauser sharpness factor for smooth-max aggregations (default 50.0).
 
     Returns
     -------
@@ -231,7 +234,7 @@ def evaluate_stratford_separation(
     centers_upper = centers_paths[0]  # Shape (num_mesh_stations, 20, 3)
 
     # Station suction peak (minimum Cp) and normalized pressure recovery
-    cp_min_st = -csdl.maximum(-cp_upper, axes=(1,), rho=RHO_SMOOTH_MAX)
+    cp_min_st = -csdl.maximum(-cp_upper, axes=(1,), rho=rho_smooth_max)
     cp_min_2d = csdl.expand(cp_min_st, (num_mesh_stations, 20), 'j->ji')
     cp_rec = sp_floor(cp_upper - cp_min_2d, 0.0, 50.0) / sp_floor(1.0 - cp_min_2d, 0.5, 50.0)
 
@@ -264,7 +267,7 @@ def evaluate_stratford_separation(
     S_cum_list = [csdl.reshape(S_list[0], (1, num_mesh_stations))]
     for k in range(1, 20):
         sub = csdl.concatenate([csdl.reshape(s, (1, num_mesh_stations)) for s in S_list[:k + 1]], axis=0)
-        m = csdl.maximum(sub, axes=(0,), rho=RHO_SMOOTH_MAX)
+        m = csdl.maximum(sub, axes=(0,), rho=rho_smooth_max)
         S_cum_list.append(csdl.reshape(m, (1, num_mesh_stations)))
 
     # S_grid has shape (20, num_mesh_stations) -> 20 chordwise, num_mesh_stations spanwise
@@ -291,14 +294,14 @@ def evaluate_stratford_separation(
     for us in u_slices:
         for vs in v_slices:
             cell_sub = S_dense_2d[us, vs]
-            cell_max = csdl.maximum(cell_sub, axes=(0, 1), rho=RHO_SMOOTH_MAX)
+            cell_max = csdl.maximum(cell_sub, axes=(0, 1), rho=rho_smooth_max)
             constrs.append(csdl.reshape(cell_max, (1,)))
 
     dv_stratford_constraints = csdl.concatenate(constrs)
     dv_stratford_constraints.name = 'dv_stratford_constraints'
 
     # Global maximum Stratford diagnostic and margin
-    max_stratford = csdl.maximum(dv_stratford_constraints, axes=(0,), rho=RHO_SMOOTH_MAX)
+    max_stratford = csdl.maximum(dv_stratford_constraints, axes=(0,), rho=rho_smooth_max)
     max_stratford.name = 'max_stratford'
     stratford_margin = S_CRIT - max_stratford
     stratford_margin.name = 'stratford_margin'

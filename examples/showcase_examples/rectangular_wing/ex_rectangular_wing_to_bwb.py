@@ -118,6 +118,18 @@ induced_drag_objective: Literal['trefftz', 'fourier', 'mixed'] = 'mixed'  # Opti
 include_cl_polar: bool = False        # Apply quadratic drag polar bucket k_polar * (Cl - Cl_ideal)^2
 include_stall_drag: bool = True       # Apply smooth aerodynamic stall penalty when Cl > Cl_crit
 
+# 7b. Stall / boundary-layer separation model:
+#   'cl'                -> Empirical sectional Cl_crit / softplus stall penalty
+#   'stratford_closure' -> Principled Stratford separation closure & reconciled Trefftz wake drag
+stall_model: Literal['cl', 'stratford_closure'] = 'stratford_closure'
+stall_model = os.environ.get('STALL_MODEL', stall_model)
+if stall_model not in ('cl', 'stratford_closure'):
+    raise ValueError(f"Unknown stall_model: '{stall_model}'. Must be 'cl' or 'stratford_closure'.")
+
+enforce_stratford_constraint: bool = True
+if 'ENFORCE_STRATFORD_CONSTRAINT' in os.environ:
+    enforce_stratford_constraint = os.environ.get('ENFORCE_STRATFORD_CONSTRAINT', '1').strip() == '1'
+
 # 8. Scale factor & warm start:
 scale_factor: float = 7.5             # Scale factor (7.5 for 50 m full-scale BWB; 1.0 for wind-tunnel scale)
 warm_start: bool = False              # Warm start DVs from prior run
@@ -130,6 +142,17 @@ run_pre_diagnostics: bool = True      # Run initial JAX evaluation and print com
 if viscous_drag_mode not in ('ibl', 'constant_cd0'):
     raise ValueError(f"Unknown viscous_drag_mode: '{viscous_drag_mode}'. Must be 'ibl' or 'constant_cd0'.")
 
+if stall_model == 'stratford_closure':
+    if viscous_drag_mode != 'ibl':
+        raise ValueError(
+            f"stall_model='stratford_closure' requires viscous_drag_mode='ibl' (got '{viscous_drag_mode}')."
+        )
+    if induced_drag_objective == 'fourier':
+        raise ValueError(
+            "stall_model='stratford_closure' is incompatible with induced_drag_objective='fourier'. "
+            "The stall closure model requires a wake-based Trefftz calculation ('trefftz' or 'mixed')."
+        )
+
 from optimization_analyses.bwb_viscous_ibl import (
     build_ibl_mesh_topology,
     evaluate_bwb_viscous_ibl,
@@ -137,6 +160,10 @@ from optimization_analyses.bwb_viscous_ibl import (
 from optimization_analyses.stratford_separation import (
     build_stratford_topology,
     evaluate_stratford_separation,
+)
+from optimization_analyses.stall_closure import (
+    build_stall_closure_topology,
+    evaluate_stall_closure,
 )
 
 # Parse and validate geonic payload mode
@@ -534,6 +561,17 @@ stratford_topology = build_stratford_topology(
     scale_factor=1.0,
     b_tip_ref=b_tip_ref,
 )
+
+# Build static stall closure topology (shares Stratford & IBL topology)
+if stall_model == 'stratford_closure':
+    stall_closure_topology = build_stall_closure_topology(
+        points=points_orig,
+        cells_dict=cells_dict,
+        te_edges=np.asarray(TE_properties[2]),
+        num_ffd_stations=num_stations,
+        scale_factor=1.0,
+        b_tip_ref=b_tip_ref,
+    )
 
 # Filter panels for right half of wing (y > 0)
 right_panel_indices = np.where(panel_centers[:, 1] > 0.0)[0]
@@ -1516,6 +1554,10 @@ panel_method.declare_outputs([
     'lift_ratio',
     'CM',
     'mu_w',
+    'V_mag',
+    'panel_area',
+    'panel_normal',
+    'wake_dict',
 ])
 
 recorder.inline = False
@@ -1545,6 +1587,35 @@ panel_forces_right_ss = outputs['panel_forces'][2, :num_right_panels, :] # shape
 if include_neg1g_sizing:
     panel_forces_right_neg1g = outputs['panel_forces'][3, :num_right_panels, :] # shape (num_right_panels, 3) from Node 3 (-1.0g push-down)
 
+# Structural sizing pull-up maneuver stall closure evaluation
+if stall_model == 'stratford_closure':
+    stall_ss = evaluate_stall_closure(
+        v_mag=outputs['V_mag'][2],
+        panel_forces_inviscid_right=panel_forces_right_ss,
+        l_inviscid=L[2],
+        m_inviscid=M[2],
+        dynamic_panel_centers=dynamic_panel_centers,
+        panel_normals=outputs['panel_normal'][0],
+        panel_areas=outputs['panel_area'][0],
+        mu_w_inviscid=mu_w[2:3],
+        wake_dict=outputs['wake_dict'],
+        te_edges=np.asarray(TE_properties[2]),
+        v_inf=sizing_speed,
+        rho=rho_array[2],
+        mach=atm_mach_numbers[2],
+        q_inf=0.5 * rho_array[2] * (sizing_speed ** 2),
+        cg_ref=r_cg,
+        strip_tc=None,
+        strip_areas=None,
+        stall_topology=stall_closure_topology,
+    )
+    panel_forces_ss_active = stall_ss['panel_forces_corrected_right']
+    f_attached_ss = stall_ss['f_attached']
+    f_attached_min_ss = stall_ss['f_attached_min']
+    panel_forces_corr_ss = stall_ss['panel_forces_corrected_right']
+else:
+    panel_forces_ss_active = panel_forces_right_ss
+
 # Lifting-line Fourier induced drag calculation from cruise vertical panel forces
 F_z_cruise = panel_forces_right_cruise[:, 2]
 T_fourier_var = csdl.Variable(value=T_fourier_panel)
@@ -1561,11 +1632,11 @@ Di_Fourier = CDi_Fourier * 0.5 * rho_array[0] * (cruise_speed ** 2) * planform_a
 W_var = csdl.Variable(value=W_matrix)
 
 # 1. Force & Moment Mapping for Structural Sizing Case
-F_node = csdl.matmat(W_var, panel_forces_right_ss)
+F_node = csdl.matmat(W_var, panel_forces_ss_active)
 
 B_expand = csdl.expand(beam_mesh, (num_beam_nodes, num_right_panels, 3), 'nj->nij')
 C_expand = csdl.expand(dynamic_panel_centers_right, (num_beam_nodes, num_right_panels, 3), 'ij->nij')
-F_expand = csdl.expand(panel_forces_right_ss, (num_beam_nodes, num_right_panels, 3), 'ij->nij')
+F_expand = csdl.expand(panel_forces_ss_active, (num_beam_nodes, num_right_panels, 3), 'ij->nij')
 W_expand = csdl.expand(W_var, (num_beam_nodes, num_right_panels, 3), 'ni->nij')
 
 r = C_expand - B_expand
@@ -1869,7 +1940,8 @@ if viscous_drag_mode == 'ibl':
 
     # Enforce active attachment constraint across all 4 x num_stations regional sectors:
     # S <= 0.39, scaled by 1.0 / 0.39 ~ 2.564
-    dv_stratford_constraints.set_as_constraint(upper=0.39, scaler=1.0 / 0.39)
+    if enforce_stratford_constraint:
+        dv_stratford_constraints.set_as_constraint(upper=0.39, scaler=1.0 / 0.39)
 else:
     cd_viscous_elem = CD0_base
     CD_viscous = csdl.Variable(value=CD0_base, name='CD_viscous')
@@ -1891,38 +1963,109 @@ k_polar = 0.010              # Curvature of polar bucket
 cl_ideal = 0.50              # Design cruise lift coefficient
 cd_polar_elem = k_polar * ((cl_local_elem - cl_ideal) ** 2) if include_cl_polar else 0.0
 
-# 2. Unified aerodynamic section stall parameters (applicable to all flight conditions)
-cl_crit = 1.40               # Critical section lift coefficient before stall onset
-delta_cl_ref = 0.25          # Scaling width for post-stall transition
-beta_cl_stall = 40.0         # Softplus transition sharpness
-k_stall_drag = 0.20          # Stall drag scaling factor (cruise)
-k_stall_lift = 0.35          # Stall lift deficit scaling factor (cruise & maneuver)
+if stall_model == 'stratford_closure':
+    # Evaluate cruise stall closure (Node 0)
+    stall_cruise = evaluate_stall_closure(
+        v_mag=outputs['V_mag'][0],
+        panel_forces_inviscid_right=panel_forces_right_cruise,
+        l_inviscid=L[0],
+        m_inviscid=M[0],
+        dynamic_panel_centers=dynamic_panel_centers,
+        panel_normals=outputs['panel_normal'][0],
+        panel_areas=outputs['panel_area'][0],
+        mu_w_inviscid=mu_w[0:1],
+        wake_dict=outputs['wake_dict'],
+        te_edges=np.asarray(TE_properties[2]),
+        v_inf=cruise_speed,
+        rho=rho_array[0],
+        mach=atm_mach_numbers[0],
+        q_inf=q_inf,
+        cg_ref=r_cg,
+        strip_tc=strip_tc,
+        strip_areas=strip_area,
+        stall_topology=stall_closure_topology,
+    )
+    L_corr_cruise = stall_cruise['lift_corrected']
+    pitch_moment = stall_cruise['pitch_moment_corrected']
+    panel_forces_corr_cruise = stall_cruise['panel_forces_corrected_right']
+    Di_Trefftz_reconciled = stall_cruise['Di_Trefftz_reconciled']
+    CDi_Trefftz_reconciled = Di_Trefftz_reconciled / (q_inf * planform_area)
+    CDi_Trefftz_reconciled.name = 'CDi_Trefftz_reconciled'
+    D_separation_cruise = stall_cruise['D_separation']
+    f_attached_cruise = stall_cruise['f_attached']
+    f_attached_min_cruise = stall_cruise['f_attached_min']
+    k_reconcile_cruise = stall_cruise['k_reconcile']
+    res_wake_lift_cruise = stall_cruise['res_wake_lift']
+    mu_w_stall_cruise = stall_cruise['mu_w_stall']
 
-cl_abs = csdl.absolute(cl_local_elem)
-delta_cl = cl_abs - cl_crit
-softplus_cl_val = (1.0 / beta_cl_stall) * csdl.softplus(beta_cl_stall * delta_cl)
-cd_stall_elem = k_stall_drag * ((softplus_cl_val / delta_cl_ref) ** 2) if include_stall_drag else 0.0
+    # Zero out legacy empirical stall parameters and penalties
+    cl_crit = 1.40
+    k_stall_drag = 0.0
+    k_stall_lift = 0.0
+    cd_stall_elem = 0.0
+    cl_stall_loss_elem = 0.0 * cl_local_elem
+    CL_loss_cruise = csdl.Variable(value=0.0)
+    L_loss_cruise = csdl.Variable(value=0.0)
 
-# Total profile drag coefficient per strip
-cd_profile_elem = CD0_base + cd_polar_elem + cd_stall_elem
-cd_profile_elem = cd_viscous_elem + cd_polar_elem + cd_stall_elem
+    cd_profile_elem = cd_viscous_elem + cd_polar_elem
+    CD_profile = csdl.sum(cd_profile_elem * strip_area) / total_strip_area
+    D_profile_elem = cd_profile_elem * q_inf * strip_area
+    D_profile = csdl.sum(D_profile_elem)
 
-# Sectional and total profile drag [N]
-# Normalized strictly by total_strip_area to prevent area-shrinkage numerical loopholes
-CD_profile = csdl.sum(cd_profile_elem * strip_area) / total_strip_area# + 0.002
-D_profile_elem = cd_profile_elem * q_inf * strip_area
-D_profile = csdl.sum(D_profile_elem)
+    lift_effective_cruise = L_corr_cruise
 
-# Sectional lift deficit penalty for cruise
-sign_cl = cl_local_elem / (cl_abs + 1.e-6)
-cl_stall_loss_elem = k_stall_lift * (softplus_cl_val / delta_cl_ref) if include_stall_drag else 0.0 * cl_local_elem
-CL_loss_cruise = csdl.sum(cl_stall_loss_elem * sign_cl * strip_area) / total_strip_area
-L_loss_cruise = csdl.sum(cl_stall_loss_elem * sign_cl * q_inf * strip_area)
-lift_effective_cruise = L[0] - L_loss_cruise
+    CD_separation_cruise = D_separation_cruise / (q_inf * planform_area)
+    if induced_drag_objective == 'mixed':
+        CDi_active = csdl.maximum(CDi_Fourier, CDi_Trefftz_reconciled, rho=2.*1.e3)
+        Di_chosen = csdl.maximum(Di_Fourier, Di_Trefftz_reconciled, rho=2.*1.e3)
+    else:
+        CDi_active = CDi_Trefftz_reconciled
+        Di_chosen = Di_Trefftz_reconciled
 
-# Total aircraft drag: Induced Drag + Strip-Wise Profile & Stall Drag + Transonic Wave Drag
-Di_chosen = Di_Fourier if induced_drag_objective == 'fourier' else Di_Trefftz
-D_total = Di_chosen + D_profile + D_wave_cruise
+    CD_active = CDi_active + CD_profile + CD_separation_cruise + CD_wave_cruise
+    D_total = Di_chosen + D_profile + D_separation_cruise + D_wave_cruise
+
+else:
+    # 2. Unified aerodynamic section stall parameters (applicable to all flight conditions)
+    cl_crit = 1.40               # Critical section lift coefficient before stall onset
+    delta_cl_ref = 0.25          # Scaling width for post-stall transition
+    beta_cl_stall = 40.0         # Softplus transition sharpness
+    k_stall_drag = 0.20          # Stall drag scaling factor (cruise)
+    k_stall_lift = 0.35          # Stall lift deficit scaling factor (cruise & maneuver)
+
+    cl_abs = csdl.absolute(cl_local_elem)
+    delta_cl = cl_abs - cl_crit
+    softplus_cl_val = (1.0 / beta_cl_stall) * csdl.softplus(beta_cl_stall * delta_cl)
+    cd_stall_elem = k_stall_drag * ((softplus_cl_val / delta_cl_ref) ** 2) if include_stall_drag else 0.0
+
+    # Total profile drag coefficient per strip
+    cd_profile_elem = cd_viscous_elem + cd_polar_elem + cd_stall_elem
+
+    # Sectional and total profile drag [N]
+    # Normalized strictly by total_strip_area to prevent area-shrinkage numerical loopholes
+    CD_profile = csdl.sum(cd_profile_elem * strip_area) / total_strip_area
+    D_profile_elem = cd_profile_elem * q_inf * strip_area
+    D_profile = csdl.sum(D_profile_elem)
+
+    # Sectional lift deficit penalty for cruise
+    sign_cl = cl_local_elem / (cl_abs + 1.e-6)
+    cl_stall_loss_elem = k_stall_lift * (softplus_cl_val / delta_cl_ref) if include_stall_drag else 0.0 * cl_local_elem
+    CL_loss_cruise = csdl.sum(cl_stall_loss_elem * sign_cl * strip_area) / total_strip_area
+    L_loss_cruise = csdl.sum(cl_stall_loss_elem * sign_cl * q_inf * strip_area)
+    lift_effective_cruise = L[0] - L_loss_cruise
+
+    # Total aircraft drag: Induced Drag + Strip-Wise Profile & Stall Drag + Transonic Wave Drag
+    Di_chosen = Di_Fourier if induced_drag_objective == 'fourier' else Di_Trefftz
+    D_total = Di_chosen + D_profile + D_wave_cruise
+
+    if induced_drag_objective == 'fourier':
+        CD_active = CDi_Fourier + CD_profile + CD_wave_cruise
+    elif induced_drag_objective == 'mixed':
+        CD_active = csdl.maximum(CDi_Fourier, CDi[0], rho=2.*1.e3) + CD_profile + CD_wave_cruise
+    else:
+        CD_active = CDi[0] + CD_profile + CD_wave_cruise
+
+    pitch_moment = M[0, 1]
 
 # Reference values for scaling constraints and objective function
 payload_weight_val = float(np.asarray(payload_weight.value).flatten()[0]) if hasattr(payload_weight, 'value') else float(payload_weight)
@@ -1932,15 +2075,6 @@ W_ref = 2.0 * total_fixed_weight_val  # reference cruise weight [N]
 D_ref = W_ref / 50. # reference drag [N] (~1/20 of payload weight if we assume L/D ~ 20)
 c_ref = scale_factor * 1.0 # Initial chord length
 
-# Set active optimization objective based on induced_drag_objective toggle:
-# Physical drag force objective: D = 0.5 * rho * V^2 * S * CD
-if induced_drag_objective == 'fourier':
-    CD_active = CDi_Fourier + CD_profile + CD_wave_cruise
-elif induced_drag_objective == 'mixed':
-    CD_active = csdl.maximum(CDi_Fourier, CDi[0], rho=2.*1.e3) + CD_profile + CD_wave_cruise
-else:
-    CD_active = CDi[0] + CD_profile + CD_wave_cruise
-
 # D_total in Newtons = 0.5 * rho * V^2 * S * CD
 objective = 0.5 * rho_array[0] * (cruise_speed ** 2) * planform_area * CD_active
 objective.set_as_objective(scaler=1.0 / D_ref)
@@ -1948,12 +2082,8 @@ objective.set_as_objective(scaler=1.0 / D_ref)
 # L = W constraint (Node 0: cruise condition)
 lift_trim = lift_effective_cruise - W_total
 lift_trim.set_as_constraint(equals=0.0, scaler=1.0 / (5*W_ref))
-# lift_trim = CL[0]# - CL_loss_cruise
-# lift_trim.set_as_constraint(equals=0.5, scaler=2.)
 
 # Pitch / Moment trim constraint: My = 0 about dynamic center of mass (x_cg)
-
-pitch_moment = M[0, 1]
 pitch_trim = pitch_moment
 pitch_trim.set_as_constraint(equals=0.0, scaler=1.0 / (W_ref * c_ref))
 
@@ -1968,19 +2098,25 @@ lift_prime_drag_ss = csdl.matvec(csdl.Variable(value=M_interp_drag), lift_prime_
 q_inf_ss = 0.5 * rho_array[2] * (sizing_speed ** 2)
 cl_local_elem_ss = lift_prime_drag_ss / (q_inf_ss * local_chord_drag)
 
-# Aerodynamic stall lift loss penalty during sizing maneuver (unified parameters):
-cl_abs_ss = csdl.absolute(cl_local_elem_ss)
-delta_cl_ss = cl_abs_ss - cl_crit
-softplus_cl_val_ss = (1.0 / beta_cl_stall) * csdl.softplus(beta_cl_stall * delta_cl_ss)
-cl_stall_loss_ss = k_stall_lift * (softplus_cl_val_ss / delta_cl_ref)
-sign_cl_ss = cl_local_elem_ss / (cl_abs_ss + 1.e-6)
-
 # Preserve geometric alpha_local_ss for reference / inspection
 alpha_local_ss = alpha_local_elem + dalpha_ss
 
-# Total lift deficit across both wings during sizing maneuver:
-L_loss_ss = csdl.sum(cl_stall_loss_ss * sign_cl_ss * q_inf_ss * strip_area)
-lift_effective_ss = L[2] - L_loss_ss
+if stall_model == 'stratford_closure':
+    # Sizing pull-up maneuver lift from stall_ss
+    cl_stall_loss_ss = 0.0 * cl_local_elem_ss
+    L_loss_ss = csdl.Variable(value=0.0)
+    lift_effective_ss = stall_ss['lift_corrected']
+else:
+    # Aerodynamic stall lift loss penalty during sizing maneuver (unified parameters):
+    cl_abs_ss = csdl.absolute(cl_local_elem_ss)
+    delta_cl_ss = cl_abs_ss - cl_crit
+    softplus_cl_val_ss = (1.0 / beta_cl_stall) * csdl.softplus(beta_cl_stall * delta_cl_ss)
+    cl_stall_loss_ss = k_stall_lift * (softplus_cl_val_ss / delta_cl_ref)
+    sign_cl_ss = cl_local_elem_ss / (cl_abs_ss + 1.e-6)
+
+    # Total lift deficit across both wings during sizing maneuver:
+    L_loss_ss = csdl.sum(cl_stall_loss_ss * sign_cl_ss * q_inf_ss * strip_area)
+    lift_effective_ss = L[2] - L_loss_ss
 
 lift_ss = lift_effective_ss - load_factor * W_total
 lift_ss.set_as_constraint(equals=0.0, scaler=1.0 / (load_factor_val * W_ref))
@@ -1990,15 +2126,25 @@ if include_neg1g_sizing:
     lift_neg1g = L[3] - (-1.0 * W_total)
     lift_neg1g.set_as_constraint(equals=0.0, scaler=1.0 / W_ref)
 
-# Static Margin constraint: SM >= 0.10 relative to the dynamic center of mass (x_cg)
+# Static Margin constraint: SM >= 0.02 relative to the dynamic center of mass (x_cg)
 # SM = (x_np - x_cg) / mean_chord = -dMy_cg / (dL * mean_chord)
 mean_chord = planform_area / wingspan
-dL_stab = L[1] - L[0]
-dMy_stab = M[1, 1] - M[0, 1]
-neutral_point_x = x_cg - dMy_stab / dL_stab
-static_margin = (neutral_point_x - x_cg) / mean_chord
-# static_margin.set_as_constraint(lower=0.1, scaler=1.e1)
-# static_margin.set_as_constraint(lower=0.00, scaler=2.e1)
+dL_stab_inv = L[1] - L[0]
+dMy_stab_inv = M[1, 1] - M[0, 1]
+neutral_point_x_inv = x_cg - dMy_stab_inv / dL_stab_inv
+static_margin_inviscid = (neutral_point_x_inv - x_cg) / mean_chord
+
+if stall_model == 'stratford_closure':
+    dL_stab = L[1] - L_corr_cruise
+    dMy_stab = M[1, 1] - pitch_moment
+    neutral_point_x = x_cg - dMy_stab / dL_stab
+    static_margin = (neutral_point_x - x_cg) / mean_chord
+else:
+    dL_stab = dL_stab_inv
+    dMy_stab = dMy_stab_inv
+    neutral_point_x = neutral_point_x_inv
+    static_margin = static_margin_inviscid
+
 static_margin.set_as_constraint(lower=0.02, scaler=2.e1)
 # static_margin.set_as_constraint(equals=0.05, scaler=2.e1)
 
@@ -2214,6 +2360,22 @@ if formulation == 'ar_area':
     additional_outs += [res_taper, res_thick, res_sweep, tc_target_control_points]
     if use_geonic:
         additional_outs += [planform_area_target]
+if stall_model == 'stratford_closure':
+    additional_outs += [
+        Di_Trefftz_reconciled,
+        CDi_Trefftz_reconciled,
+        D_separation_cruise,
+        f_attached_cruise,
+        f_attached_min_cruise,
+        k_reconcile_cruise,
+        res_wake_lift_cruise,
+        mu_w_stall_cruise,
+        f_attached_ss,
+        f_attached_min_ss,
+        panel_forces_corr_cruise,
+        panel_forces_corr_ss,
+        static_margin_inviscid,
+    ]
 additional_outs += geometry_coefficients
 
 jax_sim = csdl.experimental.JaxSimulator(
@@ -2399,8 +2561,22 @@ if run_pre_diagnostics:
         print(f"================ 2D B-SPLINE STRATFORD SEPARATION CONSTRAINTS ({len(strat_arr)} Regions, S_crit = 0.39) ================")
         print(f"Max Stratford S: {max_s_diag:.4f} (Limit: 0.3900) | Separation Margin: {margin_s_diag:+.4f} ({strat_status})")
         print(f"Regional Constraints: {np.round(strat_arr, 4)}\n")
+    if stall_model == 'stratford_closure':
+        f_min_cr_val = float(np.asarray(jax_sim[f_attached_min_cruise]).flatten()[0])
+        d_sep_cr_val = float(np.asarray(jax_sim[D_separation_cruise]).flatten()[0])
+        di_rec_val = float(np.asarray(jax_sim[Di_Trefftz_reconciled]).flatten()[0])
+        k_rec_val = float(np.asarray(jax_sim[k_reconcile_cruise]).flatten()[0])
+        res_lift_val = float(np.asarray(jax_sim[res_wake_lift_cruise]).flatten()[0])
+        f_min_ss_val = float(np.asarray(jax_sim[f_attached_min_ss]).flatten()[0])
+        sm_inv_val = float(np.asarray(jax_sim[static_margin_inviscid]).flatten()[0])
+        sm_corr_val = float(np.asarray(jax_sim[static_margin]).flatten()[0])
+        print(f"================ PRINCIPLED STRATFORD STALL CLOSURE & RECONCILED TREFFTZ ================")
+        print(f"Cruise Attached Fraction f_min: {f_min_cr_val:.4f} | Separation Drag D_sep: {d_sep_cr_val:.1f} N")
+        print(f"Reconciled Di_Trefftz: {di_rec_val:.1f} N | Reconciliation Factor k_rec: {k_rec_val:.4f} | Pre-Recon Lift Residual: {res_lift_val:+.1f} N")
+        print(f"Pull-Up (Node 2) Attached Fraction f_min: {f_min_ss_val:.4f}")
+        print(f"Static Margin: Inviscid = {sm_inv_val*100:.2f}%, Corrected = {sm_corr_val*100:.2f}%\n")
     else:
-        print()
+        print(f"Stall Model: CL EMPIRICAL (Critical Cl = {cl_crit:.2f})\n")
 
 
 if __name__ == '__main__':
@@ -3019,6 +3195,23 @@ if __name__ == '__main__':
                     cache_dict['S_grid'] = np.asarray(jax_sim[S_grid])
                     cache_dict['S_dense_2d'] = np.asarray(jax_sim[S_dense_2d])
 
+                cache_dict['stall_model'] = str(stall_model)
+                if stall_model == 'stratford_closure':
+                    cache_dict['f_attached_cruise'] = np.asarray(jax_sim[f_attached_cruise]).flatten()
+                    cache_dict['f_attached_min_cruise'] = float(np.asarray(jax_sim[f_attached_min_cruise]).flatten()[0])
+                    cache_dict['f_attached_ss'] = np.asarray(jax_sim[f_attached_ss]).flatten()
+                    cache_dict['f_attached_min_ss'] = float(np.asarray(jax_sim[f_attached_min_ss]).flatten()[0])
+                    cache_dict['d_separation_cruise'] = float(np.asarray(jax_sim[D_separation_cruise]).flatten()[0])
+                    cache_dict['di_trefftz_reconciled'] = float(np.asarray(jax_sim[Di_Trefftz_reconciled]).flatten()[0])
+                    cache_dict['cdi_trefftz_reconciled'] = float(np.asarray(jax_sim[CDi_Trefftz_reconciled]).flatten()[0])
+                    cache_dict['k_reconcile_cruise'] = float(np.asarray(jax_sim[k_reconcile_cruise]).flatten()[0])
+                    cache_dict['res_wake_lift_cruise'] = float(np.asarray(jax_sim[res_wake_lift_cruise]).flatten()[0])
+                    cache_dict['mu_w_stall_cruise'] = np.asarray(jax_sim[mu_w_stall_cruise])
+                    cache_dict['panel_forces_corr_cruise'] = np.asarray(jax_sim[panel_forces_corr_cruise])
+                    cache_dict['panel_forces_corr_ss'] = np.asarray(jax_sim[panel_forces_corr_ss])
+                    cache_dict['static_margin_inviscid'] = float(np.asarray(jax_sim[static_margin_inviscid]).flatten()[0])
+                    cache_dict['static_margin_corrected'] = float(np.asarray(jax_sim[static_margin]).flatten()[0])
+
                 np.savez_compressed(cache_file_opt, **cache_dict)
                 print(f"Cached panel telemetry saved to: {cache_file_opt}")
 
@@ -3041,6 +3234,47 @@ if __name__ == '__main__':
                     num_stations=num_stations,
                 )
                 print(f"Cached separation diagnostics telemetry saved to: {sep_cache_opt}")
+
+                # Dedicated cache for plot_stall_closure_diagnostics.py
+                stall_cache_opt = os.path.join(latest_folder, 'stall_closure_data.npz')
+                stall_telemetry = {
+                    'stall_model': str(stall_model),
+                    'scale_factor': float(scale_factor),
+                    'num_stations': int(num_stations),
+                    'd_total': float(d_total_val_opt),
+                    'd_viscous': float(cache_dict['d_viscous_val']),
+                    'd_wave': float(d_wave_val_opt),
+                    'di_trefftz': float(cdi_val_opt * float(cruise_cond['dynamic_pressure_Pa']) * sref_val_opt),
+                    'l_inviscid': float(cl_val_opt * float(cruise_cond['dynamic_pressure_Pa']) * sref_val_opt),
+                    'l_ss_inviscid': float(np.asarray(jax_sim[L]).flatten()[2]),
+                    'y_strip_pts': y_strip_pts_opt,
+                    'strip_tc': strip_tc_opt,
+                    'strip_area': strip_area_opt,
+                    'local_chord_drag': local_chord_drag_opt,
+                    'panel_centers_right': panel_centers_right_opt,
+                    'mu_w_inviscid': np.asarray(jax_sim[mu_w]),
+                    'panel_forces_right_cruise': f_cruise_opt,
+                    'panel_forces_right_ss': f_ss_opt,
+                }
+                if stall_model == 'stratford_closure':
+                    stall_telemetry.update({
+                        'f_attached_cruise': cache_dict['f_attached_cruise'],
+                        'f_attached_min_cruise': cache_dict['f_attached_min_cruise'],
+                        'f_attached_ss': cache_dict['f_attached_ss'],
+                        'f_attached_min_ss': cache_dict['f_attached_min_ss'],
+                        'd_separation_cruise': cache_dict['d_separation_cruise'],
+                        'di_trefftz_reconciled': cache_dict['di_trefftz_reconciled'],
+                        'cdi_trefftz_reconciled': cache_dict['cdi_trefftz_reconciled'],
+                        'k_reconcile_cruise': cache_dict['k_reconcile_cruise'],
+                        'res_wake_lift_cruise': cache_dict['res_wake_lift_cruise'],
+                        'mu_w_stall_cruise': cache_dict['mu_w_stall_cruise'],
+                        'panel_forces_corr_cruise': cache_dict['panel_forces_corr_cruise'],
+                        'panel_forces_corr_ss': cache_dict['panel_forces_corr_ss'],
+                        'static_margin_inviscid': cache_dict['static_margin_inviscid'],
+                        'static_margin_corrected': cache_dict['static_margin_corrected'],
+                    })
+                np.savez_compressed(stall_cache_opt, **stall_telemetry)
+                print(f"Cached stall closure telemetry saved to: {stall_cache_opt}")
 
                 # Dedicated cache for extract_wave_drag_distribution.py
                 wave_cache_opt = os.path.join(latest_folder, 'wave_drag_distribution_data.npz')
@@ -3419,6 +3653,34 @@ if __name__ == '__main__':
         print("Automatic boundary layer separation analysis completed successfully.")
     except Exception as exc:
         print(f"Warning: automatic separation diagnostics failed: {exc}")
+    # endregion
+
+    # region Automatic Stall Closure Diagnostics Analysis
+    try:
+        from optimization_analyses.plot_stall_closure_diagnostics import plot_stall_closure_diagnostics
+        plot_stall_closure_diagnostics(
+            output_folder=latest_folder,
+            artifact_dir=artifact_dir,
+            jax_sim=jax_sim,
+            main_script=sys.modules.get('__main__'),
+        )
+        print("Automatic stall closure diagnostics analysis completed successfully.")
+    except Exception as exc:
+        print(f"Warning: automatic stall closure diagnostics failed: {exc}")
+    # endregion
+
+    # region Automatic Viscous Drag Diagnostics Analysis
+    try:
+        from optimization_analyses.plot_viscous_drag_diagnostics import plot_viscous_drag_diagnostics
+        plot_viscous_drag_diagnostics(
+            output_folder=latest_folder,
+            artifact_dir=artifact_dir,
+            jax_sim=jax_sim,
+            main_script=sys.modules.get('__main__'),
+        )
+        print("Automatic viscous drag diagnostics analysis completed successfully.")
+    except Exception as exc:
+        print(f"Warning: automatic viscous drag diagnostics failed: {exc}")
     # endregion
     
     # endregion Plot Summary Figure

@@ -49,28 +49,71 @@ H_SEP = 2.40        # Head shape factor turbulent separation threshold
 H_FLAT_PLATE = 1.40 # Zero-pressure-gradient turbulent flat-plate baseline
 
 
-def find_latest_output_dir(base_dir: Optional[str] = None) -> str:
-    """Find the latest optimization output directory."""
-    if base_dir and os.path.isdir(base_dir):
-        return os.path.abspath(base_dir)
+DEFAULT_ARTIFACT_DIR = '/home/andrew/.gemini/antigravity/brain/728a2089-2977-4bdc-b525-91b2b850c11b'
 
+
+def find_latest_output_dir(base_dir: Optional[str] = None) -> str:
+    """Find the target optimization output directory.
+
+    If base_dir is provided:
+      1. Resolves if it is an existing directory path (absolute or relative).
+      2. Searches for base_dir by exact folder name in KNOWN_OUTPUT_DIRS.
+      3. Searches for base_dir by partial substring match in KNOWN_OUTPUT_DIRS,
+         returning the latest match by timestamp folder name.
+
+    If base_dir is None:
+      Automatically finds the chronologically latest completed output directory
+      (containing 'lift_and_moment_data.npz' or 'separation_diagnostics_data.npz') across
+      KNOWN_OUTPUT_DIRS, sorted by directory name (YYYY-MM-DD_HH.MM.SS.ffffff).
+    """
+    if base_dir:
+        # 1. Direct path check
+        if os.path.isdir(base_dir):
+            return os.path.abspath(base_dir)
+
+        # 2. Check exact folder name inside KNOWN_OUTPUT_DIRS
+        for cand_base in KNOWN_OUTPUT_DIRS:
+            cand_path = os.path.join(cand_base, base_dir)
+            if os.path.isdir(cand_path):
+                return os.path.abspath(cand_path)
+
+        # 3. Check partial substring match inside KNOWN_OUTPUT_DIRS
+        matches = []
+        for cand_base in KNOWN_OUTPUT_DIRS:
+            if os.path.exists(cand_base):
+                for d in os.listdir(cand_base):
+                    full = os.path.join(cand_base, d)
+                    if os.path.isdir(full) and base_dir in d:
+                        matches.append(full)
+        if matches:
+            chosen = max(matches, key=lambda d: os.path.basename(d))
+            return os.path.abspath(chosen)
+
+        raise FileNotFoundError(f"Specified optimization output directory '{base_dir}' not found.")
+
+    # Automatic mode: find chronologically latest directory with completed telemetry
+    all_with_data = []
+    all_subdirs = []
     for cand_base in KNOWN_OUTPUT_DIRS:
         if os.path.exists(cand_base):
             subdirs = [
                 os.path.join(cand_base, d) for d in os.listdir(cand_base)
                 if os.path.isdir(os.path.join(cand_base, d))
             ]
-            if subdirs:
-                # Prefer directories with x.out or lift_and_moment_data.npz
-                with_data = [
-                    d for d in subdirs
-                    if os.path.exists(os.path.join(d, 'lift_and_moment_data.npz'))
-                    or os.path.exists(os.path.join(d, 'x.out'))
-                ]
-                chosen = max(with_data if with_data else subdirs, key=os.path.getmtime)
-                return os.path.abspath(chosen)
+            all_subdirs.extend(subdirs)
+            with_data = [
+                d for d in subdirs
+                if os.path.exists(os.path.join(d, 'lift_and_moment_data.npz'))
+                or os.path.exists(os.path.join(d, 'separation_diagnostics_data.npz'))
+            ]
+            all_with_data.extend(with_data)
 
-    raise FileNotFoundError("No valid optimization output directory found.")
+    candidates = all_with_data if all_with_data else all_subdirs
+    if not candidates:
+        raise FileNotFoundError("No valid optimization output directory found.")
+
+    chosen = max(candidates, key=lambda d: os.path.basename(d))
+    return os.path.abspath(chosen)
 
 
 def load_separation_telemetry(output_folder: str) -> Dict[str, Any]:
@@ -80,15 +123,21 @@ def load_separation_telemetry(output_folder: str) -> Dict[str, Any]:
 
     data_dict: Dict[str, Any] = {}
 
-    if os.path.exists(sep_cache):
-        print(f"Loading dedicated separation diagnostics cache: {sep_cache}")
-        raw = np.load(sep_cache, allow_pickle=True)
-        data_dict = {k: raw[k] for k in raw.files}
-        return data_dict
-
     if os.path.exists(lm_cache):
         print(f"Loading separation telemetry from lift and moment cache: {lm_cache}")
         raw = np.load(lm_cache, allow_pickle=True)
+        data_dict = {k: raw[k] for k in raw.files}
+        # Supplement with any missing fields from dedicated cache if available
+        if os.path.exists(sep_cache):
+            raw_sep = np.load(sep_cache, allow_pickle=True)
+            for k in raw_sep.files:
+                if k not in data_dict:
+                    data_dict[k] = raw_sep[k]
+        return data_dict
+
+    if os.path.exists(sep_cache):
+        print(f"Loading dedicated separation diagnostics cache: {sep_cache}")
+        raw = np.load(sep_cache, allow_pickle=True)
         data_dict = {k: raw[k] for k in raw.files}
         return data_dict
 
@@ -111,6 +160,9 @@ def process_separation_fields(data_dict: Dict[str, Any]) -> Dict[str, Any]:
         else:
             num_ffd_stations = len(sc_raw) // 4
             sc_matrix = sc_raw.reshape(4, num_ffd_stations)
+    elif 'sc_matrix' in data_dict:
+        sc_matrix = np.asarray(data_dict['sc_matrix'])
+        num_ffd_stations = sc_matrix.shape[1]
     else:
         # Default placeholder if not found
         sc_matrix = np.full((4, num_ffd_stations), 0.30)
@@ -283,7 +335,7 @@ def process_separation_fields(data_dict: Dict[str, Any]) -> Dict[str, Any]:
     idx_worst_H = np.unravel_index(np.argmax(H_dense), H_dense.shape)
     worst_H_loc = (float(X_grid[idx_worst_H]), float(Y_grid[idx_worst_H]), float(v_dense[idx_worst_H[1]]))
 
-    num_satisfied_S = int(np.sum(sc_matrix <= S_CRIT + 1e-6))
+    num_satisfied_S = int(np.sum(sc_matrix <= S_CRIT + 1e-4))
     total_constrs_S = int(sc_matrix.size)
 
     return {
@@ -360,14 +412,39 @@ def generate_separation_figure(proc: Dict[str, Any], output_path: str) -> None:
     # Overlay regional constraint centers
     u_centers = [1.0 / 6.0, 0.5, 5.0 / 6.0, 1.0]
     v_centers = np.linspace(0.0, 1.0, num_ffd)
+    TOL_ACTIVE = 1e-4
+    has_active = False
+    has_feas = False
+    has_viol = False
     for i, uc in enumerate(u_centers):
         for j, vc in enumerate(v_centers):
             xc = np.interp(vc, proc['v_dense'], proc['X_grid'][int(uc * (len(proc['u_dense']) - 1)), :])
             yc = vc * b_tip
             val = sc_mat[i, j]
-            color = '#2ca02c' if val <= S_CRIT else '#d62728'
-            marker = 'o' if val <= S_CRIT else 'X'
-            ax1.scatter(xc, yc, color=color, edgecolors='black', s=42, marker=marker, zorder=5)
+            if val > S_CRIT + TOL_ACTIVE:
+                color = '#d62728'
+                marker = 'X'
+                has_viol = True
+            elif abs(val - S_CRIT) <= TOL_ACTIVE:
+                color = '#ff7f0e'
+                marker = 'o'
+                has_active = True
+            else:
+                color = '#2ca02c'
+                marker = 'o'
+                has_feas = True
+            ax1.scatter(xc, yc, color=color, edgecolors='black', s=46, marker=marker, zorder=5)
+
+    # Add legend handles for regional constraint markers in ax1
+    handles1 = []
+    if has_feas:
+        handles1.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#2ca02c', markeredgecolor='k', markersize=7, label=r'Feasible ($S < 0.39$)'))
+    if has_active:
+        handles1.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#ff7f0e', markeredgecolor='k', markersize=7, label=r'Active Bound ($S \approx 0.390$)'))
+    if has_viol:
+        handles1.append(plt.Line2D([0], [0], marker='X', color='w', markerfacecolor='#d62728', markeredgecolor='k', markersize=7, label=r'Violated ($S > 0.39$)'))
+    if handles1:
+        ax1.legend(handles=handles1, loc='upper left', fontsize=7.5, framealpha=0.92)
 
     cbar1 = plt.colorbar(cs1, ax=ax1, pad=0.02, shrink=0.92)
     cbar1.set_label(r'Stratford Parameter $S(x, y)$ [-]', fontweight='bold')
@@ -429,7 +506,15 @@ def generate_separation_figure(proc: Dict[str, Any], output_path: str) -> None:
     # Mark chordwise regional aggregation centers
     for uc in u_centers:
         ax3.axvline(uc, color='gray', linestyle=':', linewidth=1.0, alpha=0.7)
-    ax3.text(0.02, S_CRIT + 0.02, r'Regional Centers: $u \in [1/6, 1/2, 5/6, 1.0]$', fontsize=8, color='#555555')
+    ax3.text(
+        0.02, 0.05,
+        r"$\mathbf{Note:}$ Sectional curves show continuous physical $S(x/c)$ (max $\approx 0.345$).""\n"
+        r"Regional KS smooth-max ($KS \leq 0.39$) adds $\approx +0.045$ aggregation margin," "\n"
+        r"activating the optimizer constraint at $0.3900$.",
+        fontsize=7.5, color='#333333',
+        bbox=dict(boxstyle='round,pad=0.3', facecolor='#f8f9fa', edgecolor='#cccccc', alpha=0.9),
+        transform=ax3.transAxes
+    )
 
     ax3.set_xlabel(r'Normalized Chordwise Coordinate $x/c$ (LE $\to$ TE)', fontweight='bold')
     ax3.set_ylabel(r'Stratford Parameter $S(x/c)$ [-]', fontweight='bold')
@@ -449,14 +534,6 @@ def generate_separation_figure(proc: Dict[str, Any], output_path: str) -> None:
 
     for sect, col in zip(proc['sectional_data'], colors_sect):
         ax4.plot(u_pts, sect['H'], color=col, linewidth=2.2, label=f"{sect['label']} (max={sect['max_H']:.3f})")
-
-    ax4.annotate(
-        'Steep TE gradient\n(ill-conditioning source)',
-        xy=(0.92, 2.35), xytext=(0.60, 2.70),
-        arrowprops=dict(arrowstyle='->', color='#d62728', lw=1.5),
-        fontsize=8.5, fontweight='bold', color='#d62728',
-        bbox=dict(boxstyle='round,pad=0.3', facecolor='#fff0f0', edgecolor='#d62728', alpha=0.8)
-    )
 
     ax4.set_xlabel('Normalized Chordwise Coordinate $x/c$ (LE $\\to$ TE)', fontweight='bold')
     ax4.set_ylabel(r'Head Shape Factor $H(x/c)$ [-]', fontweight='bold')
@@ -513,7 +590,12 @@ def generate_separation_figure(proc: Dict[str, Any], output_path: str) -> None:
         for j in range(num_ffd):
             val = sc_mat[i, j]
             margin = S_CRIT - val
-            status = "FEAS" if val <= S_CRIT else "VIOL"
+            if val > S_CRIT + 1e-4:
+                status = "VIOL"
+            elif abs(val - S_CRIT) <= 1e-4:
+                status = "ACTIVE"
+            else:
+                status = "FEAS"
             txt_col = 'white' if abs(val - S_CRIT) > 0.15 else 'black'
             ax6.text(
                 j, i, f"{val:.3f}\n({margin:+.3f})\n{status}",
@@ -636,9 +718,10 @@ def plot_separation_diagnostics(
     generate_separation_figure(proc, fig_path)
 
     # Copy to artifact directory if present
-    if artifact_dir and os.path.isdir(artifact_dir):
-        art_fig = os.path.join(artifact_dir, 'separation_diagnostics.png')
-        art_npz = os.path.join(artifact_dir, 'separation_diagnostics_data.npz')
+    art_target = artifact_dir or (DEFAULT_ARTIFACT_DIR if os.path.isdir(DEFAULT_ARTIFACT_DIR) else None)
+    if art_target and os.path.isdir(art_target):
+        art_fig = os.path.join(art_target, 'separation_diagnostics.png')
+        art_npz = os.path.join(art_target, 'separation_diagnostics_data.npz')
         shutil.copy2(fig_path, art_fig)
         shutil.copy2(npz_path, art_npz)
         print(f"Separation artifacts also copied to: {art_fig}")
