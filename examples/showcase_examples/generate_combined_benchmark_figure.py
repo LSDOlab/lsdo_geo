@@ -50,7 +50,11 @@ def load_all_benchmark_data():
     
     paths = {
         'uav': os.path.join(base_dir, 'laser_powered_uav', 'laser_powered_uav_lhs_timing_results.pkl'),
-        'dog': os.path.join(base_dir, 'robot_dog', 'robot_dog_lhs_timing_results.pkl'),
+        'quadruped_robot': (
+            os.path.join(base_dir, 'quadruped_robot', 'quadruped_robot_lhs_timing_results.pkl')
+            if os.path.exists(os.path.join(base_dir, 'quadruped_robot', 'quadruped_robot_lhs_timing_results.pkl'))
+            else os.path.join(base_dir, 'quadruped_robot', 'robot_dog_lhs_timing_results.pkl')
+        ),
         'lpc_eq': os.path.join(base_dir, 'lift_plus_cruise', 'lift_plus_cruise_lhs_timing_results.pkl'),
         'lpc_ineq': os.path.join(base_dir, 'lift_plus_cruise', 'lift_plus_cruise_with_inequalities_lhs_timing_results.pkl'),
     }
@@ -69,35 +73,37 @@ def get_benchmark_cases(data):
         {
             'key': 'uav',
             'name': 'Laser-Powered UAV',
-            'label': 'Laser-Powered UAV\n(14 states)',
+            'label': 'Laser-Powered UAV\n(8 variables,\n4 constraints)',
             'short_label': 'Laser-Powered UAV',
             'timings_s': np.array(data['uav']['sample_timings']),
             'iters': np.array(data['uav']['sample_iterations']),
             'color': '#1f4e79',       # AIAA Deep Navy
             'fill_color': '#d0e1fd',
             'n_dvs': 9,
-            'n_states': 14,
-            'n_constraints': 14,
+            'n_states': 12,
+            'n_geom_vars': 8,
+            'n_constraints': 4,
             'n_ineq': 0,
         },
         {
-            'key': 'dog',
+            'key': 'quadruped_robot',
             'name': 'Quadruped Robot',
-            'label': 'Quadruped Robot\n(34 states)',
+            'label': 'Quadruped Robot\n(14 variables,\n22 constraints)',
             'short_label': 'Quadruped Robot',
-            'timings_s': np.array(data['dog']['sample_timings']),
-            'iters': np.array(data['dog']['sample_iterations']),
+            'timings_s': np.array(data['quadruped_robot']['sample_timings']),
+            'iters': np.array(data['quadruped_robot']['sample_iterations']),
             'color': '#d95f02',       # Burnt Orange
             'fill_color': '#fdd0a2',
             'n_dvs': 7,
-            'n_states': 34,
-            'n_constraints': 34,
+            'n_states': 36,
+            'n_geom_vars': 14,
+            'n_constraints': 22,
             'n_ineq': 0,
         },
         {
             'key': 'lpc_eq',
             'name': 'Lift+Cruise (Equality)',
-            'label': 'Lift+Cruise (Eq)\n(53 states)',
+            'label': 'Lift+Cruise (Eq)\n(19 variables,\n34 constraints)',
             'short_label': 'Lift+Cruise (Eq)',
             'timings_s': np.array(data['lpc_eq']['sample_timings']),
             'iters': np.array(data['lpc_eq']['sample_iterations']),
@@ -105,13 +111,14 @@ def get_benchmark_cases(data):
             'fill_color': '#c7eae5',
             'n_dvs': 20,
             'n_states': 53,
-            'n_constraints': 53,
+            'n_geom_vars': 19,
+            'n_constraints': 34,
             'n_ineq': 0,
         },
         {
             'key': 'lpc_ineq',
             'name': 'Lift+Cruise (Inequalities)',
-            'label': 'Lift+Cruise (Ineq)\n(53 states + 6 ineq)',
+            'label': 'Lift+Cruise (Ineq)\n(19 variables,\n34 eq + 6 ineq)',
             'short_label': 'Lift+Cruise (Ineq)',
             'timings_s': np.array(data['lpc_ineq']['sample_timings']),
             'iters': np.array(data['lpc_ineq']['sample_iterations']),
@@ -119,7 +126,8 @@ def get_benchmark_cases(data):
             'fill_color': '#f8d7da',
             'n_dvs': 20,
             'n_states': 53,
-            'n_constraints': 53,
+            'n_geom_vars': 19,
+            'n_constraints': 40,
             'n_ineq': 6,
         },
     ]
@@ -152,13 +160,6 @@ def draw_solve_time_panel(ax, cases):
             capprops=dict(color=c, linewidth=1.4),
             meanprops=dict(marker='D', markerfacecolor='#f1c40f', markeredgecolor='black', markersize=6.5, zorder=4)
         )
-        
-        # Annotate mean value above each box in seconds
-        mean_val = np.mean(t)
-        ax.text(
-            pos, np.max(t) + 0.035, f"{mean_val:.3f} s",
-            ha='center', va='bottom', fontsize=8.8, fontweight='bold', color=c
-        )
 
     # Dummy markers for legend
     ax.plot([], [], marker='D', color='#f1c40f', markeredgecolor='black', linestyle='None', markersize=6.5, label=r'Mean ($\mu$)')
@@ -166,9 +167,9 @@ def draw_solve_time_panel(ax, cases):
     ax.plot([], [], marker='o', color='gray', markeredgecolor='none', linestyle='None', markersize=5, alpha=0.5, label='LHS evaluations')
 
     ax.set_xticks(positions)
-    ax.set_xticklabels([c['label'] for c in cases], fontsize=9.2)
+    ax.set_xticklabels([c['label'] for c in cases], fontsize=8.6)
     ax.set_ylabel('Parameterization solve time [s]', fontsize=11)
-    ax.set_ylim(0.0, 1.15)
+    ax.set_ylim(0.0, 1.05)
     ax.grid(axis='y', linestyle='--', alpha=0.35, color='#b0b0b0')
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -176,55 +177,52 @@ def draw_solve_time_panel(ax, cases):
 
 def draw_iterations_panel(ax, cases):
     """Draws the Newton iterations distribution bar panel (no title)."""
-    possible_iters = np.array([3, 4, 5])
-    bar_width = 0.18
+    all_iters = np.concatenate([c['iters'] for c in cases])
+    min_iter = int(np.min(all_iters))
+    max_iter = int(np.max(all_iters))
+    possible_iters = np.arange(min_iter, max_iter + 1)
+    bar_width = 0.19
     
     for i, case in enumerate(cases):
         iters = case['iters']
         n_tot = len(iters)
         c = case['color']
         
-        percentages = []
+        counts = []
         for k in possible_iters:
-            pct = np.sum(iters == k) / n_tot * 100.0
-            percentages.append(pct)
+            cnt = int(np.sum(iters == k))
+            counts.append(cnt)
             
         x_offsets = possible_iters + (i - 1.5) * bar_width
         bars = ax.bar(
-            x_offsets, percentages, width=bar_width * 0.92,
+            x_offsets, counts, width=bar_width * 0.88,
             color=c, label=case['short_label'], alpha=0.88, edgecolor='black', linewidth=0.8, zorder=3
         )
         
         # Add text labels above non-zero bars
-        for bar, pct in zip(bars, percentages):
-            if pct > 0.0:
-                if pct < 1.0:
-                    label_str = f"{pct:.1f}%"
-                elif pct >= 10.0:
-                    label_str = f"{pct:.0f}%"
-                else:
-                    label_str = f"{pct:.1f}%"
+        for bar, cnt in zip(bars, counts):
+            if cnt > 0:
                 ax.text(
-                    bar.get_x() + bar.get_width() / 2.0, pct + 2.5,
-                    label_str,
-                    ha='center', va='bottom', fontsize=8.0, fontweight='bold', color=c
+                    bar.get_x() + bar.get_width() / 2.0, cnt + 1.6,
+                    str(cnt),
+                    ha='center', va='bottom', fontsize=7.0, fontweight='bold', color=c
                 )
 
     ax.set_xticks(possible_iters)
-    ax.set_xticklabels([f"{k} iterations" for k in possible_iters], fontsize=10)
+    ax.set_xticklabels([f"{k} iterations" for k in possible_iters], fontsize=9.5)
     ax.set_xlabel('Newton solver iterations to convergence', fontsize=11)
-    ax.set_ylabel('Percentage of LHS evaluations [%]', fontsize=11)
-    ax.set_ylim(0, 125)
+    ax.set_ylabel('Number of sample evaluations', fontsize=11)
+    ax.set_ylim(0, 100)
     ax.grid(axis='y', linestyle='--', alpha=0.35, color='#b0b0b0')
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
-    ax.legend(loc='upper left', frameon=True, facecolor='white', edgecolor='#d0d0d0', framealpha=0.92, fontsize=8.5)
+    ax.legend(loc='upper left', frameon=True, facecolor='white', edgecolor='#d0d0d0', framealpha=0.92, fontsize=8.0)
 
     # Unitless convergence watermark / annotation
     ax.text(
         0.98, 0.96, r"Convergence rate: 100.0%" + "\n" + r"All residuals $\leq 10^{-10}$",
-        transform=ax.transAxes, ha='right', va='top', fontsize=8.5,
-        bbox=dict(boxstyle='round,pad=0.45', facecolor='#e8f5e9', edgecolor='#81c784', alpha=0.92)
+        transform=ax.transAxes, ha='right', va='top', fontsize=8.0,
+        bbox=dict(boxstyle='round,pad=0.4', facecolor='#e8f5e9', edgecolor='#81c784', alpha=0.92)
     )
 
 def generate_publication_figures():

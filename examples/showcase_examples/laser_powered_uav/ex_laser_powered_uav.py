@@ -22,8 +22,11 @@ recorder = csdl.Recorder(inline=True)
 recorder.start()
 
 # Import initial geometry that will be deformed
+cad_file = "examples/example_geometries/laser_powered_uav.stp"
+if not os.path.exists(cad_file):
+    cad_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../example_geometries/laser_powered_uav.stp"))
 geometry = import_geometry(
-    "examples/example_geometries/laser_powered_uav.stp",
+    cad_file,
     parallelize=False,
 )
 # Extract initial CAD geometry meshes to plot as reference ghost in video (#B6B1A9, 0.3 opacity)

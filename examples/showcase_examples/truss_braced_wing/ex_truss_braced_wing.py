@@ -25,6 +25,8 @@ recorder = csdl.Recorder(inline=True)
 recorder.start()
 
 cad_file = "examples/example_geometries/tbw.stp"
+if not os.path.exists(cad_file):
+    cad_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../example_geometries/tbw.stp"))
 print(f"Importing {cad_file}...")
 t0 = time.time()
 geo = lg.import_geometry(cad_file, parallelize=False)

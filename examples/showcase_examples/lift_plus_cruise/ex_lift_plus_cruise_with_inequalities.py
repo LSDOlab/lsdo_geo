@@ -18,7 +18,10 @@ recorder.start()
 
 import_file_path = 'examples/example_geometries/'
 import_file = 'lift_plus_cruise_final.stp'
-geometry = lg.import_geometry(import_file_path + import_file, parallelize=False)
+cad_file = os.path.join(import_file_path, import_file)
+if not os.path.exists(cad_file):
+    cad_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../example_geometries", import_file))
+geometry = lg.import_geometry(cad_file, parallelize=False)
 
 
 camera = {

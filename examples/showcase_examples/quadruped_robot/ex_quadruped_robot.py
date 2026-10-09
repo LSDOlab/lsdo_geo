@@ -19,6 +19,8 @@ recorder = csdl.Recorder(inline=True)
 recorder.start()
 
 cad_file = "examples/example_geometries/robot_dog.stp"
+if not os.path.exists(cad_file):
+    cad_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../example_geometries/robot_dog.stp"))
 print(f"Importing {cad_file}...")
 t0 = time.time()
 geometry = lg.import_geometry(cad_file, parallelize=False)
@@ -38,15 +40,15 @@ valid_ghost_meshes = [m for m in initial_meshes if m is not None]
 # In the imported STEP model, side 0 corresponds to Left (+y) and side 1 corresponds to Right (-y).
 body = geometry.declare_component(function_search_names=['body'], name='body')
 
-front_left_thigh = geometry.declare_component(function_search_names=['front_thighs, 0'], name='front_left_thigh')
-front_right_thigh = geometry.declare_component(function_search_names=['front_thighs, 1'], name='front_right_thigh')
-rear_left_thigh = geometry.declare_component(function_search_names=['back_thighs, 0'], name='back_left_thigh')
-rear_right_thigh = geometry.declare_component(function_search_names=['back_thighs, 1'], name='back_right_thigh')
+front_left_upper_leg = geometry.declare_component(function_search_names=['front_thighs, 0'], name='front_left_upper_leg')
+front_right_upper_leg = geometry.declare_component(function_search_names=['front_thighs, 1'], name='front_right_upper_leg')
+rear_left_upper_leg = geometry.declare_component(function_search_names=['back_thighs, 0'], name='back_left_upper_leg')
+rear_right_upper_leg = geometry.declare_component(function_search_names=['back_thighs, 1'], name='back_right_upper_leg')
 
-front_left_shank = geometry.declare_component(function_search_names=['front_calves, 0'], name='front_left_shank')
-front_right_shank = geometry.declare_component(function_search_names=['front_calves, 1'], name='front_right_shank')
-rear_left_shank = geometry.declare_component(function_search_names=['back_calves, 0'], name='back_left_shank')
-rear_right_shank = geometry.declare_component(function_search_names=['back_calves, 1'], name='back_right_shank')
+front_left_lower_leg = geometry.declare_component(function_search_names=['front_calves, 0'], name='front_left_lower_leg')
+front_right_lower_leg = geometry.declare_component(function_search_names=['front_calves, 1'], name='front_right_lower_leg')
+rear_left_lower_leg = geometry.declare_component(function_search_names=['back_calves, 0'], name='back_left_lower_leg')
+rear_right_lower_leg = geometry.declare_component(function_search_names=['back_calves, 1'], name='back_right_lower_leg')
 
 # Combined leg components for initial posture hip rotations
 front_left_leg = geometry.declare_component(function_search_names=['front_thighs, 0', 'front_calves, 0'], name='front_left_leg')
@@ -56,10 +58,10 @@ rear_right_leg = geometry.declare_component(function_search_names=['back_thighs,
 
 print("Declared components:")
 print(f"  Body             : {len(body.functions)} surfaces")
-print(f"  Front Thighs     : {len(front_left_thigh.functions) + len(front_right_thigh.functions)} surfaces (FL, FR)")
-print(f"  Rear Thighs      : {len(rear_left_thigh.functions) + len(rear_right_thigh.functions)} surfaces (RL, RR)")
-print(f"  Front Shanks     : {len(front_left_shank.functions) + len(front_right_shank.functions)} surfaces (FL, FR)")
-print(f"  Rear Shanks      : {len(rear_left_shank.functions) + len(rear_right_shank.functions)} surfaces (RL, RR)")
+print(f"  Front Upper Legs     : {len(front_left_upper_leg.functions) + len(front_right_upper_leg.functions)} surfaces (FL, FR)")
+print(f"  Rear Upper Legs      : {len(rear_left_upper_leg.functions) + len(rear_right_upper_leg.functions)} surfaces (RL, RR)")
+print(f"  Front Lower Legs     : {len(front_left_lower_leg.functions) + len(front_right_lower_leg.functions)} surfaces (FL, FR)")
+print(f"  Rear Lower Legs      : {len(rear_left_lower_leg.functions) + len(rear_right_lower_leg.functions)} surfaces (RL, RR)")
 print(f"  Total Surfaces   : {len(geometry.functions)}\n")
 
 # ==============================================================================
@@ -95,27 +97,27 @@ para_body_hip_fr = body.project(p_hip_fr, projection_tolerance=1.e-2, plot=False
 para_body_hip_rl = body.project(p_hip_rl, projection_tolerance=1.e-2, plot=False)
 para_body_hip_rr = body.project(p_hip_rr, projection_tolerance=1.e-2, plot=False)
 
-# Projections onto thighs
-para_thigh_hip_fl = front_left_thigh.project(p_hip_fl, projection_tolerance=1.e-6, plot=False)
-para_thigh_hip_fr = front_right_thigh.project(p_hip_fr, projection_tolerance=1.e-6, plot=False)
-para_thigh_hip_rl = rear_left_thigh.project(p_hip_rl, projection_tolerance=1.e-6, plot=False)
-para_thigh_hip_rr = rear_right_thigh.project(p_hip_rr, projection_tolerance=1.e-6, plot=False)
+# Projections onto upper legs
+para_upper_leg_hip_fl = front_left_upper_leg.project(p_hip_fl, projection_tolerance=1.e-6, plot=False)
+para_upper_leg_hip_fr = front_right_upper_leg.project(p_hip_fr, projection_tolerance=1.e-6, plot=False)
+para_upper_leg_hip_rl = rear_left_upper_leg.project(p_hip_rl, projection_tolerance=1.e-6, plot=False)
+para_upper_leg_hip_rr = rear_right_upper_leg.project(p_hip_rr, projection_tolerance=1.e-6, plot=False)
 
-para_thigh_knee_fl = front_left_thigh.project(p_knee_fl, projection_tolerance=1.e-6, plot=False)
-para_thigh_knee_fr = front_right_thigh.project(p_knee_fr, projection_tolerance=1.e-6, plot=False)
-para_thigh_knee_rl = rear_left_thigh.project(p_knee_rl, projection_tolerance=1.e-6, plot=False)
-para_thigh_knee_rr = rear_right_thigh.project(p_knee_rr, projection_tolerance=1.e-6, plot=False)
+para_upper_leg_knee_fl = front_left_upper_leg.project(p_knee_fl, projection_tolerance=1.e-6, plot=False)
+para_upper_leg_knee_fr = front_right_upper_leg.project(p_knee_fr, projection_tolerance=1.e-6, plot=False)
+para_upper_leg_knee_rl = rear_left_upper_leg.project(p_knee_rl, projection_tolerance=1.e-6, plot=False)
+para_upper_leg_knee_rr = rear_right_upper_leg.project(p_knee_rr, projection_tolerance=1.e-6, plot=False)
 
-# Projections onto shanks
-para_shank_knee_fl = front_left_shank.project(p_knee_fl, projection_tolerance=1.e-6, plot=False)
-para_shank_knee_fr = front_right_shank.project(p_knee_fr, projection_tolerance=1.e-6, plot=False)
-para_shank_knee_rl = rear_left_shank.project(p_knee_rl, projection_tolerance=1.e-6, plot=False)
-para_shank_knee_rr = rear_right_shank.project(p_knee_rr, projection_tolerance=1.e-6, plot=False)
+# Projections onto lower legs
+para_lower_leg_knee_fl = front_left_lower_leg.project(p_knee_fl, projection_tolerance=1.e-6, plot=False)
+para_lower_leg_knee_fr = front_right_lower_leg.project(p_knee_fr, projection_tolerance=1.e-6, plot=False)
+para_lower_leg_knee_rl = rear_left_lower_leg.project(p_knee_rl, projection_tolerance=1.e-6, plot=False)
+para_lower_leg_knee_rr = rear_right_lower_leg.project(p_knee_rr, projection_tolerance=1.e-6, plot=False)
 
-para_shank_foot_fl = front_left_shank.project(p_foot_fl, projection_tolerance=1.e-6, plot=False)
-para_shank_foot_fr = front_right_shank.project(p_foot_fr, projection_tolerance=1.e-6, plot=False)
-para_shank_foot_rl = rear_left_shank.project(p_foot_rl, projection_tolerance=1.e-6, plot=False)
-para_shank_foot_rr = rear_right_shank.project(p_foot_rr, projection_tolerance=1.e-6, plot=False)
+para_lower_leg_foot_fl = front_left_lower_leg.project(p_foot_fl, projection_tolerance=1.e-6, plot=False)
+para_lower_leg_foot_fr = front_right_lower_leg.project(p_foot_fr, projection_tolerance=1.e-6, plot=False)
+para_lower_leg_foot_rl = rear_left_lower_leg.project(p_foot_rl, projection_tolerance=1.e-6, plot=False)
+para_lower_leg_foot_rr = rear_right_lower_leg.project(p_foot_rr, projection_tolerance=1.e-6, plot=False)
 
 # ==============================================================================
 # 4. Measure Baseline Nominal Quantities and Capture Connection Vectors
@@ -123,28 +125,28 @@ para_shank_foot_rr = rear_right_shank.project(p_foot_rr, projection_tolerance=1.
 nom_body_length = float(np.squeeze(body.evaluate(para_body_front)[0].value - body.evaluate(para_body_rear)[0].value))
 nom_scale_length = nom_body_length
 
-nom_front_thigh_length = float(np.squeeze(np.linalg.norm(front_left_thigh.evaluate(para_thigh_hip_fl).value - front_left_thigh.evaluate(para_thigh_knee_fl).value)))
-nom_rear_thigh_length = float(np.squeeze(np.linalg.norm(rear_left_thigh.evaluate(para_thigh_hip_rl).value - rear_left_thigh.evaluate(para_thigh_knee_rl).value)))
-nom_front_shank_length = float(np.squeeze(np.linalg.norm(front_left_shank.evaluate(para_shank_knee_fl).value - front_left_shank.evaluate(para_shank_foot_fl).value)))
-nom_rear_shank_length = float(np.squeeze(np.linalg.norm(rear_left_shank.evaluate(para_shank_knee_rl).value - rear_left_shank.evaluate(para_shank_foot_rl).value)))
+nom_front_upper_leg_length = float(np.squeeze(np.linalg.norm(front_left_upper_leg.evaluate(para_upper_leg_hip_fl).value - front_left_upper_leg.evaluate(para_upper_leg_knee_fl).value)))
+nom_rear_upper_leg_length = float(np.squeeze(np.linalg.norm(rear_left_upper_leg.evaluate(para_upper_leg_hip_rl).value - rear_left_upper_leg.evaluate(para_upper_leg_knee_rl).value)))
+nom_front_lower_leg_length = float(np.squeeze(np.linalg.norm(front_left_lower_leg.evaluate(para_lower_leg_knee_fl).value - front_left_lower_leg.evaluate(para_lower_leg_foot_fl).value)))
+nom_rear_lower_leg_length = float(np.squeeze(np.linalg.norm(rear_left_lower_leg.evaluate(para_lower_leg_knee_rl).value - rear_left_lower_leg.evaluate(para_lower_leg_foot_rl).value)))
 
-nom_leg_length = nom_front_thigh_length + nom_front_shank_length
-nom_leg_aspect_ratio = nom_front_thigh_length / nom_front_shank_length
+nom_leg_length = nom_front_upper_leg_length + nom_front_lower_leg_length
+nom_leg_aspect_ratio = nom_front_upper_leg_length / nom_front_lower_leg_length
 nom_leg_to_body_ratio = nom_leg_length / nom_scale_length
 
 nom_chassis_width = float(np.squeeze(body.evaluate(para_body_hip_fl).value[1] - body.evaluate(para_body_hip_fr).value[1]))
 nom_chassis_aspect_ratio = nom_chassis_width / nom_scale_length
 
 # Capture baseline connection vectors from imported CAD
-baseline_fl_hip_conn = front_left_thigh.evaluate(para_thigh_hip_fl).value - body.evaluate(para_body_hip_fl).value
-baseline_fr_hip_conn = front_right_thigh.evaluate(para_thigh_hip_fr).value - body.evaluate(para_body_hip_fr).value
-baseline_rl_hip_conn = rear_left_thigh.evaluate(para_thigh_hip_rl).value - body.evaluate(para_body_hip_rl).value
-baseline_rr_hip_conn = rear_right_thigh.evaluate(para_thigh_hip_rr).value - body.evaluate(para_body_hip_rr).value
+baseline_fl_hip_conn = front_left_upper_leg.evaluate(para_upper_leg_hip_fl).value - body.evaluate(para_body_hip_fl).value
+baseline_fr_hip_conn = front_right_upper_leg.evaluate(para_upper_leg_hip_fr).value - body.evaluate(para_body_hip_fr).value
+baseline_rl_hip_conn = rear_left_upper_leg.evaluate(para_upper_leg_hip_rl).value - body.evaluate(para_body_hip_rl).value
+baseline_rr_hip_conn = rear_right_upper_leg.evaluate(para_upper_leg_hip_rr).value - body.evaluate(para_body_hip_rr).value
 
-baseline_fl_knee_conn = front_left_shank.evaluate(para_shank_knee_fl).value - front_left_thigh.evaluate(para_thigh_knee_fl).value
-baseline_fr_knee_conn = front_right_shank.evaluate(para_shank_knee_fr).value - front_right_thigh.evaluate(para_thigh_knee_fr).value
-baseline_rl_knee_conn = rear_left_shank.evaluate(para_shank_knee_rl).value - rear_left_thigh.evaluate(para_thigh_knee_rl).value
-baseline_rr_knee_conn = rear_right_shank.evaluate(para_shank_knee_rr).value - rear_right_thigh.evaluate(para_thigh_knee_rr).value
+baseline_fl_knee_conn = front_left_lower_leg.evaluate(para_lower_leg_knee_fl).value - front_left_upper_leg.evaluate(para_upper_leg_knee_fl).value
+baseline_fr_knee_conn = front_right_lower_leg.evaluate(para_lower_leg_knee_fr).value - front_right_upper_leg.evaluate(para_upper_leg_knee_fr).value
+baseline_rl_knee_conn = rear_left_lower_leg.evaluate(para_lower_leg_knee_rl).value - rear_left_upper_leg.evaluate(para_upper_leg_knee_rl).value
+baseline_rr_knee_conn = rear_right_lower_leg.evaluate(para_lower_leg_knee_rr).value - rear_right_upper_leg.evaluate(para_upper_leg_knee_rr).value
 
 nom_abduction_offset = float(np.squeeze(abs(baseline_fl_hip_conn[1])))
 nom_abduction_offset_ratio = nom_abduction_offset / nom_leg_length
@@ -154,7 +156,7 @@ nom_initial_knee_angle_deg = -90.0
 
 print("Imported CAD Nominal & Dimensionless Values:")
 print(f"  Scale Length (Lb)             : {nom_scale_length:.6f} m")
-print(f"  Leg Aspect Ratio (rho_leg)    : {nom_leg_aspect_ratio:.6f}  (L_thigh / L_shank)")
+print(f"  Leg Aspect Ratio (rho_leg)    : {nom_leg_aspect_ratio:.6f}  (L_upper_leg / L_lower_leg)")
 print(f"  Leg-to-Body Ratio (rho_body)  : {nom_leg_to_body_ratio:.6f}  ((L2 + L3) / Lb)")
 print(f"  Chassis Aspect Ratio (alpha)  : {nom_chassis_aspect_ratio:.6f}  (Wb / Lb)")
 print(f"  Abduction Offset Ratio (rho_ab: {nom_abduction_offset_ratio:.6f}  (L_ab / (L2 + L3))")
@@ -182,29 +184,29 @@ knee_angle_rad = initial_knee_angle_dv * (np.pi / 180.0)
 # Trivariate 2x2x2 linear FFD blocks around body and each limb component
 body_ffd = lg.construct_ffd_block_around_entities(body, num_coefficients=(2, 2, 2))
 
-fl_thigh_ffd = lg.construct_ffd_block_around_entities(front_left_thigh, num_coefficients=(2, 2, 2))
-fr_thigh_ffd = lg.construct_ffd_block_around_entities(front_right_thigh, num_coefficients=(2, 2, 2))
-rl_thigh_ffd = lg.construct_ffd_block_around_entities(rear_left_thigh, num_coefficients=(2, 2, 2))
-rr_thigh_ffd = lg.construct_ffd_block_around_entities(rear_right_thigh, num_coefficients=(2, 2, 2))
+fl_upper_leg_ffd = lg.construct_ffd_block_around_entities(front_left_upper_leg, num_coefficients=(2, 2, 2))
+fr_upper_leg_ffd = lg.construct_ffd_block_around_entities(front_right_upper_leg, num_coefficients=(2, 2, 2))
+rl_upper_leg_ffd = lg.construct_ffd_block_around_entities(rear_left_upper_leg, num_coefficients=(2, 2, 2))
+rr_upper_leg_ffd = lg.construct_ffd_block_around_entities(rear_right_upper_leg, num_coefficients=(2, 2, 2))
 
-fl_shank_ffd = lg.construct_ffd_block_around_entities(front_left_shank, num_coefficients=(2, 2, 2))
-fr_shank_ffd = lg.construct_ffd_block_around_entities(front_right_shank, num_coefficients=(2, 2, 2))
-rl_shank_ffd = lg.construct_ffd_block_around_entities(rear_left_shank, num_coefficients=(2, 2, 2))
-rr_shank_ffd = lg.construct_ffd_block_around_entities(rear_right_shank, num_coefficients=(2, 2, 2))
+fl_lower_leg_ffd = lg.construct_ffd_block_around_entities(front_left_lower_leg, num_coefficients=(2, 2, 2))
+fr_lower_leg_ffd = lg.construct_ffd_block_around_entities(front_right_lower_leg, num_coefficients=(2, 2, 2))
+rl_lower_leg_ffd = lg.construct_ffd_block_around_entities(rear_left_lower_leg, num_coefficients=(2, 2, 2))
+rr_lower_leg_ffd = lg.construct_ffd_block_around_entities(rear_right_lower_leg, num_coefficients=(2, 2, 2))
 
 # FFD stretch states
 body_stretch_x = csdl.Variable(value=0.0, name='body_stretch_x')
 body_stretch_y = csdl.Variable(value=0.0, name='body_stretch_y')
 
-fl_thigh_stretch = csdl.Variable(value=0.0, name='fl_thigh_stretch')
-fr_thigh_stretch = csdl.Variable(value=0.0, name='fr_thigh_stretch')
-rl_thigh_stretch = csdl.Variable(value=0.0, name='rl_thigh_stretch')
-rr_thigh_stretch = csdl.Variable(value=0.0, name='rr_thigh_stretch')
+fl_upper_leg_stretch = csdl.Variable(value=0.0, name='fl_upper_leg_stretch')
+fr_upper_leg_stretch = csdl.Variable(value=0.0, name='fr_upper_leg_stretch')
+rl_upper_leg_stretch = csdl.Variable(value=0.0, name='rl_upper_leg_stretch')
+rr_upper_leg_stretch = csdl.Variable(value=0.0, name='rr_upper_leg_stretch')
 
-fl_shank_stretch = csdl.Variable(value=0.0, name='fl_shank_stretch')
-fr_shank_stretch = csdl.Variable(value=0.0, name='fr_shank_stretch')
-rl_shank_stretch = csdl.Variable(value=0.0, name='rl_shank_stretch')
-rr_shank_stretch = csdl.Variable(value=0.0, name='rr_shank_stretch')
+fl_lower_leg_stretch = csdl.Variable(value=0.0, name='fl_lower_leg_stretch')
+fr_lower_leg_stretch = csdl.Variable(value=0.0, name='fr_lower_leg_stretch')
+rl_lower_leg_stretch = csdl.Variable(value=0.0, name='rl_lower_leg_stretch')
+rr_lower_leg_stretch = csdl.Variable(value=0.0, name='rr_lower_leg_stretch')
 
 # Body longitudinal x deformation: front (+x) moves +stretch_x/2, rear (-x) moves -stretch_x/2
 # Body lateral y deformation: left (+y) moves +stretch_y/2, right (-y) moves -stretch_y/2
@@ -214,31 +216,31 @@ body_coeff = body_coeff.set(csdl.slice[:, 1, :, 1], body_coeff[:, 1, :, 1] + bod
 body_coeff = body_coeff.set(csdl.slice[:, 0, :, 1], body_coeff[:, 0, :, 1] - body_stretch_y / 2.0)
 body.set_coefficients(body_ffd.evaluate_ffd(body_coeff))
 
-# Thigh longitudinal deformation: move knee joint end (z=0, index 0 in dim 2) along -z
-fl_th_coeff = fl_thigh_ffd.coefficients.set(csdl.slice[:, :, 0, 2], fl_thigh_ffd.coefficients[:, :, 0, 2] - fl_thigh_stretch)
-front_left_thigh.set_coefficients(fl_thigh_ffd.evaluate_ffd(fl_th_coeff))
+# Upper Leg longitudinal deformation: move knee joint end (z=0, index 0 in dim 2) along -z
+fl_upper_leg_coeff = fl_upper_leg_ffd.coefficients.set(csdl.slice[:, :, 0, 2], fl_upper_leg_ffd.coefficients[:, :, 0, 2] - fl_upper_leg_stretch)
+front_left_upper_leg.set_coefficients(fl_upper_leg_ffd.evaluate_ffd(fl_upper_leg_coeff))
 
-fr_th_coeff = fr_thigh_ffd.coefficients.set(csdl.slice[:, :, 0, 2], fr_thigh_ffd.coefficients[:, :, 0, 2] - fr_thigh_stretch)
-front_right_thigh.set_coefficients(fr_thigh_ffd.evaluate_ffd(fr_th_coeff))
+fr_upper_leg_coeff = fr_upper_leg_ffd.coefficients.set(csdl.slice[:, :, 0, 2], fr_upper_leg_ffd.coefficients[:, :, 0, 2] - fr_upper_leg_stretch)
+front_right_upper_leg.set_coefficients(fr_upper_leg_ffd.evaluate_ffd(fr_upper_leg_coeff))
 
-rl_th_coeff = rl_thigh_ffd.coefficients.set(csdl.slice[:, :, 0, 2], rl_thigh_ffd.coefficients[:, :, 0, 2] - rl_thigh_stretch)
-rear_left_thigh.set_coefficients(rl_thigh_ffd.evaluate_ffd(rl_th_coeff))
+rl_upper_leg_coeff = rl_upper_leg_ffd.coefficients.set(csdl.slice[:, :, 0, 2], rl_upper_leg_ffd.coefficients[:, :, 0, 2] - rl_upper_leg_stretch)
+rear_left_upper_leg.set_coefficients(rl_upper_leg_ffd.evaluate_ffd(rl_upper_leg_coeff))
 
-rr_th_coeff = rr_thigh_ffd.coefficients.set(csdl.slice[:, :, 0, 2], rr_thigh_ffd.coefficients[:, :, 0, 2] - rr_thigh_stretch)
-rear_right_thigh.set_coefficients(rr_thigh_ffd.evaluate_ffd(rr_th_coeff))
+rr_upper_leg_coeff = rr_upper_leg_ffd.coefficients.set(csdl.slice[:, :, 0, 2], rr_upper_leg_ffd.coefficients[:, :, 0, 2] - rr_upper_leg_stretch)
+rear_right_upper_leg.set_coefficients(rr_upper_leg_ffd.evaluate_ffd(rr_upper_leg_coeff))
 
-# shank longitudinal deformation: move foot contact end (z=0, index 0 in dim 2) along -z
-fl_sh_coeff = fl_shank_ffd.coefficients.set(csdl.slice[:, :, 0, 2], fl_shank_ffd.coefficients[:, :, 0, 2] - fl_shank_stretch)
-front_left_shank.set_coefficients(fl_shank_ffd.evaluate_ffd(fl_sh_coeff))
+# lower_leg longitudinal deformation: move foot contact end (z=0, index 0 in dim 2) along -z
+fl_lower_leg_coeff = fl_lower_leg_ffd.coefficients.set(csdl.slice[:, :, 0, 2], fl_lower_leg_ffd.coefficients[:, :, 0, 2] - fl_lower_leg_stretch)
+front_left_lower_leg.set_coefficients(fl_lower_leg_ffd.evaluate_ffd(fl_lower_leg_coeff))
 
-fr_sh_coeff = fr_shank_ffd.coefficients.set(csdl.slice[:, :, 0, 2], fr_shank_ffd.coefficients[:, :, 0, 2] - fr_shank_stretch)
-front_right_shank.set_coefficients(fr_shank_ffd.evaluate_ffd(fr_sh_coeff))
+fr_lower_leg_coeff = fr_lower_leg_ffd.coefficients.set(csdl.slice[:, :, 0, 2], fr_lower_leg_ffd.coefficients[:, :, 0, 2] - fr_lower_leg_stretch)
+front_right_lower_leg.set_coefficients(fr_lower_leg_ffd.evaluate_ffd(fr_lower_leg_coeff))
 
-rl_sh_coeff = rl_shank_ffd.coefficients.set(csdl.slice[:, :, 0, 2], rl_shank_ffd.coefficients[:, :, 0, 2] - rl_shank_stretch)
-rear_left_shank.set_coefficients(rl_shank_ffd.evaluate_ffd(rl_sh_coeff))
+rl_lower_leg_coeff = rl_lower_leg_ffd.coefficients.set(csdl.slice[:, :, 0, 2], rl_lower_leg_ffd.coefficients[:, :, 0, 2] - rl_lower_leg_stretch)
+rear_left_lower_leg.set_coefficients(rl_lower_leg_ffd.evaluate_ffd(rl_lower_leg_coeff))
 
-rr_sh_coeff = rr_shank_ffd.coefficients.set(csdl.slice[:, :, 0, 2], rr_shank_ffd.coefficients[:, :, 0, 2] - rr_shank_stretch)
-rear_right_shank.set_coefficients(rr_shank_ffd.evaluate_ffd(rr_sh_coeff))
+rr_lower_leg_coeff = rr_lower_leg_ffd.coefficients.set(csdl.slice[:, :, 0, 2], rr_lower_leg_ffd.coefficients[:, :, 0, 2] - rr_lower_leg_stretch)
+rear_right_lower_leg.set_coefficients(rr_lower_leg_ffd.evaluate_ffd(rr_lower_leg_coeff))
 
 # ==============================================================================
 # 7. Kinematic Posture Rotations
@@ -246,27 +248,27 @@ rear_right_shank.set_coefficients(rr_shank_ffd.evaluate_ffd(rr_sh_coeff))
 # Rotate each complete leg assembly about its own hip joint
 rot_axis_y = np.array([0.0, 1.0, 0.0])
 
-fl_hip_origin = front_left_leg.evaluate(para_thigh_hip_fl)
-fr_hip_origin = front_right_leg.evaluate(para_thigh_hip_fr)
-rl_hip_origin = rear_left_leg.evaluate(para_thigh_hip_rl)
-rr_hip_origin = rear_right_leg.evaluate(para_thigh_hip_rr)
+fl_hip_origin = front_left_leg.evaluate(para_upper_leg_hip_fl)
+fr_hip_origin = front_right_leg.evaluate(para_upper_leg_hip_fr)
+rl_hip_origin = rear_left_leg.evaluate(para_upper_leg_hip_rl)
+rr_hip_origin = rear_right_leg.evaluate(para_upper_leg_hip_rr)
 
 front_left_leg.rotate(rotation_origin=fl_hip_origin, axis_vector=rot_axis_y, angles=hip_angle_rad)
 front_right_leg.rotate(rotation_origin=fr_hip_origin, axis_vector=rot_axis_y, angles=hip_angle_rad)
 rear_left_leg.rotate(rotation_origin=rl_hip_origin, axis_vector=rot_axis_y, angles=hip_angle_rad)
 rear_right_leg.rotate(rotation_origin=rr_hip_origin, axis_vector=rot_axis_y, angles=hip_angle_rad)
 
-# Evaluate rotated knee points on thighs/legs after hip rotation
-fl_knee_origin = front_left_thigh.evaluate(para_thigh_knee_fl)
-fr_knee_origin = front_right_thigh.evaluate(para_thigh_knee_fr)
-rl_knee_origin = rear_left_thigh.evaluate(para_thigh_knee_rl)
-rr_knee_origin = rear_right_thigh.evaluate(para_thigh_knee_rr)
+# Evaluate rotated knee points on upper legs/legs after hip rotation
+fl_knee_origin = front_left_upper_leg.evaluate(para_upper_leg_knee_fl)
+fr_knee_origin = front_right_upper_leg.evaluate(para_upper_leg_knee_fr)
+rl_knee_origin = rear_left_upper_leg.evaluate(para_upper_leg_knee_rl)
+rr_knee_origin = rear_right_upper_leg.evaluate(para_upper_leg_knee_rr)
 
-# Rotate shanks about their rotated knee joints
-front_left_shank.rotate(rotation_origin=fl_knee_origin, axis_vector=rot_axis_y, angles=knee_angle_rad)
-front_right_shank.rotate(rotation_origin=fr_knee_origin, axis_vector=rot_axis_y, angles=knee_angle_rad)
-rear_left_shank.rotate(rotation_origin=rl_knee_origin, axis_vector=rot_axis_y, angles=knee_angle_rad)
-rear_right_shank.rotate(rotation_origin=rr_knee_origin, axis_vector=rot_axis_y, angles=knee_angle_rad)
+# Rotate lower legs about their rotated knee joints
+front_left_lower_leg.rotate(rotation_origin=fl_knee_origin, axis_vector=rot_axis_y, angles=knee_angle_rad)
+front_right_lower_leg.rotate(rotation_origin=fr_knee_origin, axis_vector=rot_axis_y, angles=knee_angle_rad)
+rear_left_lower_leg.rotate(rotation_origin=rl_knee_origin, axis_vector=rot_axis_y, angles=knee_angle_rad)
+rear_right_lower_leg.rotate(rotation_origin=rr_knee_origin, axis_vector=rot_axis_y, angles=knee_angle_rad)
 
 # ==============================================================================
 # 8. Rigid Body Corrections
@@ -281,100 +283,100 @@ body_trans = csdl.concatenate([csdl.Variable(value=0.0), csdl.Variable(value=0.0
 for f in body.functions.values():
     f.coefficients += csdl.expand(body_trans, f.coefficients.shape, 'i->jki')
 
-# Component-level 3D translations for thighs to preserve hip connections
-fl_th_trans = csdl.Variable(value=np.zeros(3), name='fl_th_trans')
-fr_th_trans = csdl.Variable(value=np.zeros(3), name='fr_th_trans')
-rl_th_trans = csdl.Variable(value=np.zeros(3), name='rl_th_trans')
-rr_th_trans = csdl.Variable(value=np.zeros(3), name='rr_th_trans')
+# Component-level 3D translations for upper legs to preserve hip connections
+fl_upper_leg_trans = csdl.Variable(value=np.zeros(3), name='fl_upper_leg_trans')
+fr_upper_leg_trans = csdl.Variable(value=np.zeros(3), name='fr_upper_leg_trans')
+rl_upper_leg_trans = csdl.Variable(value=np.zeros(3), name='rl_upper_leg_trans')
+rr_upper_leg_trans = csdl.Variable(value=np.zeros(3), name='rr_upper_leg_trans')
 
-for f in front_left_thigh.functions.values(): f.coefficients += csdl.expand(fl_th_trans, f.coefficients.shape, 'i->jki')
-for f in front_right_thigh.functions.values(): f.coefficients += csdl.expand(fr_th_trans, f.coefficients.shape, 'i->jki')
-for f in rear_left_thigh.functions.values(): f.coefficients += csdl.expand(rl_th_trans, f.coefficients.shape, 'i->jki')
-for f in rear_right_thigh.functions.values(): f.coefficients += csdl.expand(rr_th_trans, f.coefficients.shape, 'i->jki')
+for f in front_left_upper_leg.functions.values(): f.coefficients += csdl.expand(fl_upper_leg_trans, f.coefficients.shape, 'i->jki')
+for f in front_right_upper_leg.functions.values(): f.coefficients += csdl.expand(fr_upper_leg_trans, f.coefficients.shape, 'i->jki')
+for f in rear_left_upper_leg.functions.values(): f.coefficients += csdl.expand(rl_upper_leg_trans, f.coefficients.shape, 'i->jki')
+for f in rear_right_upper_leg.functions.values(): f.coefficients += csdl.expand(rr_upper_leg_trans, f.coefficients.shape, 'i->jki')
 
-# Component-level 3D translations for shanks to preserve knee connections
-fl_sh_trans = csdl.Variable(value=np.zeros(3), name='fl_sh_trans')
-fr_sh_trans = csdl.Variable(value=np.zeros(3), name='fr_sh_trans')
-rl_sh_trans = csdl.Variable(value=np.zeros(3), name='rl_sh_trans')
-rr_sh_trans = csdl.Variable(value=np.zeros(3), name='rr_sh_trans')
+# Component-level 3D translations for lower legs to preserve knee connections
+fl_lower_leg_trans = csdl.Variable(value=np.zeros(3), name='fl_lower_leg_trans')
+fr_lower_leg_trans = csdl.Variable(value=np.zeros(3), name='fr_lower_leg_trans')
+rl_lower_leg_trans = csdl.Variable(value=np.zeros(3), name='rl_lower_leg_trans')
+rr_lower_leg_trans = csdl.Variable(value=np.zeros(3), name='rr_lower_leg_trans')
 
-for f in front_left_shank.functions.values(): f.coefficients += csdl.expand(fl_sh_trans, f.coefficients.shape, 'i->jki')
-for f in front_right_shank.functions.values(): f.coefficients += csdl.expand(fr_sh_trans, f.coefficients.shape, 'i->jki')
-for f in rear_left_shank.functions.values(): f.coefficients += csdl.expand(rl_sh_trans, f.coefficients.shape, 'i->jki')
-for f in rear_right_shank.functions.values(): f.coefficients += csdl.expand(rr_sh_trans, f.coefficients.shape, 'i->jki')
+for f in front_left_lower_leg.functions.values(): f.coefficients += csdl.expand(fl_lower_leg_trans, f.coefficients.shape, 'i->jki')
+for f in front_right_lower_leg.functions.values(): f.coefficients += csdl.expand(fr_lower_leg_trans, f.coefficients.shape, 'i->jki')
+for f in rear_left_lower_leg.functions.values(): f.coefficients += csdl.expand(rl_lower_leg_trans, f.coefficients.shape, 'i->jki')
+for f in rear_right_lower_leg.functions.values(): f.coefficients += csdl.expand(rr_lower_leg_trans, f.coefficients.shape, 'i->jki')
 
 # ==============================================================================
 # 9. Geometric Output Metrics and Connection Quantities
 # ==============================================================================
 # Evaluated points
-fl_th_h_pt = front_left_thigh.evaluate(para_thigh_hip_fl)
-fl_th_k_pt = front_left_thigh.evaluate(para_thigh_knee_fl)
-fr_th_h_pt = front_right_thigh.evaluate(para_thigh_hip_fr)
-fr_th_k_pt = front_right_thigh.evaluate(para_thigh_knee_fr)
+fl_upper_leg_h_pt = front_left_upper_leg.evaluate(para_upper_leg_hip_fl)
+fl_upper_leg_k_pt = front_left_upper_leg.evaluate(para_upper_leg_knee_fl)
+fr_upper_leg_h_pt = front_right_upper_leg.evaluate(para_upper_leg_hip_fr)
+fr_upper_leg_k_pt = front_right_upper_leg.evaluate(para_upper_leg_knee_fr)
 
-rl_th_h_pt = rear_left_thigh.evaluate(para_thigh_hip_rl)
-rl_th_k_pt = rear_left_thigh.evaluate(para_thigh_knee_rl)
-rr_th_h_pt = rear_right_thigh.evaluate(para_thigh_hip_rr)
-rr_th_k_pt = rear_right_thigh.evaluate(para_thigh_knee_rr)
+rl_upper_leg_h_pt = rear_left_upper_leg.evaluate(para_upper_leg_hip_rl)
+rl_upper_leg_k_pt = rear_left_upper_leg.evaluate(para_upper_leg_knee_rl)
+rr_upper_leg_h_pt = rear_right_upper_leg.evaluate(para_upper_leg_hip_rr)
+rr_upper_leg_k_pt = rear_right_upper_leg.evaluate(para_upper_leg_knee_rr)
 
-fl_sh_k_pt = front_left_shank.evaluate(para_shank_knee_fl)
-fl_sh_f_pt = front_left_shank.evaluate(para_shank_foot_fl)
-fr_sh_k_pt = front_right_shank.evaluate(para_shank_knee_fr)
-fr_sh_f_pt = front_right_shank.evaluate(para_shank_foot_fr)
+fl_lower_leg_k_pt = front_left_lower_leg.evaluate(para_lower_leg_knee_fl)
+fl_lower_leg_f_pt = front_left_lower_leg.evaluate(para_lower_leg_foot_fl)
+fr_lower_leg_k_pt = front_right_lower_leg.evaluate(para_lower_leg_knee_fr)
+fr_lower_leg_f_pt = front_right_lower_leg.evaluate(para_lower_leg_foot_fr)
 
-rl_sh_k_pt = rear_left_shank.evaluate(para_shank_knee_rl)
-rl_sh_f_pt = rear_left_shank.evaluate(para_shank_foot_rl)
-rr_sh_k_pt = rear_right_shank.evaluate(para_shank_knee_rr)
-rr_sh_f_pt = rear_right_shank.evaluate(para_shank_foot_rr)
+rl_lower_leg_k_pt = rear_left_lower_leg.evaluate(para_lower_leg_knee_rl)
+rl_lower_leg_f_pt = rear_left_lower_leg.evaluate(para_lower_leg_foot_rl)
+rr_lower_leg_k_pt = rear_right_lower_leg.evaluate(para_lower_leg_knee_rr)
+rr_lower_leg_f_pt = rear_right_lower_leg.evaluate(para_lower_leg_foot_rr)
 
 # Length and width metrics
 body_len_comp = body.evaluate(para_body_front)[0] - body.evaluate(para_body_rear)[0]
 chassis_width_comp = body.evaluate(para_body_hip_fl)[1] - body.evaluate(para_body_hip_fr)[1]
 
-fl_thigh_len_comp = csdl.norm(fl_th_h_pt - fl_th_k_pt)
-fr_thigh_len_comp = csdl.norm(fr_th_h_pt - fr_th_k_pt)
-rl_thigh_len_comp = csdl.norm(rl_th_h_pt - rl_th_k_pt)
-rr_thigh_len_comp = csdl.norm(rr_th_h_pt - rr_th_k_pt)
+fl_upper_leg_len_comp = csdl.norm(fl_upper_leg_h_pt - fl_upper_leg_k_pt)
+fr_upper_leg_len_comp = csdl.norm(fr_upper_leg_h_pt - fr_upper_leg_k_pt)
+rl_upper_leg_len_comp = csdl.norm(rl_upper_leg_h_pt - rl_upper_leg_k_pt)
+rr_upper_leg_len_comp = csdl.norm(rr_upper_leg_h_pt - rr_upper_leg_k_pt)
 
-fl_shank_len_comp = csdl.norm(fl_sh_k_pt - fl_sh_f_pt)
-fr_shank_len_comp = csdl.norm(fr_sh_k_pt - fr_sh_f_pt)
-rl_shank_len_comp = csdl.norm(rl_sh_k_pt - rl_sh_f_pt)
-rr_shank_len_comp = csdl.norm(rr_sh_k_pt - rr_sh_f_pt)
+fl_lower_leg_len_comp = csdl.norm(fl_lower_leg_k_pt - fl_lower_leg_f_pt)
+fr_lower_leg_len_comp = csdl.norm(fr_lower_leg_k_pt - fr_lower_leg_f_pt)
+rl_lower_leg_len_comp = csdl.norm(rl_lower_leg_k_pt - rl_lower_leg_f_pt)
+rr_lower_leg_len_comp = csdl.norm(rr_lower_leg_k_pt - rr_lower_leg_f_pt)
 
 # Dimensionless ratio metrics computed directly from geometry
 chassis_aspect_ratio_comp = chassis_width_comp / body_len_comp
 
-fl_leg_aspect_ratio_comp = fl_thigh_len_comp / fl_shank_len_comp
-fr_leg_aspect_ratio_comp = fr_thigh_len_comp / fr_shank_len_comp
-rl_leg_aspect_ratio_comp = rl_thigh_len_comp / rl_shank_len_comp
-rr_leg_aspect_ratio_comp = rr_thigh_len_comp / rr_shank_len_comp
+fl_leg_aspect_ratio_comp = fl_upper_leg_len_comp / fl_lower_leg_len_comp
+fr_leg_aspect_ratio_comp = fr_upper_leg_len_comp / fr_lower_leg_len_comp
+rl_leg_aspect_ratio_comp = rl_upper_leg_len_comp / rl_lower_leg_len_comp
+rr_leg_aspect_ratio_comp = rr_upper_leg_len_comp / rr_lower_leg_len_comp
 
-fl_leg_to_body_ratio_comp = (fl_thigh_len_comp + fl_shank_len_comp) / body_len_comp
-fr_leg_to_body_ratio_comp = (fr_thigh_len_comp + fr_shank_len_comp) / body_len_comp
-rl_leg_to_body_ratio_comp = (rl_thigh_len_comp + rl_shank_len_comp) / body_len_comp
-rr_leg_to_body_ratio_comp = (rr_thigh_len_comp + rr_shank_len_comp) / body_len_comp
+fl_leg_to_body_ratio_comp = (fl_upper_leg_len_comp + fl_lower_leg_len_comp) / body_len_comp
+fr_leg_to_body_ratio_comp = (fr_upper_leg_len_comp + fr_lower_leg_len_comp) / body_len_comp
+rl_leg_to_body_ratio_comp = (rl_upper_leg_len_comp + rl_lower_leg_len_comp) / body_len_comp
+rr_leg_to_body_ratio_comp = (rr_upper_leg_len_comp + rr_lower_leg_len_comp) / body_len_comp
 
 # Joint connection vectors
-conn_fl_hip = fl_th_h_pt - body.evaluate(para_body_hip_fl)
-conn_fr_hip = fr_th_h_pt - body.evaluate(para_body_hip_fr)
-conn_rl_hip = rl_th_h_pt - body.evaluate(para_body_hip_rl)
-conn_rr_hip = rr_th_h_pt - body.evaluate(para_body_hip_rr)
+conn_fl_hip = fl_upper_leg_h_pt - body.evaluate(para_body_hip_fl)
+conn_fr_hip = fr_upper_leg_h_pt - body.evaluate(para_body_hip_fr)
+conn_rl_hip = rl_upper_leg_h_pt - body.evaluate(para_body_hip_rl)
+conn_rr_hip = rr_upper_leg_h_pt - body.evaluate(para_body_hip_rr)
 
-conn_fl_knee = fl_sh_k_pt - fl_th_k_pt
-conn_fr_knee = fr_sh_k_pt - fr_th_k_pt
-conn_rl_knee = rl_sh_k_pt - rl_th_k_pt
-conn_rr_knee = rr_sh_k_pt - rr_th_k_pt
+conn_fl_knee = fl_lower_leg_k_pt - fl_upper_leg_k_pt
+conn_fr_knee = fr_lower_leg_k_pt - fr_upper_leg_k_pt
+conn_rl_knee = rl_lower_leg_k_pt - rl_upper_leg_k_pt
+conn_rr_knee = rr_lower_leg_k_pt - rr_upper_leg_k_pt
 
-fl_abduction_offset_ratio_comp = conn_fl_hip[1] / (fl_thigh_len_comp + fl_shank_len_comp)
-fr_abduction_offset_ratio_comp = (-conn_fr_hip[1]) / (fr_thigh_len_comp + fr_shank_len_comp)
-rl_abduction_offset_ratio_comp = conn_rl_hip[1] / (rl_thigh_len_comp + rl_shank_len_comp)
-rr_abduction_offset_ratio_comp = (-conn_rr_hip[1]) / (rr_thigh_len_comp + rr_shank_len_comp)
+fl_abduction_offset_ratio_comp = conn_fl_hip[1] / (fl_upper_leg_len_comp + fl_lower_leg_len_comp)
+fr_abduction_offset_ratio_comp = (-conn_fr_hip[1]) / (fr_upper_leg_len_comp + fr_lower_leg_len_comp)
+rl_abduction_offset_ratio_comp = conn_rl_hip[1] / (rl_upper_leg_len_comp + rl_lower_leg_len_comp)
+rr_abduction_offset_ratio_comp = (-conn_rr_hip[1]) / (rr_upper_leg_len_comp + rr_lower_leg_len_comp)
 
 # Foot heights
-foot_fl_z = fl_sh_f_pt[2]
-foot_fr_z = fr_sh_f_pt[2]
-foot_rl_z = rl_sh_f_pt[2]
-foot_rr_z = rr_sh_f_pt[2]
+foot_fl_z = fl_lower_leg_f_pt[2]
+foot_fr_z = fr_lower_leg_f_pt[2]
+foot_rl_z = rl_lower_leg_f_pt[2]
+foot_rr_z = rr_lower_leg_f_pt[2]
 
 # ==============================================================================
 # 10. Parameterization Solver Setup and Nominal Solve
@@ -385,27 +387,27 @@ solver = ParameterizationSolver()
 # Solver states
 solver.add_state(body_stretch_x)
 solver.add_state(body_stretch_y)
-solver.add_state(fl_thigh_stretch)
-solver.add_state(fr_thigh_stretch)
-solver.add_state(rl_thigh_stretch)
-solver.add_state(rr_thigh_stretch)
-solver.add_state(fl_shank_stretch)
-solver.add_state(fr_shank_stretch)
-solver.add_state(rl_shank_stretch)
-solver.add_state(rr_shank_stretch)
+solver.add_state(fl_upper_leg_stretch)
+solver.add_state(fr_upper_leg_stretch)
+solver.add_state(rl_upper_leg_stretch)
+solver.add_state(rr_upper_leg_stretch)
+solver.add_state(fl_lower_leg_stretch)
+solver.add_state(fr_lower_leg_stretch)
+solver.add_state(rl_lower_leg_stretch)
+solver.add_state(rr_lower_leg_stretch)
 
 solver.add_state(body_pitch)
 solver.add_state(body_trans_z)
 
-solver.add_state(fl_th_trans)
-solver.add_state(fr_th_trans)
-solver.add_state(rl_th_trans)
-solver.add_state(rr_th_trans)
+solver.add_state(fl_upper_leg_trans)
+solver.add_state(fr_upper_leg_trans)
+solver.add_state(rl_upper_leg_trans)
+solver.add_state(rr_upper_leg_trans)
 
-solver.add_state(fl_sh_trans)
-solver.add_state(fr_sh_trans)
-solver.add_state(rl_sh_trans)
-solver.add_state(rr_sh_trans)
+solver.add_state(fl_lower_leg_trans)
+solver.add_state(fr_lower_leg_trans)
+solver.add_state(rl_lower_leg_trans)
+solver.add_state(rr_lower_leg_trans)
 
 # Hip connection alignment in X (longitudinal) and Z (vertical)
 solver.add_equality_constraint(csdl.concatenate([conn_fl_hip[0], conn_fl_hip[2]]), np.array([baseline_fl_hip_conn[0], baseline_fl_hip_conn[2]]))
@@ -595,9 +597,9 @@ def generate_perturbation_video():
     sim.run()
     print(f"JaxSimulator compiled and verified in {time.time() - t_jit0:.2f}s!\n")
 
-    output_dir = "examples/showcase_examples/robot_dog"
+    output_dir = "examples/showcase_examples/quadruped_robot"
     os.makedirs(output_dir, exist_ok=True)
-    video_path = os.path.join(output_dir, "robot_dog_perturbations.mp4")
+    video_path = os.path.join(output_dir, "quadruped_robot_perturbations.mp4")
 
     pv.OFF_SCREEN = True
     plotter = pv.Plotter(off_screen=True, window_size=[1920, 1088])
@@ -612,14 +614,14 @@ def generate_perturbation_video():
     # Component styling
     video_components = [
         (body, "#3498db", "Body"),
-        (front_left_thigh, "#e67e22", "FL Thigh"),
-        (front_right_thigh, "#e67e22", "FR Thigh"),
-        (rear_left_thigh, "#d35400", "RL Thigh"),
-        (rear_right_thigh, "#d35400", "RR Thigh"),
-        (front_left_shank, "#2ecc71", "FL Shank"),
-        (front_right_shank, "#2ecc71", "FR Shank"),
-        (rear_left_shank, "#27ae60", "RL Shank"),
-        (rear_right_shank, "#27ae60", "RR Shank"),
+        (front_left_upper_leg, "#e67e22", "FL Upper Leg"),
+        (front_right_upper_leg, "#e67e22", "FR Upper Leg"),
+        (rear_left_upper_leg, "#d35400", "RL Upper Leg"),
+        (rear_right_upper_leg, "#d35400", "RR Upper Leg"),
+        (front_left_lower_leg, "#2ecc71", "FL Lower Leg"),
+        (front_right_lower_leg, "#2ecc71", "FR Lower Leg"),
+        (rear_left_lower_leg, "#27ae60", "RL Lower Leg"),
+        (rear_right_lower_leg, "#27ae60", "RR Lower Leg"),
     ]
 
     # Ground plane mesh at z = 0

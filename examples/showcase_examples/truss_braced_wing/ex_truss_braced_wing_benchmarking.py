@@ -116,20 +116,20 @@ for name, val in zip(variable_names, baseline_values):
     print(f"  {name:25s}: {val:10.4f}")
 print()
 
-# Reasonable design space bounds (±15% for wing and tail, [-10%, +15%] for cabin & moment arm)
+# Aggressive design space bounds (±50% across all continuous geometric variables)
 design_variable_bounds = {
-    'wing_area':            [baseline_values[0] * 0.85, baseline_values[0] * 1.15],
-    'wing_aspect_ratio':    [baseline_values[1] * 0.85, baseline_values[1] * 1.15],
-    'wing_mid_taper_ratio': [baseline_values[2] * 0.85, baseline_values[2] * 1.15],
-    'wing_tip_taper_ratio': [baseline_values[3] * 0.85, baseline_values[3] * 1.15],
-    'wing_inboard_sweep':   [baseline_values[4] * 0.85, baseline_values[4] * 1.15],
-    'wing_outboard_sweep':  [baseline_values[5] * 0.85, baseline_values[5] * 1.15],
-    'cabin_length':         [baseline_values[6] * 0.90, baseline_values[6] * 1.15],
-    'tail_moment_arm':      [baseline_values[7] * 0.90, baseline_values[7] * 1.15],
-    'fuselage_radius':      [baseline_values[8] * 0.85, baseline_values[8] * 1.15],
-    'tail_area':            [baseline_values[9] * 0.85, baseline_values[9] * 1.15],
-    'tail_aspect_ratio':    [baseline_values[10] * 0.85, baseline_values[10] * 1.15],
-    'tail_taper_ratio':     [baseline_values[11] * 0.85, baseline_values[11] * 1.15],
+    'wing_area':            [baseline_values[0] * 0.50, baseline_values[0] * 1.50],
+    'wing_aspect_ratio':    [baseline_values[1] * 0.50, baseline_values[1] * 1.50],
+    'wing_mid_taper_ratio': [baseline_values[2] * 0.50, baseline_values[2] * 1.50],
+    'wing_tip_taper_ratio': [baseline_values[3] * 0.50, baseline_values[3] * 1.50],
+    'wing_inboard_sweep':   [baseline_values[4] * 0.50, baseline_values[4] * 1.50],
+    'wing_outboard_sweep':  [baseline_values[5] * 0.50, baseline_values[5] * 1.50],
+    'cabin_length':         [baseline_values[6] * 0.50, baseline_values[6] * 1.50],
+    'tail_moment_arm':      [baseline_values[7] * 0.50, baseline_values[7] * 1.50],
+    'fuselage_radius':      [baseline_values[8] * 0.50, baseline_values[8] * 1.50],
+    'tail_area':            [baseline_values[9] * 0.50, baseline_values[9] * 1.50],
+    'tail_aspect_ratio':    [baseline_values[10] * 0.50, baseline_values[10] * 1.50],
+    'tail_taper_ratio':     [baseline_values[11] * 0.50, baseline_values[11] * 1.50],
 }
 
 n_samples = 100

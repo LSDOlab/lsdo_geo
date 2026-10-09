@@ -72,9 +72,8 @@ enable_iteration_tracking()
 
 # Configuration Flags
 CREATE_VIDEO = False
-RUN_BENCHMARK = not CREATE_VIDEO
 ENABLE_INEQUALITIES = os.environ.get("BENCH_ENABLE_INEQUALITIES", "False").lower() in ("true", "1", "yes")
-N_LHS_SAMPLES = int(os.environ.get("BENCH_N_SAMPLES", "100" if ENABLE_INEQUALITIES else "300"))
+N_LHS_SAMPLES = int(os.environ.get("BENCH_N_SAMPLES", "100"))
 SEED = 42
 
 # Pass inequality toggle to standard script
@@ -114,23 +113,24 @@ else:
 
     baseline_values = np.array([float(np.asarray(inp.value).flatten()[0]) for inp in jax_inputs])
 
+    # Aggressive design space bounds (±50% on dimensions, ±8° twist, ±10% lift rotor radii)
     design_variable_bounds = {
-        "wing_area":            [baseline_values[0] * 0.85, baseline_values[0] * 1.15],
-        "wing_aspect_ratio":    [baseline_values[1] * 0.85, baseline_values[1] * 1.15],
-        "wing_taper_ratio":     [baseline_values[2] * 0.85, baseline_values[2] * 1.15],
-        "wing_tip_twist":       [-4.0, 4.0],  # degrees
-        "tail_area":            [baseline_values[4] * 0.85, baseline_values[4] * 1.15],
-        "tail_aspect_ratio":    [baseline_values[5] * 0.85, baseline_values[5] * 1.15],
-        "tail_taper_ratio":     [baseline_values[6] * 0.85, baseline_values[6] * 1.15],
-        "cabin_length":         [baseline_values[7] * 0.90, baseline_values[7] * 1.10],
-        "tail_moment_arm":      [baseline_values[8] * 0.90, baseline_values[8] * 1.10],
-        "cabin_height":         [baseline_values[9] * 0.90, baseline_values[9] * 1.10],
-        "cabin_width":          [baseline_values[10] * 0.90, baseline_values[10] * 1.10],
-        "cruise_rotor_radius":  [baseline_values[11] * 0.90, baseline_values[11] * 1.10],
+        "wing_area":            [baseline_values[0] * 0.50, baseline_values[0] * 1.50],
+        "wing_aspect_ratio":    [baseline_values[1] * 0.50, baseline_values[1] * 1.50],
+        "wing_taper_ratio":     [baseline_values[2] * 0.50, baseline_values[2] * 1.50],
+        "wing_tip_twist":       [-8.0, 8.0],  # degrees
+        "tail_area":            [baseline_values[4] * 0.50, baseline_values[4] * 1.50],
+        "tail_aspect_ratio":    [baseline_values[5] * 0.50, baseline_values[5] * 1.50],
+        "tail_taper_ratio":     [baseline_values[6] * 0.50, baseline_values[6] * 1.50],
+        "cabin_length":         [baseline_values[7] * 0.50, baseline_values[7] * 1.50],
+        "tail_moment_arm":      [baseline_values[8] * 0.50, baseline_values[8] * 1.50],
+        "cabin_height":         [baseline_values[9] * 0.50, baseline_values[9] * 1.50],
+        "cabin_width":          [baseline_values[10] * 0.50, baseline_values[10] * 1.50],
+        "cruise_rotor_radius":  [baseline_values[11] * 0.50, baseline_values[11] * 1.50],
     }
     for i, name in enumerate(rotor_names):
         idx = 12 + i
-        design_variable_bounds[f"{name}_radius"] = [baseline_values[idx] * 0.95, baseline_values[idx] * 1.05]
+        design_variable_bounds[f"{name}_radius"] = [baseline_values[idx] * 0.90, baseline_values[idx] * 1.10]
 
     lower_bounds = np.array([design_variable_bounds[name][0] for name in variable_names])
     upper_bounds = np.array([design_variable_bounds[name][1] for name in variable_names])

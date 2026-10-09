@@ -114,17 +114,17 @@ for name, val in zip(variable_names, baseline_values):
     print(f"  {name:25s}: {val:10.4f}")
 print()
 
-# Reasonable design space bounds (±20% for continuous dimensions, ±5° for incidence angle)
+# Aggressive design space bounds (±50% for continuous dimensions, ±10° for incidence angle)
 design_variable_bounds = {
-    'wing_area':            [baseline_values[0] * 0.80, baseline_values[0] * 1.20],
-    'wing_aspect_ratio':    [baseline_values[1] * 0.80, baseline_values[1] * 1.20],
-    'wing_taper_ratio':     [baseline_values[2] * 0.80, baseline_values[2] * 1.20],
-    'tail_area':            [baseline_values[3] * 0.80, baseline_values[3] * 1.20],
-    'tail_aspect_ratio':    [baseline_values[4] * 0.80, baseline_values[4] * 1.20],
-    'tail_taper_ratio':     [baseline_values[5] * 0.80, baseline_values[5] * 1.20],
-    'tail_moment_arm':      [baseline_values[6] * 0.80, baseline_values[6] * 1.20],
-    'tail_incidence_angle': [-5.0, 5.0],
-    'propeller_radius':     [baseline_values[8] * 0.80, baseline_values[8] * 1.20],
+    'wing_area':            [baseline_values[0] * 0.50, baseline_values[0] * 1.50],
+    'wing_aspect_ratio':    [baseline_values[1] * 0.50, baseline_values[1] * 1.50],
+    'wing_taper_ratio':     [baseline_values[2] * 0.50, baseline_values[2] * 1.50],
+    'tail_area':            [baseline_values[3] * 0.50, baseline_values[3] * 1.50],
+    'tail_aspect_ratio':    [baseline_values[4] * 0.50, baseline_values[4] * 1.50],
+    'tail_taper_ratio':     [baseline_values[5] * 0.50, baseline_values[5] * 1.50],
+    'tail_moment_arm':      [baseline_values[6] * 0.50, baseline_values[6] * 1.50],
+    'tail_incidence_angle': [-10.0, 10.0],
+    'propeller_radius':     [baseline_values[8] * 0.50, baseline_values[8] * 1.50],
 }
 
 n_samples = 100
