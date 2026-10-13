@@ -91,23 +91,24 @@ def build_ibl_mesh_topology(
     y_round = np.round(y_right, 3)
     unique_y, counts = np.unique(y_round, return_counts=True)
     
-    # 40-panel spanwise stations
-    station_ys = unique_y[counts == 40]
+    dominant_station_quads = int(np.max(counts))
+    n_half = dominant_station_quads // 2
+    station_ys = unique_y[counts == dominant_station_quads]
     num_stations = len(station_ys)
     if num_stations < 2:
         raise ValueError(
-            f"Expected at least 2 valid span stations with 40 quads, found {num_stations}."
+            f"Expected at least 2 valid span stations with {dominant_station_quads} quads, found {num_stations}."
         )
 
-    upper_indices = np.zeros((num_stations, 20), dtype=int)
-    lower_indices = np.zeros((num_stations, 20), dtype=int)
+    upper_indices = np.zeros((num_stations, n_half), dtype=int)
+    lower_indices = np.zeros((num_stations, n_half), dtype=int)
     station_span_y = np.zeros(num_stations)
 
     for i, y_val in enumerate(station_ys):
         st_panels = right_indices[y_round == y_val]
-        if len(st_panels) != 40:
+        if len(st_panels) != dominant_station_quads:
             raise ValueError(
-                f"Station at y={y_val} has {len(st_panels)} panels instead of 40."
+                f"Station at y={y_val} has {len(st_panels)} panels instead of {dominant_station_quads}."
             )
         c_st = centers[st_panels]
         station_span_y[i] = np.mean(c_st[:, 1])
@@ -118,9 +119,9 @@ def build_ibl_mesh_topology(
         u_idx = st_panels[upper_mask]
         l_idx = st_panels[lower_mask]
 
-        if len(u_idx) != 20 or len(l_idx) != 20:
+        if len(u_idx) != n_half or len(l_idx) != n_half:
             raise ValueError(
-                f"Station at y={y_val} has {len(u_idx)} upper and {len(l_idx)} lower panels; expected 20 each."
+                f"Station at y={y_val} has {len(u_idx)} upper and {len(l_idx)} lower panels; expected {n_half} each."
             )
 
         # Sort from LE to TE (increasing x coordinate)
@@ -130,8 +131,8 @@ def build_ibl_mesh_topology(
         upper_indices[i] = u_sorted
         lower_indices[i] = l_sorted
 
-    # Construct static gather matrix M_gather of shape (2 * num_stations * 20, total_quads)
-    # paths_idx shape is (2, num_stations, 20) where path 0 = upper, path 1 = lower
+    # Construct static gather matrix M_gather of shape (2 * num_stations * n_half, total_quads)
+    # paths_idx shape is (2, num_stations, n_half) where path 0 = upper, path 1 = lower
     paths_idx = np.stack([upper_indices, lower_indices], axis=0)
     flat_paths_idx = paths_idx.flatten()
     n_gathered = len(flat_paths_idx)
@@ -168,6 +169,7 @@ def build_ibl_mesh_topology(
         'upper_indices': upper_indices,
         'lower_indices': lower_indices,
         'paths_idx': paths_idx,
+        'num_chord_panels': n_half,
         'M_gather': M_gather,
         'M_interp_ibl': M_interp_ibl,
     }
@@ -215,6 +217,7 @@ def evaluate_bwb_viscous_ibl(
         theta_te_upper, theta_te_lower.
     """
     num_stations = topology['num_stations']
+    num_chord_panels = topology.get('num_chord_panels', 20)
     M_gather_var = csdl.Variable(value=topology['M_gather'])
     M_interp_var = csdl.Variable(value=topology['M_interp_ibl'])
 
@@ -223,10 +226,10 @@ def evaluate_bwb_viscous_ibl(
 
     # Gather Cp and panel centers
     cp_flat = csdl.matvec(M_gather_var, cp_node0)
-    cp_paths = csdl.reshape(cp_flat, (2, num_stations, 20))
+    cp_paths = csdl.reshape(cp_flat, (2, num_stations, num_chord_panels))
 
     centers_flat = csdl.matmat(M_gather_var, dynamic_panel_centers)
-    centers_paths = csdl.reshape(centers_flat, (2, num_stations, 20, 3))
+    centers_paths = csdl.reshape(centers_flat, (2, num_stations, num_chord_panels, 3))
 
     # Pressure cutoff diagnostics: min(Cp) and margin from -5.0
     ibl_min_cp = -csdl.maximum(-cp_node0, axes=(0,), rho=50.0)
@@ -261,8 +264,8 @@ def evaluate_bwb_viscous_ibl(
     H_lower_steps = [csdl.Variable(value=np.full((num_stations,), H_0_val))]
     all_H = [csdl.reshape(csdl.Variable(value=np.full((2, num_stations), H_0_val)), (-1,))]
 
-    # March 19 chordwise panel intervals with second-order Runge-Kutta
-    for k in range(19):
+    # March (num_chord_panels - 1) chordwise panel intervals with second-order Runge-Kutta
+    for k in range(num_chord_panels - 1):
         diff = centers_paths[:, :, k+1, :] - centers_paths[:, :, k, :]
         ds_k = csdl.sqrt(csdl.sum(diff**2, axes=(2,)) + 1e-12)
 
@@ -340,10 +343,10 @@ def evaluate_bwb_viscous_ibl(
     cd_viscous_elem = csdl.matvec(M_interp_var, cd_section)
 
     # Local chordwise smooth-max per IBL station over upper and lower surfaces
-    # Reshaping to (20, num_stations) allows chordwise smooth-max along axis 0
-    H_upper_matrix = csdl.reshape(csdl.concatenate(H_upper_steps), (20, num_stations))
+    # Reshaping to (num_chord_panels, num_stations) allows chordwise smooth-max along axis 0
+    H_upper_matrix = csdl.reshape(csdl.concatenate(H_upper_steps), (num_chord_panels, num_stations))
     H_upper_matrix.name = 'H_upper_matrix'
-    H_lower_matrix = csdl.reshape(csdl.concatenate(H_lower_steps), (20, num_stations))
+    H_lower_matrix = csdl.reshape(csdl.concatenate(H_lower_steps), (num_chord_panels, num_stations))
     H_lower_matrix.name = 'H_lower_matrix'
     H_section_upper = csdl.maximum(H_upper_matrix, axes=(0,), rho=20.0)
     H_section_upper.name = 'H_section_upper'

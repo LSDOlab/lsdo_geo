@@ -74,18 +74,55 @@ ParamerizationType = Literal['ar_area', 'chord_span']
 formulation: ParamerizationType = 'chord_span'  # Options: 'chord_span' or 'ar_area'
 formulation = os.environ.get('BWB_FORMULATION', formulation)
 
-# 2. Mesh and design variable resolution: 'fast' or 'full'
-#   'fast' -> 5 design stations, 9 FFD sections, 1,272 aero quads (fast iteration/testing)
-#   'full' -> 8 design stations, 15 FFD sections, 2,872 aero quads (production resolution)
-resolution: Literal['fast', 'full'] = 'fast'  # Options: 'fast' or 'full'
-resolution = os.environ.get('BWB_RESOLUTION', resolution)
+# 2. Analysis mesh and design variable discretization toggles:
+# -------------------------------------------------------------------------
+# a) Spanwise analysis mesh stations per semi-span (e.g., 15, 35, 60)
+#    Controls spanwise discretization of the VortexAD vortex panel mesh.
+num_spanwise_sections: int = 35
+if 'BWB_NUM_SPANWISE_SECTIONS' in os.environ:
+    num_spanwise_sections = int(os.environ['BWB_NUM_SPANWISE_SECTIONS'])
+elif 'BWB_NUM_SECTIONS' in os.environ:
+    num_spanwise_sections = int(os.environ['BWB_NUM_SECTIONS'])
+
+# b) Chordwise panel count around airfoil ring (e.g., 20, 40, 50, 60)
+#    Controls chordwise discretization around upper/lower airfoil OML.
+num_chordwise_panels: int = 50
+if 'BWB_NUM_CHORDWISE_PANELS' in os.environ:
+    num_chordwise_panels = int(os.environ['BWB_NUM_CHORDWISE_PANELS'])
+elif 'BWB_NUM_CHORD' in os.environ:
+    num_chordwise_panels = int(os.environ['BWB_NUM_CHORD'])
+
+# c) Spanwise design variable stations per semi-span (e.g., 5, 6, 8)
+#    Controls number of chord, sweep, twist, camber, and thickness FFD control stations.
+num_spanwise_dvs: int = 6
+if 'BWB_NUM_DVS' in os.environ:
+    num_spanwise_dvs = int(os.environ['BWB_NUM_DVS'])
+elif 'BWB_NUM_STATIONS' in os.environ:
+    num_spanwise_dvs = int(os.environ['BWB_NUM_STATIONS'])
+
+# Preset resolution selector for backward compatibility ('fast', 'full', 'production'):
+resolution = os.environ.get('BWB_RESOLUTION', None)
+if resolution == 'fast':
+    num_spanwise_sections = 15
+    num_chordwise_panels = 40
+    num_spanwise_dvs = 5
+elif resolution == 'full':
+    num_spanwise_sections = 35
+    num_chordwise_panels = 50
+    num_spanwise_dvs = 6
+elif resolution == 'production':
+    num_spanwise_sections = 35
+    num_chordwise_panels = 60
+    num_spanwise_dvs = 6
+else:
+    resolution = f"{num_spanwise_dvs}DV_{num_spanwise_sections}S_{num_chordwise_panels}C"
 
 # 3. Geometric Non-Interference (Geonic) payload containment mode:
 #   'none'      -> Baseline behavior: unconstrained OML, legacy payload_cg DV, no BSM3 import
 #   'oversized' -> Constrain TCP0 oversized box (8 sample points, payload_center_x DV, 0.2 m buffer)
 #   'pallets'   -> Constrain TCP0 6-pallet stack (32 sample points, pallet_stack_center_x DV, 0.2 m buffer)
 #   'both'      -> Constrain both payload cases (40-point batch, equal CG consistency constraint)
-geonic_payload_mode: str = 'oversized'  # Options: 'none', 'oversized', 'pallets', 'both'
+geonic_payload_mode: str = 'none'  # Options: 'none', 'oversized', 'pallets', 'both'
 geonic_payload_mode = os.environ.get('GEONIC_PAYLOAD_MODE', geonic_payload_mode)
 if 'GEONIC_PAYLOAD_MODE' not in os.environ and 'USE_GEONIC' in os.environ:
     geonic_payload_mode = 'oversized' if str(os.environ['USE_GEONIC']).strip() == '1' else 'none'
@@ -201,24 +238,46 @@ if use_geonic:
     )
 
 # Import initial geometry that will be deformed
-geometry_directory = "examples/example_geometries/"
+geometry_directory = "examples/example_geometries/rectangular_wing/"
+if not os.path.exists(geometry_directory):
+    geometry_directory = "examples/example_geometries/"
 file_name = "rectangular_wing_naca0012_10ar"
 
-if resolution == 'fast':
-    num_stations = 5
-    num_ffd_sections = 2 * num_stations - 1  # 9 FFD sections across full span
-    mesh_file_name = "rectangular_wing_naca0012_10ar"  # Coarser mesh (1,272 quads) for rapid testing
-elif resolution == 'full':
-    num_stations = 8
-    num_ffd_sections = 2 * num_stations - 1  # 15 FFD sections across full span
-    mesh_file_name = "rectangular_wing_naca0012_35sect"  # Refined mesh (2,872 quads)
-else:
-    raise ValueError(f"Unknown resolution: {resolution}. Must be 'fast' or 'full'.")
-
-# Diagnostic-only override: retain active FFD parameterization while evaluating aero on different mesh
-aero_mesh_file_name = os.environ.get('BWB_AERO_MESH_FILE', mesh_file_name)
+num_stations = num_spanwise_dvs
+num_ffd_sections = 2 * num_stations - 1  # FFD sections across full span
 num_chord_stations = num_stations
 num_thickness_stations = num_stations
+
+# Aero mesh file resolution and dynamic on-demand generation
+if 'BWB_AERO_MESH_FILE' in os.environ:
+    aero_mesh_file_name = os.environ['BWB_AERO_MESH_FILE']
+    if aero_mesh_file_name.endswith('.msh'):
+        aero_mesh_file_name = aero_mesh_file_name[:-4]
+else:
+    # Standard naming conventions
+    if num_chordwise_panels == 40 and num_spanwise_sections == 15:
+        aero_mesh_file_name = "rectangular_wing_naca0012_10ar"
+    elif num_chordwise_panels == 40 and num_spanwise_sections == 35:
+        aero_mesh_file_name = "rectangular_wing_naca0012_35sect"
+    elif num_chordwise_panels == 40 and num_spanwise_sections == 60:
+        aero_mesh_file_name = "rectangular_wing_naca0012_60sect"
+    else:
+        aero_mesh_file_name = f"rectangular_wing_naca0012_{num_spanwise_sections}sect_{num_chordwise_panels}chord"
+
+mesh_full_path = os.path.join(geometry_directory, f"{aero_mesh_file_name}.msh")
+if not os.path.exists(mesh_full_path):
+    print(f"Target mesh '{mesh_full_path}' not found on disk. Generating parametrically...", flush=True)
+    if num_spanwise_sections == 15:
+        base_mesh_file = os.path.join(geometry_directory, "rectangular_wing_naca0012_10ar.msh")
+    elif num_spanwise_sections == 35:
+        base_mesh_file = os.path.join(geometry_directory, "rectangular_wing_naca0012_35sect.msh")
+    elif num_spanwise_sections == 60:
+        base_mesh_file = os.path.join(geometry_directory, "rectangular_wing_naca0012_60sect.msh")
+    else:
+        raise FileNotFoundError(f"No base mesh found for {num_spanwise_sections} spanwise sections.")
+    
+    from optimization_analyses.generate_parametric_chord_mesh import generate_chordwise_mesh
+    generate_chordwise_mesh(base_mesh_file, mesh_full_path, num_chordwise_panels)
 
 # Geometric CAD control points are kept equivalent across resolutions (15 spanwise)
 num_spanwise_cp_target = 25
@@ -595,8 +654,9 @@ for i in range(num_right_panels):
 
 # Compute static panel-to-Fourier transformation matrix for lifting-line induced drag
 y_round = np.round(Y_panels_right, 4)
-y_unique = np.unique(y_round)
-main_stations = [y for y in y_unique if np.sum(y_round == y) == 40]
+y_unique, y_counts = np.unique(y_round, return_counts=True)
+dominant_station_quads = int(np.max(y_counts))
+main_stations = [y for y in y_unique if np.sum(y_round == y) == dominant_station_quads]
 num_strips = len(main_stations)
 
 W_strip = np.zeros((num_strips, num_right_panels))
@@ -617,7 +677,7 @@ eta_strips = y_strip_centers / b_tip_initial
 # Invariant polar angle theta in [pi/2, pi] corresponding to spanwise coordinate y in [0, b_tip]
 theta_strips = np.pi - np.arccos(eta_strips)
 
-num_fourier_terms = 16  if resolution == 'full' else 8
+num_fourier_terms = 16 if num_stations >= 8 else 8
 # Odd harmonics n = 1, 3, 5, ..., 15
 n_fourier_odd = np.arange(1, 2 * num_fourier_terms, 2)
 K_fourier = np.sin(np.outer(n_fourier_odd, theta_strips)) / np.sin(theta_strips)
@@ -1954,8 +2014,8 @@ else:
     )
     max_stratford = csdl.Variable(value=0.20, name='max_stratford')
     stratford_margin = csdl.Variable(value=0.19, name='stratford_margin')
-    H_upper_matrix = csdl.Variable(value=np.full((20, stratford_topology['num_mesh_stations']), 1.4), name='H_upper_matrix')
-    S_grid = csdl.Variable(value=np.zeros((20, stratford_topology['num_mesh_stations'])), name='S_grid')
+    H_upper_matrix = csdl.Variable(value=np.full((viscous_ibl_topology['num_chord_panels'], stratford_topology['num_mesh_stations']), 1.4), name='H_upper_matrix')
+    S_grid = csdl.Variable(value=np.zeros((viscous_ibl_topology['num_chord_panels'], stratford_topology['num_mesh_stations'])), name='S_grid')
     S_dense_2d = csdl.Variable(value=np.zeros((31, 41)), name='S_dense_2d')
 
 # 1. Sectional Cl drag polar bucket: regularizes planform by penalizing extreme section Cl
@@ -2216,8 +2276,9 @@ cl_ss_ceiling = np.linspace(cl_root_max, cl_tip_max, num_stations)
 
 # for i in range(num_stations):
     # dv_cl_ss[i].set_as_constraint(upper=cl_ss_ceiling[i], scaler=1.0 / cl_ss_ceiling[i])
-cl_constraints_to_enforce = dv_cl_ss[-3:] if resolution == 'fast' else dv_cl_ss[-4:]
-cl_ceiling_to_enforce = cl_ss_ceiling[-3:] if resolution == 'fast' else cl_ss_ceiling[-4:]
+n_cl_enforce = 3 if num_stations <= 5 else 4
+cl_constraints_to_enforce = dv_cl_ss[-n_cl_enforce:]
+cl_ceiling_to_enforce = cl_ss_ceiling[-n_cl_enforce:]
 # cl_constraints_to_enforce.set_as_constraint(upper=cl_ceiling_to_enforce, scaler=1.0 / cl_ceiling_to_enforce)
 
 # =========================================================================
@@ -2385,11 +2446,25 @@ jax_sim = csdl.experimental.JaxSimulator(
     gpu=False
 )
 
-# Populate design variables with initial/warm-started values
-for dv_info in design_variables.values():
-    val = dv_info.variable.value
-    if val is not None:
-        jax_sim[dv_info.variable] = np.asarray(val)
+# Populate design variables with initial, warm-started, or explicitly evaluated optimal vector
+eval_x_opt_path = os.environ.get('BWB_EVAL_X_OPT', None)
+if eval_x_opt_path and os.path.exists(eval_x_opt_path):
+    print(f"Loading design vector for evaluation from: {eval_x_opt_path}", flush=True)
+    x_hist = np.loadtxt(eval_x_opt_path)
+    x_eval = x_hist[-1] if x_hist.ndim > 1 else x_hist
+    curr_idx = 0
+    for name, dv_info in design_variables.items():
+        var_size = int(np.prod(dv_info.variable.shape))
+        slc = slice(curr_idx, curr_idx + var_size)
+        unscaled_val = (x_eval[slc] / dv_info.scaler).reshape(dv_info.variable.shape)
+        jax_sim[dv_info.variable] = unscaled_val
+        curr_idx += var_size
+    print(f"Successfully populated {curr_idx} DVs into JAX simulator from {eval_x_opt_path}", flush=True)
+else:
+    for dv_info in design_variables.values():
+        val = dv_info.variable.value
+        if val is not None:
+            jax_sim[dv_info.variable] = np.asarray(val)
 
 if run_pre_diagnostics:
     jax_sim.run()
@@ -2472,7 +2547,7 @@ if run_pre_diagnostics:
         print(f"{j:7d} | {station_cl_peaks[j]:8.4f} | {cl_val_st:20.4f} | {ceil_val:18.4f} | {st_status:8s}")
 
     dv_mdd_excess_arr = np.asarray(jax_sim[dv_mdd_excess]).flatten()
-    global_mdd_excess_val = float(np.asarray(jax_sim[global_mdd_excess]))
+    global_mdd_excess_val = float(np.asarray(jax_sim[global_mdd_excess]).flatten()[0])
     print(f"\n================ {num_stations} STATION TRANSONIC DRAG DIVERGENCE / BUFFET MARGIN (Cruise M_inf = {cruise_cond['mach']:.3f}) ================")
     print(f"{'Station':7s} | {'eta_peak':8s} | {'M_inf - M_dd':14s} | {'M_dd - M_inf Margin':20s} | {'Status':8s}")
     print("-" * 75)
@@ -2574,9 +2649,11 @@ if run_pre_diagnostics:
         print(f"Cruise Attached Fraction f_min: {f_min_cr_val:.4f} | Separation Drag D_sep: {d_sep_cr_val:.1f} N")
         print(f"Reconciled Di_Trefftz: {di_rec_val:.1f} N | Reconciliation Factor k_rec: {k_rec_val:.4f} | Pre-Recon Lift Residual: {res_lift_val:+.1f} N")
         print(f"Pull-Up (Node 2) Attached Fraction f_min: {f_min_ss_val:.4f}")
-        print(f"Static Margin: Inviscid = {sm_inv_val*100:.2f}%, Corrected = {sm_corr_val*100:.2f}%\n")
     else:
         print(f"Stall Model: CL EMPIRICAL (Critical Cl = {cl_crit:.2f})\n")
+
+if os.environ.get('DIAGNOSTIC_ONLY', 'false').lower() == 'true':
+    sys.exit(0)
 
 
 if __name__ == '__main__':
@@ -3145,6 +3222,9 @@ if __name__ == '__main__':
                     geonic_payload_mode=str(geonic_payload_mode),
                     num_chord_stations=int(num_chord_stations),
                     num_stations=int(num_stations),
+                    num_spanwise_sections=int(num_spanwise_sections),
+                    num_chordwise_panels=int(num_chordwise_panels),
+                    num_spanwise_dvs=int(num_spanwise_dvs),
                     dv_names=np.array(list(design_variables.keys()), dtype=str),
                 )
                 for dv_name, dv_info in design_variables.items():
@@ -3344,6 +3424,9 @@ if __name__ == '__main__':
                     formulation=str(formulation),
                     num_chord_stations=int(num_chord_stations),
                     num_stations=int(num_stations),
+                    num_spanwise_sections=int(num_spanwise_sections),
+                    num_chordwise_panels=int(num_chordwise_panels),
+                    num_spanwise_dvs=int(num_spanwise_dvs),
                     use_geonic=bool(use_geonic),
                     geonic_payload_mode=str(geonic_payload_mode),
                     dv_names=np.array(list(design_variables.keys()), dtype=str),
@@ -3519,12 +3602,18 @@ if __name__ == '__main__':
     artifact_dir = os.environ.get('ARTIFACT_DIR', None)
     if not artifact_dir or not os.path.exists(artifact_dir):
         for c_id in candidate_ids:
-            cand_path = f'/home/andrew/.gemini/antigravity/brain/{c_id}'
-            if os.path.exists(cand_path):
-                artifact_dir = cand_path
+            for base_dir in [
+                os.path.expanduser(f'~/.gemini/antigravity/brain/{c_id}'),
+                f'/home/andrewfletcher/.gemini/antigravity/brain/{c_id}',
+                f'/home/andrew/.gemini/antigravity/brain/{c_id}',
+            ]:
+                if os.path.exists(base_dir):
+                    artifact_dir = base_dir
+                    break
+            if artifact_dir and os.path.exists(artifact_dir):
                 break
 
-    if os.path.exists(artifact_dir):
+    if artifact_dir and os.path.exists(artifact_dir):
         if os.path.exists(video_path):
             shutil.copy2(video_path, os.path.join(artifact_dir, 'optimization_history.mp4'))
         if os.path.exists(summary_fig_path):
@@ -3633,7 +3722,7 @@ if __name__ == '__main__':
             generate_airfoil_gallery_plot(stn_data, gal_path, half_span_m, parsed_dvs=p_dvs)
             generate_shape_evolution_plot(stn_data, evo_path, half_span_m, p_dvs, l_chords, c_stretches, cad_prof)
             save_airfoil_telemetry(stn_data, tel_path, half_span_m)
-            if os.path.exists(artifact_dir):
+            if artifact_dir and os.path.exists(artifact_dir):
                 shutil.copy2(gal_path, os.path.join(artifact_dir, "airfoil_cross_sections_gallery.png"))
                 shutil.copy2(evo_path, os.path.join(artifact_dir, "airfoil_shape_evolution.png"))
             print("Airfoil cross-section analysis completed automatically.")

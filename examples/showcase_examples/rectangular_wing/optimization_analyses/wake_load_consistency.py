@@ -47,9 +47,11 @@ def aggregate_pressure_loading(panel_centers, panel_forces):
     if centers.ndim != 2 or forces.ndim != 2 or centers.shape[0] != forces.shape[0]:
         raise ValueError("panel centers and forces must have matching 2-D shapes")
     y_round = np.round(centers[:, 1], 4)
-    main_stations = [y for y in np.unique(y_round) if np.count_nonzero(y_round == y) == 40]
+    u_vals, u_counts = np.unique(y_round, return_counts=True)
+    dominant_quads = int(np.max(u_counts))
+    main_stations = [y for y, c in zip(u_vals, u_counts) if c == dominant_quads]
     if not main_stations:
-        raise ValueError("no 40-panel spanwise stations were found")
+        raise ValueError(f"no {dominant_quads}-panel spanwise stations were found")
     y = np.array([centers[y_round == station, 1].mean() for station in main_stations])
     strip_lift = np.array([forces[y_round == station, 2].sum() for station in main_stations])
     tip_mask = ~np.isin(y_round, main_stations)

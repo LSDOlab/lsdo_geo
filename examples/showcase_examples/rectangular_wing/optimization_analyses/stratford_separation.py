@@ -57,13 +57,14 @@ def build_stratford_topology(
         scale_factor=scale_factor,
     )
     num_mesh_stations = ibl_topo['num_stations']
+    num_chord_panels = ibl_topo.get('num_chord_panels', 20)
     station_span_y = ibl_topo['station_span_y']
 
     if b_tip_ref is None:
         b_tip_ref = float(np.max(station_span_y))
 
     # Normalized collocation coordinates for the mesh
-    # Chordwise: 20 upper panel centers mapped to normalized [0, 1]
+    # Chordwise: num_chord_panels upper panel centers mapped to normalized [0, 1]
     # At interval midpoints with LE at 0.0:
     pts_scaled = points * scale_factor
     quads = cells_dict['quad']
@@ -76,7 +77,7 @@ def build_stratford_topology(
     chord_len = max(x_te - x_le, 1e-3)
     u_colloc = np.clip((st0_centers[:, 0] - x_le) / chord_len, 0.0, 1.0)
     # Ensure strictly increasing for B-spline evaluation
-    u_colloc = np.linspace(0.0, 1.0, 20)
+    u_colloc = np.linspace(0.0, 1.0, num_chord_panels)
 
     # Spanwise collocation coordinates: station_span_y normalized by b_tip_ref
     v_colloc = np.clip(station_span_y / b_tip_ref, 0.0, 1.0)
@@ -216,6 +217,7 @@ def evaluate_stratford_separation(
     """
     topo = stratford_topology['ibl_topology']
     num_mesh_stations = stratford_topology['num_mesh_stations']
+    num_chord_panels = topo.get('num_chord_panels', 20)
     u_slices = stratford_topology['u_slices']
     v_slices = stratford_topology['v_slices']
 
@@ -226,16 +228,16 @@ def evaluate_stratford_separation(
 
     # Gather Cp and panel centers
     cp_flat = csdl.matvec(M_gather_var, cp_node0)
-    cp_paths = csdl.reshape(cp_flat, (2, num_mesh_stations, 20))
-    cp_upper = cp_paths[0]  # Shape (num_mesh_stations, 20)
+    cp_paths = csdl.reshape(cp_flat, (2, num_mesh_stations, num_chord_panels))
+    cp_upper = cp_paths[0]  # Shape (num_mesh_stations, num_chord_panels)
 
     centers_flat = csdl.matmat(M_gather_var, dynamic_panel_centers)
-    centers_paths = csdl.reshape(centers_flat, (2, num_mesh_stations, 20, 3))
-    centers_upper = centers_paths[0]  # Shape (num_mesh_stations, 20, 3)
+    centers_paths = csdl.reshape(centers_flat, (2, num_mesh_stations, num_chord_panels, 3))
+    centers_upper = centers_paths[0]  # Shape (num_mesh_stations, num_chord_panels, 3)
 
     # Station suction peak (minimum Cp) and normalized pressure recovery
     cp_min_st = -csdl.maximum(-cp_upper, axes=(1,), rho=rho_smooth_max)
-    cp_min_2d = csdl.expand(cp_min_st, (num_mesh_stations, 20), 'j->ji')
+    cp_min_2d = csdl.expand(cp_min_st, (num_mesh_stations, num_chord_panels), 'j->ji')
     cp_rec = sp_floor(cp_upper - cp_min_2d, 0.0, 50.0) / sp_floor(1.0 - cp_min_2d, 0.5, 50.0)
 
     # Leading edge nose distance
@@ -243,11 +245,11 @@ def evaluate_stratford_separation(
     le_dist = csdl.sqrt(csdl.sum(diff_le**2, axes=(1,)) + 1e-12)
     s0 = 0.5 * le_dist
 
-    # Compute Stratford parameter on 19 chordwise intervals
+    # Compute Stratford parameter on (num_chord_panels - 1) chordwise intervals
     S_list = [csdl.Variable(value=np.zeros(num_mesh_stations))]  # S=0 at LE
     s_curr = s0
 
-    for k in range(19):
+    for k in range(num_chord_panels - 1):
         diff = centers_upper[:, k + 1, :] - centers_upper[:, k, :]
         ds_k = csdl.sqrt(csdl.sum(diff**2, axes=(1,)) + 1e-12)
         s_mid = s_curr + 0.5 * ds_k
@@ -265,18 +267,18 @@ def evaluate_stratford_separation(
 
     # Cumulative downstream maximum along chord to enforce monotonic separation
     S_cum_list = [csdl.reshape(S_list[0], (1, num_mesh_stations))]
-    for k in range(1, 20):
+    for k in range(1, num_chord_panels):
         sub = csdl.concatenate([csdl.reshape(s, (1, num_mesh_stations)) for s in S_list[:k + 1]], axis=0)
         m = csdl.maximum(sub, axes=(0,), rho=rho_smooth_max)
         S_cum_list.append(csdl.reshape(m, (1, num_mesh_stations)))
 
-    # S_grid has shape (20, num_mesh_stations) -> 20 chordwise, num_mesh_stations spanwise
+    # S_grid has shape (num_chord_panels, num_mesh_stations)
     S_grid = csdl.concatenate(S_cum_list, axis=0)
     S_grid.name = 'S_grid'
 
     # 2D B-Spline surface fit
-    # S_aug appends root derivative symmetry zero column: shape (20, num_mesh_stations + 1)
-    zero_col = csdl.Variable(value=np.zeros((20, 1)))
+    # S_aug appends root derivative symmetry zero column: shape (num_chord_panels, num_mesh_stations + 1)
+    zero_col = csdl.Variable(value=np.zeros((num_chord_panels, 1)))
     S_aug = csdl.concatenate([S_grid, zero_col], axis=1)
 
     # Tensor product solve: C = Mu_inv @ S_aug @ Mv_inv.T

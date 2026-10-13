@@ -194,6 +194,7 @@ def evaluate_stall_closure(
     strat_topo = stall_topology['stratford_topology']
     ibl_topo = strat_topo['ibl_topology']
     num_mesh_stations = stall_topology['num_mesh_stations']
+    num_chord_panels = ibl_topo.get('num_chord_panels', 20)
     num_right_panels = stall_topology['num_right_panels']
     station_span_y = stall_topology['station_span_y']
 
@@ -206,24 +207,24 @@ def evaluate_stall_closure(
 
     # 2. Gather Cp, normals, areas, and centers on upper surface panel chains
     cp_flat = csdl.matvec(M_gather_var, cp_uncut)
-    cp_paths = csdl.reshape(cp_flat, (2, num_mesh_stations, 20))
-    cp_upper = cp_paths[0]  # Shape (num_mesh_stations, 20)
+    cp_paths = csdl.reshape(cp_flat, (2, num_mesh_stations, num_chord_panels))
+    cp_upper = cp_paths[0]  # Shape (num_mesh_stations, num_chord_panels)
 
     centers_flat = csdl.matmat(M_gather_var, dynamic_panel_centers)
-    centers_paths = csdl.reshape(centers_flat, (2, num_mesh_stations, 20, 3))
-    centers_upper = centers_paths[0]  # Shape (num_mesh_stations, 20, 3)
+    centers_paths = csdl.reshape(centers_flat, (2, num_mesh_stations, num_chord_panels, 3))
+    centers_upper = centers_paths[0]  # Shape (num_mesh_stations, num_chord_panels, 3)
 
     normals_flat = csdl.matmat(M_gather_var, panel_normals)
-    normals_paths = csdl.reshape(normals_flat, (2, num_mesh_stations, 20, 3))
-    normals_upper = normals_paths[0]  # Shape (num_mesh_stations, 20, 3)
+    normals_paths = csdl.reshape(normals_flat, (2, num_mesh_stations, num_chord_panels, 3))
+    normals_upper = normals_paths[0]  # Shape (num_mesh_stations, num_chord_panels, 3)
 
     areas_flat = csdl.matvec(M_gather_var, panel_areas)
-    areas_paths = csdl.reshape(areas_flat, (2, num_mesh_stations, 20))
-    areas_upper = areas_paths[0]  # Shape (num_mesh_stations, 20)
+    areas_paths = csdl.reshape(areas_flat, (2, num_mesh_stations, num_chord_panels))
+    areas_upper = areas_paths[0]  # Shape (num_mesh_stations, num_chord_panels)
 
     # 3. Evaluate Stratford separation criterion along upper chains
     cp_min_st = -csdl.maximum(-cp_upper, axes=(1,), rho=RHO_SMOOTH_MAX)
-    cp_min_2d = csdl.expand(cp_min_st, (num_mesh_stations, 20), 'j->ji')
+    cp_min_2d = csdl.expand(cp_min_st, (num_mesh_stations, num_chord_panels), 'j->ji')
     cp_rec = sp_floor(cp_upper - cp_min_2d, 0.0, 50.0) / sp_floor(1.0 - cp_min_2d, 0.5, 50.0)
 
     diff_le = centers_paths[0, :, 0, :] - centers_paths[1, :, 0, :]
@@ -237,7 +238,7 @@ def evaluate_stall_closure(
 
     mu_air_val = 1.4e-5  # Standard air dynamic viscosity Pa*s
 
-    for k in range(19):
+    for k in range(num_chord_panels - 1):
         diff = centers_upper[:, k + 1, :] - centers_upper[:, k, :]
         ds_k = csdl.sqrt(csdl.sum(diff**2, axes=(1,)) + 1e-12)
         ds_list.append(ds_k)
@@ -254,24 +255,24 @@ def evaluate_stall_closure(
         S_k = cp_rec_mid * csdl.sqrt(adverse_k + 1e-12) * re_factor
         S_list.append(S_k)
 
-    # Stack S and ds along chord: shape (20, num_mesh_stations)
+    # Stack S and ds along chord: shape (num_chord_panels, num_mesh_stations)
     S_stack = csdl.concatenate([csdl.reshape(s, (1, num_mesh_stations)) for s in S_list], axis=0)
     ds_stack = csdl.concatenate([csdl.reshape(ds, (1, num_mesh_stations)) for ds in ds_list], axis=0)
     s_total = csdl.sum(ds_stack, axes=(0,)) + 1e-12  # Shape (num_mesh_stations,)
 
     # 4. Cumulative downstream monotonic propagation of Stratford parameter
     S_cum_list = [csdl.reshape(S_stack[0], (1, num_mesh_stations))]
-    for k in range(1, 20):
+    for k in range(1, num_chord_panels):
         sub_S = csdl.concatenate([csdl.reshape(S_stack[j], (1, num_mesh_stations)) for j in range(k + 1)], axis=0)
         m = csdl.maximum(sub_S, axes=(0,), rho=RHO_SMOOTH_MAX)
         S_cum_list.append(csdl.reshape(m, (1, num_mesh_stations)))
 
-    S_cum = csdl.concatenate(S_cum_list, axis=0)  # Shape (20, num_mesh_stations)
+    S_cum = csdl.concatenate(S_cum_list, axis=0)  # Shape (num_chord_panels, num_mesh_stations)
 
     # Logistic separation activation (sharpness k=40, S_crit=0.39)
     # Applied to cumulative peak Stratford parameter along chord
-    act_cum = 1.0 / (1.0 + csdl.exp(-K_LOGISTIC * (S_cum - S_CRIT)))  # Shape (20, num_mesh_stations)
-    act_cum_transpose = csdl.transpose(act_cum)                       # Shape (num_mesh_stations, 20)
+    act_cum = 1.0 / (1.0 + csdl.exp(-K_LOGISTIC * (S_cum - S_CRIT)))  # Shape (num_chord_panels, num_mesh_stations)
+    act_cum_transpose = csdl.transpose(act_cum)                       # Shape (num_mesh_stations, num_chord_panels)
 
     # 5. Integrated attached fraction f in [0.01, 1.0]
     sep_length = csdl.sum(act_cum * ds_stack, axes=(0,))  # Shape (num_mesh_stations,)
@@ -294,7 +295,7 @@ def evaluate_stall_closure(
     delta_kh_factor = r_gamma - 1.0
 
     # Upper panel normal force projection (vertical z component of normal)
-    # normals_upper has shape (num_mesh_stations, 20, 3)
+    # normals_upper has shape (num_mesh_stations, num_chord_panels, 3)
     nz_upper = normals_upper[:, :, 2]
     # Inviscid normal force on upper chain: N_inviscid = sum(-Cp * nz * Area)
     n_panel_upper = -cp_upper * nz_upper * areas_upper
@@ -311,17 +312,17 @@ def evaluate_stall_closure(
 
     # Pressure deficit delta_Cp on each panel:
     # delta_Cp = -(act_cum / a_sep_eff) * delta_N
-    delta_N_expand = csdl.expand(delta_N, (num_mesh_stations, 20), 'i->ij')
-    a_sep_expand = csdl.expand(a_sep_eff, (num_mesh_stations, 20), 'i->ij')
-    delta_cp_upper = -(act_cum_transpose / a_sep_expand) * delta_N_expand  # Shape (num_mesh_stations, 20)
+    delta_N_expand = csdl.expand(delta_N, (num_mesh_stations, num_chord_panels), 'i->ij')
+    a_sep_expand = csdl.expand(a_sep_eff, (num_mesh_stations, num_chord_panels), 'i->ij')
+    delta_cp_upper = -(act_cum_transpose / a_sep_expand) * delta_N_expand  # Shape (num_mesh_stations, num_chord_panels)
 
     # 8. Corrected panel forces on right wing
     # Force increment delta_F_k = -delta_Cp * Area * Normal
-    areas_exp = csdl.expand(areas_upper, (num_mesh_stations, 20, 3), 'ij->ijk')
-    delta_cp_exp = csdl.expand(delta_cp_upper, (num_mesh_stations, 20, 3), 'ij->ijk')
-    delta_F_upper = -delta_cp_exp * areas_exp * normals_upper  # Shape (num_mesh_stations, 20, 3)
+    areas_exp = csdl.expand(areas_upper, (num_mesh_stations, num_chord_panels, 3), 'ij->ijk')
+    delta_cp_exp = csdl.expand(delta_cp_upper, (num_mesh_stations, num_chord_panels, 3), 'ij->ijk')
+    delta_F_upper = -delta_cp_exp * areas_exp * normals_upper  # Shape (num_mesh_stations, num_chord_panels, 3)
 
-    delta_F_flat = csdl.reshape(delta_F_upper, (num_mesh_stations * 20, 3))
+    delta_F_flat = csdl.reshape(delta_F_upper, (num_mesh_stations * num_chord_panels, 3))
     delta_F_right = csdl.matmat(M_scatter_var, delta_F_flat)  # Shape (num_right_panels, 3)
 
     # Corrected panel forces on right wing:

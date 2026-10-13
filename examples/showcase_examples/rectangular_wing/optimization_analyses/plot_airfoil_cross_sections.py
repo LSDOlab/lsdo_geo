@@ -218,6 +218,10 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                         saved_use_geonic = bool(data['use_geonic'])
                     if saved_geonic_payload_mode is None and 'geonic_payload_mode' in data:
                         saved_geonic_payload_mode = str(data['geonic_payload_mode'])
+                    if 'num_stations' in data:
+                        saved_num_stations = int(data['num_stations'])
+                    if 'num_chord_stations' in data:
+                        saved_num_chord_stations = int(data['num_chord_stations'])
                     if formulation is None and 'formulation' in data:
                         formulation = str(data['formulation'])
                     if resolution is None and 'resolution' in data:
@@ -265,8 +269,17 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
             else:
                 formulation = 'ar_area'
 
-        if resolution is None:
-            for res_candidate, n_stn in [('fast', 5), ('full', 8)]:
+        # Determine num_stations dynamically:
+        detected_num_stations = None
+        if 'saved_num_stations' in locals() and saved_num_stations is not None:
+            detected_num_stations = saved_num_stations
+        elif dv_metadata is not None and 'chord_stretch_dvs' in dv_metadata:
+            detected_num_stations = int(dv_metadata['chord_stretch_dvs']['shape'][0])
+        elif dv_metadata is not None and 'taper_dvs' in dv_metadata:
+            detected_num_stations = int(dv_metadata['taper_dvs']['shape'][0]) + 1
+        else:
+            # Probe candidate stations between 3 and 16
+            for n_stn in range(3, 16):
                 expected_len = 0
                 for name in dv_names:
                     if dv_metadata is not None and name in dv_metadata:
@@ -283,13 +296,21 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                     else:
                         expected_len += 1
                 if expected_len == n_dv:
-                    resolution = res_candidate
+                    detected_num_stations = n_stn
                     break
-            if resolution is None:
-                resolution = 'fast' if n_dv <= 35 else 'full'
 
-        num_stations = 5 if resolution == 'fast' else 8
+        if detected_num_stations is not None:
+            num_stations = detected_num_stations
+        elif resolution == 'fast':
+            num_stations = 5
+        elif resolution == 'full':
+            num_stations = 8
+        else:
+            num_stations = 5 if n_dv <= 35 else (6 if n_dv in [69, 58] else 8)
+
         num_chord_stations = num_stations
+        if resolution is None:
+            resolution = f"{num_stations}DV"
         initial_chord = 1.0 * scale_factor
         initial_thickness = 0.12 * initial_chord
         camber_max_percent = saved_camber_max_percent if saved_camber_max_percent is not None else 6.0
@@ -535,7 +556,16 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
         else:
             include_elevator = (n_dv in [28, 43])
 
-    num_stations = 5 if resolution == 'fast' else 8
+    if 'saved_num_stations' in locals() and saved_num_stations is not None:
+        num_stations = saved_num_stations
+    elif n_dv in [69]:
+        num_stations = 6
+    elif n_dv in [82, 91, 66, 43]:
+        num_stations = 8
+    elif n_dv in [17, 22, 26, 27, 32, 34, 37, 50, 58]:
+        num_stations = 5
+    else:
+        num_stations = 5 if resolution == 'fast' else 8
     num_chord_stations = num_stations
     initial_chord = 1.0 * scale_factor
     initial_thickness = 0.12 * initial_chord
@@ -720,7 +750,9 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     recorder = csdl.Recorder(inline=True)
     recorder.start()
 
-    stp_path = os.path.join(repo_root, "examples/example_geometries/rectangular_wing_naca0012_10ar.stp")
+    stp_path = os.path.join(repo_root, "examples/example_geometries/rectangular_wing/rectangular_wing_naca0012_10ar.stp")
+    if not os.path.exists(stp_path):
+        stp_path = os.path.join(repo_root, "examples/example_geometries/rectangular_wing_naca0012_10ar.stp")
     if not os.path.exists(stp_path):
         raise FileNotFoundError(f"CAD geometry file not found at: {stp_path}")
 

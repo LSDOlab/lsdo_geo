@@ -24,7 +24,9 @@ recorder = csdl.Recorder(inline=True)
 recorder.start()
 
 # Import initial geometry that will be deformed
-geometry_directory = "examples/example_geometries/"
+geometry_directory = "examples/example_geometries/rectangular_wing/"
+if not os.path.exists(geometry_directory):
+    geometry_directory = "examples/example_geometries/"
 file_name = "rectangular_wing_naca0012_10ar"
 geometry = import_geometry(geometry_directory + file_name + ".stp", parallelize=False)
 

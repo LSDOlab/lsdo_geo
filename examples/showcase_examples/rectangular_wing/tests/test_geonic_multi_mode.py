@@ -144,9 +144,10 @@ def test_bsm3_derivatives_vs_finite_difference():
     from lsdo_geo import import_geometry
 
     repo_root = Path(__file__).resolve().parents[4]
-    cad_file = str(
-        repo_root / "examples" / "example_geometries" / "rectangular_wing_naca0012_10ar.stp"
-    )
+    cad_path = repo_root / "examples" / "example_geometries" / "rectangular_wing" / "rectangular_wing_naca0012_10ar.stp"
+    if not cad_path.exists():
+        cad_path = repo_root / "examples" / "example_geometries" / "rectangular_wing_naca0012_10ar.stp"
+    cad_file = str(cad_path)
     wing_geom = import_geometry(cad_file, parallelize=False)
 
     cx_pal = csdl.Variable(value=5.0, name='pallet_stack_center_x')

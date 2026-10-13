@@ -16,7 +16,10 @@ from examples.showcase_examples.rectangular_wing.optimization_analyses.stall_clo
 
 @pytest.fixture(scope="module")
 def fast_mesh_data():
-    mesh = meshio.read("examples/example_geometries/rectangular_wing_naca0012_10ar.msh")
+    p = "examples/example_geometries/rectangular_wing/rectangular_wing_naca0012_10ar.msh"
+    if not os.path.exists(p):
+        p = "examples/example_geometries/rectangular_wing_naca0012_10ar.msh"
+    mesh = meshio.read(p)
     pts = mesh.points * 7.5
     cells = mesh.cells_dict
     cell_adj = VortexAD.find_cell_adjacency(points=mesh.points, cells=cells)

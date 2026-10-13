@@ -187,8 +187,9 @@ def process_separation_fields(data_dict: Dict[str, Any]) -> Dict[str, Any]:
     if panel_centers_right is not None and len(panel_centers_right.shape) == 2:
         pc = np.asarray(panel_centers_right)
         y_round = np.round(pc[:, 1], 4)
-        y_unique = np.unique(y_round)
-        main_stations = [y for y in y_unique if np.sum(y_round == y) == 40]
+        u_vals, u_counts = np.unique(y_round, return_counts=True)
+        dominant_quads = int(np.max(u_counts))
+        main_stations = [y for y, c in zip(u_vals, u_counts) if c == dominant_quads]
 
         if len(main_stations) >= num_mesh_stations:
             main_stations = main_stations[:num_mesh_stations]

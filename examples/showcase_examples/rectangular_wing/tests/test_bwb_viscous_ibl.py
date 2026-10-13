@@ -85,7 +85,9 @@ def test_closure_transforms_and_floors():
 def test_topology_construction_fast_and_full():
     """Gate 3: Topology tests for both fast (10ar) and full (35sect) meshes."""
     repo_root = Path(__file__).resolve().parents[4]
-    geom_dir = repo_root / "examples" / "example_geometries"
+    geom_dir = repo_root / "examples" / "example_geometries" / "rectangular_wing"
+    if not geom_dir.exists():
+        geom_dir = repo_root / "examples" / "example_geometries"
 
     mesh_fast = meshio.read(geom_dir / "rectangular_wing_naca0012_10ar.msh")
     topo_fast = build_ibl_mesh_topology(mesh_fast.points, mesh_fast.cells_dict, scale_factor=7.5)

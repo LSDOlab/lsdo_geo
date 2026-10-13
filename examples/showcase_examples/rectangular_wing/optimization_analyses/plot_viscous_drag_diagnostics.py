@@ -207,7 +207,8 @@ def process_viscous_drag_fields(data: Dict[str, Any]) -> Dict[str, Any]:
     if pc is not None and len(pc.shape) == 2:
         y_round = np.round(pc[:, 1], 3)
         u_y, counts = np.unique(y_round, return_counts=True)
-        st_y = u_y[counts == 40]
+        dominant_quads = int(np.max(counts))
+        st_y = u_y[counts == dominant_quads]
     else:
         st_y = np.linspace(y_strip[0], y_strip[-1], 14)
 

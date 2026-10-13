@@ -59,8 +59,10 @@ def process_strips(pc, pf_c):
     y_round = np.round(pc[:, 1], 4)
     y_unique = np.unique(y_round)
 
-    # Main lifting surface panels are arranged in chordwise rings (40 panels each)
-    main_stations = [y for y in y_unique if np.sum(y_round == y) == 40]
+    # Main lifting surface panels are arranged in chordwise rings
+    u_vals, u_counts = np.unique(y_round, return_counts=True)
+    dominant_quads = int(np.max(u_counts))
+    main_stations = [y for y, c in zip(u_vals, u_counts) if c == dominant_quads]
 
     y_centers = []
     L_c = []

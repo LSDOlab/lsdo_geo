@@ -13,12 +13,18 @@ from examples.showcase_examples.rectangular_wing.optimization_analyses.stratford
 
 @pytest.fixture(scope="module")
 def fast_mesh():
-    return meshio.read("examples/example_geometries/rectangular_wing_naca0012_10ar.msh")
+    p = "examples/example_geometries/rectangular_wing/rectangular_wing_naca0012_10ar.msh"
+    if not os.path.exists(p):
+        p = "examples/example_geometries/rectangular_wing_naca0012_10ar.msh"
+    return meshio.read(p)
 
 
 @pytest.fixture(scope="module")
 def full_mesh():
-    return meshio.read("examples/example_geometries/rectangular_wing_naca0012_35sect.msh")
+    p = "examples/example_geometries/rectangular_wing/rectangular_wing_naca0012_35sect.msh"
+    if not os.path.exists(p):
+        p = "examples/example_geometries/rectangular_wing_naca0012_35sect.msh"
+    return meshio.read(p)
 
 
 def test_stratford_topology_shapes(fast_mesh, full_mesh):
