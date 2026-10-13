@@ -17,8 +17,8 @@
 project = 'lsdo_geo'
 copyright = '2023-2026, Andrew Fletcher'
 author = 'Andrew Fletcher'
-version = '1.0'
-release = '1.0.0'
+version = '1.1'
+release = '1.1.0'
 
 
 # -- General configuration ---------------------------------------------------

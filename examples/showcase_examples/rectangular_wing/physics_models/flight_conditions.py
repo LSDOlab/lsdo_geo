@@ -19,6 +19,7 @@ Dynamic viscosity (Sutherland's law diagnostic):
 """
 
 from __future__ import annotations
+import os
 from typing import Union
 import numpy as np
 import csdl_alpha as csdl
@@ -37,8 +38,9 @@ T_S = 273.15       # Reference temperature [K]
 S_SUTHERLAND = 110.4  # Sutherland temperature constant [K]
 
 # Mission & sizing condition specifications
-CRUISE_ALTITUDE_M = 30000.0 * 0.3048  # 9,144 m (30,000 ft)
-CRUISE_MACH = 0.70
+CRUISE_ALTITUDE_FT = float(os.environ.get('CRUISE_ALTITUDE_FT', 33000.0))
+CRUISE_ALTITUDE_M = float(os.environ.get('CRUISE_ALTITUDE_M', CRUISE_ALTITUDE_FT * 0.3048))  # 10,058.4 m (33,000 ft)
+CRUISE_MACH = float(os.environ.get('CRUISE_MACH', 0.75))
 SIZING_EQUIVALENT_SPEED_FACTOR = 1.25
 
 

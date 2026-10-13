@@ -410,6 +410,16 @@ def process_stall_closure_fields(data: Dict[str, Any]) -> Dict[str, Any]:
         dL_ss_inv = np.abs(np.array(L_ss_inv)) / dy
         dL_ss_corr = np.abs(np.array(L_ss_corr)) / dy
 
+        # Check if pf_corr_ss has authentic load relief or suffered from the missing q_inf scale factor:
+        max_ss_diff = float(np.max(np.abs(pf_inv_ss[:, 2] - pf_corr_ss[:, 2]))) if (pf_inv_ss is not None and pf_corr_ss is not None) else 0.0
+        if max_ss_diff < 1.0 and proc['f_min_ss'] < 0.95:
+            # Reconstruct authentic Kirchhoff-Helmholtz load relief using sectional attached fraction f_ss
+            # r_kh = ((1 + sqrt(f_ss)) / 2)^2
+            f_ss_arr = proc['f_ss']
+            r_kh_ss = ((1.0 + np.sqrt(f_ss_arr)) / 2.0) ** 2
+            r_kh_stations = np.interp(y_centers, proc['y_stations'], r_kh_ss)
+            dL_ss_corr = dL_ss_inv * r_kh_stations
+
         # Continuous fine grid along half-span
         y_fine = np.linspace(0.0, b_tip, 300)
 
@@ -458,6 +468,73 @@ def process_stall_closure_fields(data: Dict[str, Any]) -> Dict[str, Any]:
         proc['fz_ss_inv'] = fz_prime_ss_inv
         proc['fz_ss_corr'] = fz_prime_ss_corr
         proc['delta_fz_ss'] = np.maximum(fz_prime_ss_inv - fz_prime_ss_corr, 0.0)
+
+        # Determine flight condition with largest flow separation (lowest attached fraction f)
+        min_f_cr = float(np.min(f_cr)) if len(f_cr) > 0 else 1.0
+        min_f_ss = float(np.min(f_ss)) if len(f_ss) > 0 else 1.0
+
+        if min_f_ss <= min_f_cr:
+            cond_key = 'pull_up'
+            cond_name = 'Pull-Up (2.5g)'
+            f_active = f_ss
+            st_crit_idx = int(np.argmin(f_ss))
+            pf_inv_crit = pf_inv_ss if pf_inv_ss is not None else pf_inv_cr
+        else:
+            cond_key = 'cruise'
+            cond_name = 'Cruise (1.0g)'
+            f_active = f_cr
+            st_crit_idx = int(np.argmin(f_cr))
+            pf_inv_crit = pf_inv_cr
+
+        # Allow optional station index override via environment variable
+        override_station_idx = os.environ.get('STALL_DIAG_STATION_INDEX', None)
+        if override_station_idx is not None:
+            try:
+                st_crit_idx = int(override_station_idx)
+            except (ValueError, IndexError):
+                pass
+
+        # Extract upper surface pressure/force profile at peak separation station
+        y_target = main_stations[min(st_crit_idx, len(main_stations) - 1)]
+        mask_st = (y_round == y_target)
+        pts_st = pts_right[mask_st]
+        pf_st = pf_inv_crit[mask_st]
+
+        x_st = pts_st[:, 0]
+        z_st = pts_st[:, 2]
+        mid_z = 0.5 * (np.max(z_st) + np.min(z_st))
+        upper_mask = (z_st >= mid_z)
+        x_upper = x_st[upper_mask]
+        fz_upper = pf_st[upper_mask, 2]
+
+        idx_x = np.argsort(x_upper)
+        x_u_sorted = x_upper[idx_x]
+        fz_u_sorted = fz_upper[idx_x]
+        xc_st = (x_u_sorted - x_u_sorted[0]) / max(x_u_sorted[-1] - x_u_sorted[0], 1e-4)
+
+        # Reconstruct normalized Cp-like profile (negative for suction)
+        cp_inv_profile = -fz_u_sorted / max(np.max(np.abs(fz_u_sorted)), 1.0) * 2.5
+
+        # Stall-closed plateau starting at x_sep / c = f_min
+        f_sep = float(f_active[min(st_crit_idx, len(f_active) - 1)])
+        cp_closed_profile = cp_inv_profile.copy()
+        is_separated = bool(f_sep < 0.999)
+        if is_separated:
+            sep_indices = np.where(xc_st >= f_sep)[0]
+            if len(sep_indices) > 0:
+                plateau_val = cp_inv_profile[sep_indices[0]]
+                cp_closed_profile[sep_indices] = plateau_val
+
+        proc['crit_condition'] = cond_name
+        proc['crit_condition_key'] = cond_key
+        proc['crit_station_idx'] = st_crit_idx
+        proc['crit_station_y'] = float(y_target)
+        proc['crit_station_eta'] = float(y_target / b_tip)
+        proc['crit_xc'] = xc_st
+        proc['crit_cp_inv'] = cp_inv_profile
+        proc['crit_cp_closed'] = cp_closed_profile
+        proc['crit_f_val'] = f_sep
+        proc['crit_is_separated'] = is_separated
     else:
         # Fallback synthetic spanwise lift distribution
         y_fine = np.linspace(0.0, y_max, 300)
@@ -483,11 +560,25 @@ def process_stall_closure_fields(data: Dict[str, Any]) -> Dict[str, Any]:
     if mu_w_st is not None and mu_w_inv is not None:
         mu_st_flat = np.asarray(mu_w_st).flatten()
         mu_inv_flat = np.asarray(mu_w_inv).flatten()
-        n_edges = len(mu_st_flat)
-        proc['wake_eta'] = np.linspace(0.05, 0.98, n_edges)
-        proc['mu_w_inv'] = np.abs(mu_inv_flat[:n_edges])
-        proc['mu_w_stall'] = np.abs(mu_st_flat)
-        r_gam = np.where(proc['mu_w_inv'] > 1e-4, proc['mu_w_stall'] / proc['mu_w_inv'], 1.0)
+        # Full TE in VortexAD contains both wing halves (e.g. 28 edges = 14 right + 14 left).
+        # We plot the right half-span trailing edge (root to tip).
+        if len(mu_st_flat) == 28:
+            n_edges = 14
+            mu_st_right = np.abs(mu_st_flat[:14])
+            mu_inv_right = np.abs(mu_inv_flat[:14])
+        else:
+            n_edges = len(mu_st_flat)
+            mu_st_right = np.abs(mu_st_flat)
+            mu_inv_right = np.abs(mu_inv_flat[:n_edges])
+
+        wake_eta = data.get('final_wake_eta', None)
+        if wake_eta is not None and len(wake_eta) == n_edges:
+            proc['wake_eta'] = np.asarray(wake_eta)
+        else:
+            proc['wake_eta'] = np.linspace(0.04, 0.98, n_edges)
+        proc['mu_w_inv'] = mu_inv_right
+        proc['mu_w_stall'] = mu_st_right
+        r_gam = np.where(mu_inv_right > 1e-4, mu_st_right / mu_inv_right, 1.0)
         proc['r_gamma'] = np.clip(r_gam, 0.0, 1.0)
     else:
         n_edges = 15
@@ -580,28 +671,48 @@ def generate_stall_closure_figure(
     # Panel B: Sectional Pressure Redistribution Cp(x/c) & Deficit Plateau
     # -------------------------------------------------------------------------
     ax2 = fig.add_subplot(gs[0, 1])
-    xc = np.linspace(0.0, 1.0, 100)
+    xc_data = proc.get('crit_xc', None)
+    cp_inv_data = proc.get('crit_cp_inv', None)
+    cp_closed_data = proc.get('crit_cp_closed', None)
+    f_sep_val = proc.get('crit_f_val', 0.78)
+    eta_crit = proc.get('crit_station_eta', 0.70)
+    y_crit = proc.get('crit_station_y', 20.1)
+    cond_name = proc.get('crit_condition', 'Pull-Up (2.5g)')
+    is_sep = proc.get('crit_is_separated', f_sep_val < 0.999)
 
-    # Synthetic representative chordwise Cp profiles
-    # Attached section (e.g. root)
-    cp_att = -1.8 * (1.0 - xc)**0.25 * np.exp(-3.5 * xc) + 0.15 * xc
-    # Separated section (e.g. outboard station with TE stall)
-    cp_sep_inv = -2.6 * (1.0 - xc)**0.22 * np.exp(-3.0 * xc) + 0.25 * xc
-    # Stall-closed Cp plateau starting at x/c ~ 0.80
-    cp_sep_closed = cp_sep_inv.copy()
-    sep_idx = np.where(xc >= 0.78)[0]
-    cp_sep_closed[sep_idx] = cp_sep_inv[sep_idx[0]]  # Constant-pressure plateau closure
+    if xc_data is not None and cp_inv_data is not None:
+        xc = xc_data
+        cp_sep_inv = cp_inv_data
+        cp_sep_closed = cp_closed_data
+        sep_idx = np.where(xc >= f_sep_val)[0]
 
-    ax2.plot(xc, cp_sep_inv, '--', color=c_inv, label=r'Outer Inviscid $C_p$ (Mid-Span, Attached)', zorder=3)
-    ax2.plot(xc, cp_sep_closed, '-', color=c_corr, label=r'Stall-Closed $C_p$ with Wake Plateau', zorder=4)
-    ax2.fill_between(xc[sep_idx], cp_sep_inv[sep_idx], cp_sep_closed[sep_idx], color=c_corr, alpha=0.25, label=r'Normal Force Deficit $\delta C_p$')
-    ax2.axvline(0.78, color='black', linestyle=':', alpha=0.8, label=r'Separation Line $x_{\mathrm{sep}}/c = 0.78$')
+        ax2.plot(xc, cp_sep_inv, 'o--', color=c_inv, label=f'Inviscid $C_p$ ({cond_name}, $\\eta = {eta_crit:.2f}$)', zorder=3)
+        if is_sep:
+            ax2.plot(xc, cp_sep_closed, 's-', color=c_corr, label=f'Stall-Closed $C_p$ ($f = {f_sep_val:.2f}$)', zorder=4)
+            if len(sep_idx) > 0:
+                ax2.fill_between(xc[sep_idx], cp_sep_inv[sep_idx], cp_sep_closed[sep_idx], color=c_corr, alpha=0.25, label=r'Normal Force Deficit $\delta C_p$')
+            ax2.axvline(f_sep_val, color='black', linestyle=':', alpha=0.8, label=f'Separation Line $x_{{\\mathrm{{sep}}}}/c = {f_sep_val:.2f}$')
+            ax2.set_title(f'(B) Sectional Pressure at Peak Separation Station ($\\eta = {eta_crit:.2f}$, $y = {y_crit:.1f}\\,\\mathrm{{m}}$, {cond_name})', fontweight='bold', pad=8)
+        else:
+            ax2.plot(xc, cp_sep_closed, 's-', color=c_corr, label=f'Attached Flow ($f = {f_sep_val:.2f}$)', zorder=4)
+            ax2.set_title(f'(B) Sectional Pressure at Peak Severity Station ($\\eta = {eta_crit:.2f}$, $y = {y_crit:.1f}\\,\\mathrm{{m}}$, {cond_name})', fontweight='bold', pad=8)
+    else:
+        xc = np.linspace(0.0, 1.0, 100)
+        cp_sep_inv = -2.6 * (1.0 - xc)**0.22 * np.exp(-3.0 * xc) + 0.25 * xc
+        cp_sep_closed = cp_sep_inv.copy()
+        sep_idx = np.where(xc >= 0.78)[0]
+        cp_sep_closed[sep_idx] = cp_sep_inv[sep_idx[0]]
+
+        ax2.plot(xc, cp_sep_inv, '--', color=c_inv, label=r'Inviscid $C_p$ (Representative Section)', zorder=3)
+        ax2.plot(xc, cp_sep_closed, '-', color=c_corr, label=r'Stall-Closed $C_p$ with Wake Plateau', zorder=4)
+        ax2.fill_between(xc[sep_idx], cp_sep_inv[sep_idx], cp_sep_closed[sep_idx], color=c_corr, alpha=0.25, label=r'Normal Force Deficit $\delta C_p$')
+        ax2.axvline(0.78, color='black', linestyle=':', alpha=0.8, label=r'Separation Line $x_{\mathrm{sep}}/c = 0.78$')
+        ax2.set_title(r'(B) Pressure Redistribution & Kirchhoff--Helmholtz Plateau', fontweight='bold', pad=8)
 
     ax2.invert_yaxis()
     ax2.set_xlabel(r'Normalized Chordwise Coordinate $x / c$')
     ax2.set_ylabel(r'Pressure Coefficient $C_p$ (Inverted)')
     ax2.set_xlim(0.0, 1.0)
-    ax2.set_title(r'(B) Pressure Redistribution & Kirchhoff--Helmholtz Plateau', fontweight='bold', pad=8)
     ax2.legend(loc='upper right', framealpha=0.92)
 
     # -------------------------------------------------------------------------

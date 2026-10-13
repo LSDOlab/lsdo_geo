@@ -1,5 +1,59 @@
 # Release Notes
 
+## lsdo_geo 1.1.0 (October 2026)
+
+`lsdo_geo` 1.1.0 introduces Rodrigues rotation formulations for differentiable CAD and mesh transformations, improves geometric translation handling, enhances Free-Form Deformation (FFD) block fitting robustness, and broadens mathematical and analytic derivative test verification.
+
+---
+
+### Highlights
+
+* **Rodrigues Rotation Formulation**: Added analytical Rodrigues rotation matrix generation (`compute_rodrigues_rotation_matrix`) and rotation methods (`rotate_using_rodrigues`), providing an efficient, numerically stable alternative to quaternion rotations.
+* **Rotation Vector Normalization & Multi-Angle Vectorization**: Guaranteed unit normalization of arbitrary rotation axis vectors and added support for batched multi-angle rotation arrays in `rotate()`.
+* **Geometry Translation Robustness**: Fixed single-function component translations in `Geometry.translate()` with automatic shape broadcasting.
+* **Dynamic FFD Enclosure Bounds**: Refactored `construct_tight_fit_ffd_block()` to calculate exact enclosure $z$-extents dynamically rather than relying on fixed coordinate indices.
+* **Expanded Verification & Derivative Testing**: Added unit tests verifying machine-precision numerical agreement and analytic derivative equivalence between Rodrigues and Quaternion formulations under CSDL automatic differentiation.
+
+---
+
+### Core Architecture & Geometry
+
+* **Rodrigues & Quaternion Rotation Methods (`Geometry`, `geometry_functions`)**:
+  * Implemented `compute_rodrigues_rotation_matrix(axis, angle)` evaluating the exact $3 \times 3$ rotation matrix $\mathbf{R} = \mathbf{I} + \sin\theta \mathbf{K} + (1 - \cos\theta)\mathbf{K}^2$.
+  * Added `rotate_using_rodrigues()` and `rotate_using_quaternion()` to top-level `lsdo_geo` exports and as methods on `Geometry`.
+  * Added `method='rodrigues'|'quaternion'` keyword argument to `rotate()` (defaulting to `'rodrigues'`).
+  * Enforced unit normalization of axis vectors prior to rotation evaluation, preventing angle distortion when non-unit vectors are supplied.
+  * Added multi-angle rotation vectorization, reshaping output geometries to `(num_angles, ...)` when evaluating arrays of rotation angles.
+* **Geometry Translation (`Geometry.translate`)**:
+  * Resolved shape compatibility errors when translating a single function (`len(function_indices) == 1`) by expanding 1D translation vectors via `csdl.expand`.
+* **Free-Form Deformation (`construct_tight_fit_ffd_block`)**:
+  * Evaluates dynamic coordinate minima and maxima (`z_min`, `z_max`) across all enclosure control points, ensuring reliable tight-fitting FFD blocks for diverse CAD geometries.
+* **Sectional Parameterization (`SectionalParameterization`)**:
+  * Enhanced translation basis evaluation to handle dynamic `csdl.Variable` and `np.ndarray` directional axes consistently.
+
+---
+
+### Verification & Testing
+
+* **Equivalence & Derivative Tests (`tests/test_geometry_functions.py`)**:
+  * Verified that Rodrigues and Quaternion rotation formulations match to machine precision ($10^{-12}$).
+  * Verified that CSDL automatic differentiation total derivatives with respect to points, axis, and angle match exactly between Rodrigues and Quaternion implementations.
+  * Added dedicated test cases for non-unit rotation axes and multi-angle array rotations.
+* **Component Translation Tests (`tests/test_geometry.py`)**:
+  * Verified selective translation of individual functions within multi-patch geometries.
+* **Parameterization Derivative Tests (`tests/test_sectional_parameterization.py`, `tests/test_ffd_block.py`)**:
+  * Verified finite, non-zero analytic sensitivity propagation through sectional translation parameters.
+  * Verified tight-fitting FFD block generation across arbitrary height distributions.
+
+---
+
+### Documentation & Packaging
+
+* Updated project license metadata to SPDX `LGPL-3.0-or-later`.
+* Synchronized version identifiers across `pyproject.toml`, `lsdo_geo/__init__.py`, and documentation configuration.
+
+---
+
 ## lsdo_geo 1.0.0 (September 2026)
 
 `lsdo_geo` 1.0.0 is the first major stable release of the LSDO lab's geometry representation, deformational parameterization, and sensitivity analysis framework for Multidisciplinary Design Optimization (MDO). This release modernizes the codebase for full Python 3.9–3.14 and NumPy 2.x compatibility, consolidates the parameterization API, introduces automated CI and PyPI deployment pipelines, and broadens unit test coverage.

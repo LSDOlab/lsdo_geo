@@ -85,7 +85,9 @@ def construct_ffd_block_from_corners(entities:Union[Sequence[EntityType], Entity
 
 
 def construct_tight_fit_ffd_block(entities:Union[Sequence[EntityType], EntityType],
-                                    num_coefficients:Union[tuple[int,...], int]=2, degree:Union[tuple[int,...], int]=1, name:str='ffd_block') -> FFDBlock:
+                                  num_coefficients:Union[tuple[int,...], int]=2, degree:Union[tuple[int,...], int]=1,
+                                  name:str='ffd_block',
+                                  parallelize:bool=False) -> FFDBlock:
     '''
     Constructs an FFD block around the given entities and embeds them within.
     '''
@@ -111,7 +113,13 @@ def construct_tight_fit_ffd_block(entities:Union[Sequence[EntityType], EntityTyp
     enclosure_top_points = enclosure_ffd_block.evaluate(parametric_coordinates=parametric_coordinates_top, non_csdl=True)
     # ffd_bot_points = bot_evaluation_matrix.dot(b_spline_hyper_volume.coefficients.value)
 
-    top_points_on_wing = entities[0].project(enclosure_top_points, direction=sampling_projection_direction, plot=False)
+    num_workers = None if parallelize else 1
+    top_points_on_wing = entities[0].project(
+        enclosure_top_points,
+        direction=sampling_projection_direction,
+        plot=False,
+        num_workers=num_workers,
+    )
     # bot_points_on_wing = entities[0].project(ffd_bot_points, direction=sampling_projection_direction)
 
     # identify key surfaces
@@ -127,6 +135,10 @@ def construct_tight_fit_ffd_block(entities:Union[Sequence[EntityType], EntityTyp
     for entity_name, entity_count in entity_counters.items():
         if entity_count >= 2:
             key_entities.append(entity_name)
+
+    enclosure_coords = np.asarray(enclosure_ffd_block.coefficients.value).reshape((-1, 3))
+    z_min = np.min(enclosure_coords[:, 2])
+    z_max = np.max(enclosure_coords[:, 2])
 
     # Evaluate to get corners of key entities
     corner_points = {}
@@ -152,15 +164,15 @@ def construct_tight_fit_ffd_block(entities:Union[Sequence[EntityType], EntityTyp
         corner_1i1 = entities[0].evaluate(parametric_coordinate_10, non_csdl=True)
         corner_1ip11 = entities[0].evaluate(parametric_coordinate_11, non_csdl=True)
 
-        corner_0i0[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[2]  # z value of first coordinate
-        corner_0ip10[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[2]  # z value of first coordinate
-        corner_1i0[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[2]  # z value of first coordinate
-        corner_1ip10[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[2]  # z value of first coordinate
+        corner_0i0[2] = z_min
+        corner_0ip10[2] = z_min
+        corner_1i0[2] = z_min
+        corner_1ip10[2] = z_min
 
-        corner_0i1[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[5]  # z value of second coordinate
-        corner_0ip11[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[5]  # z value of second coordinate
-        corner_1i1[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[5]  # z value of second coordinate
-        corner_1ip11[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[5]  # z value of second coordinate
+        corner_0i1[2] = z_max
+        corner_0ip11[2] = z_max
+        corner_1i1[2] = z_max
+        corner_1ip11[2] = z_max
 
         if i == 0:
             corner_points[f'0{i}0'] = corner_0i0

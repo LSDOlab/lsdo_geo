@@ -7,6 +7,7 @@ aggregation centered at camber DV influence peaks (and trailing edge) and spanwi
 """
 
 from __future__ import annotations
+import os
 import numpy as np
 import csdl_alpha as csdl
 import lsdo_function_spaces as lfs
@@ -16,7 +17,7 @@ from .bwb_viscous_ibl import build_ibl_mesh_topology, sp_floor
 
 # Numerical constants
 S_CRIT = 0.39            # Canonical Stratford turbulent separation threshold
-RHO_SMOOTH_MAX = 50.0   # Sharpness for smooth maximum aggregations
+RHO_SMOOTH_MAX = float(os.environ.get('RHO_SMOOTH_MAX', 40.0))   # Sharpness for smooth maximum aggregations
 NU_DENSE = 31           # Chordwise dense evaluation points
 NV_DENSE = 41           # Spanwise dense evaluation points
 N_CP_U = 6              # Chordwise control points (degree 2)
@@ -204,7 +205,7 @@ def evaluate_stratford_separation(
     stratford_topology : dict
         Static topology dictionary from build_stratford_topology.
     rho_smooth_max : float, optional
-        Kreisselmeier-Steinhauser sharpness factor for smooth-max aggregations (default 50.0).
+        Kreisselmeier-Steinhauser sharpness factor for smooth-max aggregations (default 40.0).
 
     Returns
     -------
