@@ -4,6 +4,7 @@ recursive-include tests *.py
 recursive-exclude scratch *
 recursive-exclude docs *
 recursive-exclude examples *
+recursive-include examples/example_geometries *
 global-exclude __pycache__
 global-exclude *.py[co]
 global-exclude .DS_Store

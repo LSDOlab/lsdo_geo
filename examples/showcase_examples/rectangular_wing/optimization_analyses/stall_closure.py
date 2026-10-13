@@ -6,6 +6,7 @@ normal force deficit closure, corrected surface forces/moments, and corrected
 """
 
 from __future__ import annotations
+import os
 import numpy as np
 import csdl_alpha as csdl
 from typing import Dict, Any, Tuple
@@ -20,7 +21,7 @@ from .stratford_separation import (
 # Physical & numerical constants
 K_SEP_BASE = 0.18         # Calibrated fixed-transition NACA 0012 post-stall drag constant
 TC_REF = 0.12             # Reference thickness-to-chord ratio (NACA 0012)
-K_LOGISTIC = 40.0         # Sharpness of logistic separation activation
+K_LOGISTIC = float(os.environ.get('STALL_K_LOGISTIC', 20.0))         # Sharpness of logistic separation activation
 F_ATTACHED_FLOOR = 0.01   # Smooth floor for attached fraction f
 EPS_AREA_SEP = 1e-6       # Area floor for separated normal force redistribution
 
@@ -319,7 +320,7 @@ def evaluate_stall_closure(
     # Force increment delta_F_k = -delta_Cp * Area * Normal
     areas_exp = csdl.expand(areas_upper, (num_mesh_stations, 20, 3), 'ij->ijk')
     delta_cp_exp = csdl.expand(delta_cp_upper, (num_mesh_stations, 20, 3), 'ij->ijk')
-    delta_F_upper = -delta_cp_exp * areas_exp * normals_upper  # Shape (num_mesh_stations, 20, 3)
+    delta_F_upper = -delta_cp_exp * areas_exp * normals_upper * q_inf  # Shape (num_mesh_stations, 20, 3)
 
     delta_F_flat = csdl.reshape(delta_F_upper, (num_mesh_stations * 20, 3))
     delta_F_right = csdl.matmat(M_scatter_var, delta_F_flat)  # Shape (num_right_panels, 3)

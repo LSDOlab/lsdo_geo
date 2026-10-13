@@ -77,7 +77,7 @@ formulation = os.environ.get('BWB_FORMULATION', formulation)
 # 2. Mesh and design variable resolution: 'fast' or 'full'
 #   'fast' -> 5 design stations, 9 FFD sections, 1,272 aero quads (fast iteration/testing)
 #   'full' -> 8 design stations, 15 FFD sections, 2,872 aero quads (production resolution)
-resolution: Literal['fast', 'full'] = 'fast'  # Options: 'fast' or 'full'
+resolution: Literal['fast', 'full'] = 'full'  # Options: 'fast' or 'full'
 resolution = os.environ.get('BWB_RESOLUTION', resolution)
 
 # 3. Geometric Non-Interference (Geonic) payload containment mode:
@@ -114,14 +114,14 @@ include_te_thickness: bool = False    # True: blunt TE (5 rows); False: pinned s
 include_elevator: bool = False        # Trailing-edge elevator deflection DV
 
 # 7. Aerodynamics and drag formulation:
-induced_drag_objective: Literal['trefftz', 'fourier', 'mixed'] = 'mixed'  # Options: 'trefftz', 'fourier', 'mixed'
+induced_drag_objective: Literal['trefftz', 'fourier', 'mixed'] = 'trefftz'  # Options: 'trefftz', 'fourier', 'mixed'
 include_cl_polar: bool = False        # Apply quadratic drag polar bucket k_polar * (Cl - Cl_ideal)^2
 include_stall_drag: bool = True       # Apply smooth aerodynamic stall penalty when Cl > Cl_crit
 
 # 7b. Stall / boundary-layer separation model:
 #   'cl'                -> Empirical sectional Cl_crit / softplus stall penalty
 #   'stratford_closure' -> Principled Stratford separation closure & reconciled Trefftz wake drag
-stall_model: Literal['cl', 'stratford_closure'] = 'stratford_closure'
+stall_model: Literal['cl', 'stratford_closure'] = 'stratford_closure' if viscous_drag_mode == 'ibl' else 'cl'
 stall_model = os.environ.get('STALL_MODEL', stall_model)
 if stall_model not in ('cl', 'stratford_closure'):
     raise ValueError(f"Unknown stall_model: '{stall_model}'. Must be 'cl' or 'stratford_closure'.")
@@ -409,10 +409,10 @@ te_line_physical[:, 1] = y_beam_span
 te_line_physical[:, 2] = 0.0
 projected_te_mesh = geometry.project(te_line_physical, plot=False)
 
-# Sample wingbox upper/lower surfaces at 5 chordwise stations across 20% to 70% chord
+# Sample wingbox upper/lower surfaces at 5 chordwise stations across 15% to 60% chord
 # Using composite Simpson's rule: weights = [1, 4, 2, 4, 1] / 12
 # Integrates quadratic B-spline thickness profiles with zero algebraic truncation error
-x_fracs_box = np.array([0.20, 0.325, 0.45, 0.575, 0.70])
+x_fracs_box = np.array([0.15, 0.2625, 0.375, 0.4875, 0.60])
 num_box_samples = len(x_fracs_box)
 simpson_weights_box = np.array([1.0, 4.0, 2.0, 4.0, 1.0]) / 12.0
 
@@ -746,8 +746,8 @@ twist_upper[0] = 0.0
 camber_max_percent = 6.0  # 6.0% chord max camber displacement
 camber_lower = -camber_max_percent
 camber_upper = camber_max_percent
-# camber_scaler = 1.0  # Scales DVs with unit scaler (dampens aggressive optimizer camber updates)
-camber_scaler = 1/2  # Scales DVs with unit scaler (dampens aggressive optimizer camber updates)
+camber_scaler = 1.0  # Scales DVs with unit scaler (larger scalars dampen aggressive optimizer camber updates)
+# camber_scaler = 1/2  # Scales DVs with unit scaler (dampens aggressive optimizer camber updates)
 
 num_chordwise_thick_dvs = 5 if include_te_thickness else 4
 thick_shape_lower = np.full((num_chordwise_thick_dvs, num_chord_stations), -50.0)  # Max -50% thickness reduction
@@ -759,8 +759,23 @@ thick_shape_upper = np.full((num_chordwise_thick_dvs, num_chord_stations), 50.0)
 if include_te_thickness:
     thick_shape_upper[-1, :] = 10.0  # Max blunt TE
 
-# thick_shape_scaler = 1.0 / 10.0  # Scales [-50.0, 50.0] with 1/10 scaler (dampens aggressive thickness updates)
-thick_shape_scaler = 1.0 / 20.0  # Scales [-50.0, 50.0] with 1/10 scaler (dampens aggressive thickness updates)
+thick_shape_scaler = 1.0 / 10.0  # Scales [-50.0, 50.0] with 1/10 scaler (larger scalars dampen aggressive thickness updates)
+# thick_shape_scaler = 1.0 / 20.0  # Scales [-50.0, 50.0] with 1/10 scaler (dampens aggressive thickness updates)
+
+# Base structural gauge values defined at scale_factor = 1.0, scaled dynamically by scale_factor:
+# At scale_factor = 7.5 (full-scale BWB), this yields:
+#   t_min_gauge = 1.0 mm (0.0010 m)
+#   t_max_gauge = 500 mm (0.5000 m)
+#   t_nominal   = 20 mm  (0.0200 m)
+#   thick_scaler = 50.0  (1.0 / t_nominal)
+t_min_base = 0.0010 / 7.5
+t_max_base = 0.5000 / 7.5
+t_nom_base = 0.0200 / 7.5
+
+t_min_gauge = t_min_base * scale_factor
+t_max_gauge = t_max_base * scale_factor
+t_nominal = t_nom_base * scale_factor
+thick_scaler = 1.0 / t_nominal
 
 if formulation == 'ar_area':
     # Formulation 1: Cubic B-spline Target Regularization
@@ -809,8 +824,8 @@ if formulation == 'ar_area':
         design_variables['planform_area_target'] = DVInfo(
             variable=planform_area_target, lower=area_lower, upper=area_upper, scaler=area_scaler
         )
-    design_variables['ttop_dvs'] = DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.5, scaler=5.e1)
-    design_variables['tweb_dvs'] = DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.5, scaler=5.e1)
+    design_variables['ttop_dvs'] = DVInfo(variable=ttop_dvs, lower=t_min_gauge, upper=t_max_gauge, scaler=thick_scaler)
+    design_variables['tweb_dvs'] = DVInfo(variable=tweb_dvs, lower=t_min_gauge, upper=t_max_gauge, scaler=thick_scaler)
     if include_elevator:
         design_variables['elevator_angle'] = DVInfo(variable=elevator_angle, lower=-25.0*np.pi/180, upper=25.0*np.pi/180, scaler=1.e1)
     if include_camber:
@@ -867,8 +882,8 @@ elif formulation == 'chord_span':
     init_pitch_ss = 10.0 * np.pi / 180.0
     if include_neg1g_sizing:
         init_pitch_neg1g = -5.0 * np.pi / 180.0
-    init_ttop_val = np.ones(num_thickness_stations) * 0.02
-    init_tweb_val = np.ones(num_thickness_stations) * 0.02
+    init_ttop_val = np.ones(num_thickness_stations) * t_nominal
+    init_tweb_val = np.ones(num_thickness_stations) * t_nominal
 
     chord_stretch_dvs = csdl.Variable(shape=(num_chord_stations,), value=init_chord)
     sweep_dvs = csdl.Variable(shape=(num_chord_stations,), value=init_sweep)
@@ -885,11 +900,11 @@ elif formulation == 'chord_span':
 
     initial_chord = 1.0 * scale_factor  # 0.3162 m baseline chord
     chord_stretch_lower = -0.85 * initial_chord  # (prevents chord collapsing below 15% of baseline)
-    chord_stretch_upper = 4.0 * initial_chord    
+    chord_stretch_upper = 10.0 * initial_chord    
 
     initial_thickness = 0.12 * initial_chord  # 0.0379 m baseline NACA 0012 thickness
     thickness_stretch_lower = -0.95 * initial_thickness
-    thickness_stretch_upper = 4.0 * initial_thickness    # 0.1518 m
+    thickness_stretch_upper = 10.0 * initial_thickness    # 0.1518 m
 
     # sweep_lower = np.full(num_chord_stations, -0.5 * scale_factor)
     sweep_lower = np.full(num_chord_stations, -0. * scale_factor)
@@ -925,8 +940,8 @@ elif formulation == 'chord_span':
         design_variables['misc_cg'] = DVInfo(
             variable=misc_cg, lower=0.05, upper=0.95, scaler=1.e1
         )
-    design_variables['ttop_dvs'] = DVInfo(variable=ttop_dvs, lower=0.0001, upper=0.5, scaler=5.e1)
-    design_variables['tweb_dvs'] = DVInfo(variable=tweb_dvs, lower=0.0001, upper=0.5, scaler=5.e1)
+    design_variables['ttop_dvs'] = DVInfo(variable=ttop_dvs, lower=t_min_gauge, upper=t_max_gauge, scaler=thick_scaler)
+    design_variables['tweb_dvs'] = DVInfo(variable=tweb_dvs, lower=t_min_gauge, upper=t_max_gauge, scaler=thick_scaler)
     if include_elevator:
         design_variables['elevator_angle'] = DVInfo(variable=elevator_angle, lower=-25.0*np.pi/180, upper=25.0*np.pi/180, scaler=1.e1)
     if include_camber:
@@ -1327,8 +1342,8 @@ elif scale_factor == 7.5:
     # misc_weight scaled with (q_M0.70 / q_M0.75) = (0.70/0.75)^2 to keep cruise CL consistent:
     # Total fixed weight: 500,000 lbf * (0.70/0.75)^2 = 574,933.33 lbf -> misc = 414,933.33 lbf
     # misc_weight = csdl.Variable(value=(500000. * (0.70 / 0.75)**2 - 160000.) * 4.44822)
-    # misc_weight = csdl.Variable(value=6.e5)  # Total payload + misc should be roughly around 130k kg
-    misc_weight = csdl.Variable(value=1.e6)  # Miscellaneous systems / fuel weight
+    misc_weight = csdl.Variable(value=6.e5)  # Total payload + misc should be roughly around 130k kg
+    # misc_weight = csdl.Variable(value=1.e6)  # Miscellaneous systems / fuel weight
     load_factor = csdl.Variable(value=2.5)  # 2.5g load factor for sizing maneuver
     # load_factor = csdl.Variable(value=3.0)  # 3.0g load factor for sizing maneuver
 else:
@@ -1337,8 +1352,8 @@ else:
 load_factor_val = float(np.asarray(load_factor.value).flatten()[0]) if hasattr(load_factor, 'value') else float(load_factor)
 
 # Flight conditions:
-# Node 0 = cruise condition (ISA 30,000 ft, Mach 0.70)
-# Node 1 = stability condition (+1.0 deg alpha perturbation, ISA 30,000 ft, Mach 0.70)
+# Node 0 = cruise condition (ISA 33,000 ft, Mach 0.75)
+# Node 1 = stability condition (+1.0 deg alpha perturbation, ISA 33,000 ft, Mach 0.75)
 # Node 2 = structural sizing pull-up condition (sea level, q_sizing = 1.25^2 * q_cruise, pitch angle = pitch_ss)
 # Node 3 = -1.0g push-down structural sizing condition (optional, sea level, pitch angle = pitch_neg1g)
 flight_cond_dict = get_nominal_flight_conditions()
@@ -1431,15 +1446,14 @@ strip_lower_mesh = geometry.evaluate(projected_strip_lower_skin, plot=False)
 node_chords = te_mesh[:,0] - le_mesh[:,0]
 local_chord = 0.5 * (node_chords[:-1] + node_chords[1:])
 
-# Compute area-weighted wingbox height across 20% to 70% chord via composite Simpson's rule
+# Compute area-weighted wingbox height across 15% to 60% chord via composite Simpson's rule
 box_diff_z = upper_beam_mesh[:, 2] - lower_beam_mesh[:, 2]
 node_heights = csdl.matvec(W_box_mat, box_diff_z)
 local_height = 0.5 * (node_heights[:-1] + node_heights[1:])
 
 # Define wingbox cross-section along the span
-# Wingbox width is 50% of local chord; height is scaled by box_height_factor
-# box_width = 0.50 * local_chord
-box_width = 0.40 * local_chord
+# Wingbox width is distance between front and rear spar (0.60 - 0.15 = 45% chord); height is scaled by box_height_factor
+box_width = 0.45 * local_chord
 box_height = box_height_factor * local_height
 
 # Evaluate B-spline thickness parameterization at element midpoints
@@ -2586,9 +2600,11 @@ if __name__ == '__main__':
             simulator=jax_sim,
         )
         max_iter = int(os.environ.get('MAX_ITER', '500'))
+        slsqp_acc = float(os.environ.get('SLSQP_ACC', '1.e-4'))
         optimizer = modopt.PySLSQP(
             optimization_problem,
-            solver_options={'maxiter': max_iter, 'acc': 1.e-5},
+            # solver_options={'maxiter': max_iter, 'acc': 1.e-5},
+            solver_options={'maxiter': max_iter, 'acc': slsqp_acc},
             readable_outputs=['x'],
         )
         optimizer.solve()

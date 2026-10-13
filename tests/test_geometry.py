@@ -71,6 +71,50 @@ def test_geometry_rotate_using_quaternion():
         assert not np.isnan(func.coefficients.value).any()
 
 
+def test_geometry_rotate_using_rodrigues_and_equivalence():
+    """Test rotating geometry using Rodrigues formula and verify equivalence with quaternion."""
+    recorder = csdl.Recorder(inline=True)
+    recorder.start()
+
+    origin = np.array([0.5, 1.0, -0.5])
+    axis = np.array([1.0, 2.0, 3.0])
+    angle = 37.5  # degrees
+
+    # 1. Rotate using Rodrigues
+    geo_rodrigues = lg.import_geometry(SAMPLE_STP, parallelize=False)
+    geo_rodrigues.rotate_using_rodrigues(rotation_origin=origin, axis_vector=axis, angles=angle, units='degrees')
+
+    # 2. Rotate using Quaternion (with axis and angles)
+    geo_quaternion = lg.import_geometry(SAMPLE_STP, parallelize=False)
+    geo_quaternion.rotate_using_quaternion(rotation_origin=origin, axis_vector=axis, angles=angle, units='degrees')
+
+    # 3. Rotate using general rotate (default rodrigues)
+    geo_general = lg.import_geometry(SAMPLE_STP, parallelize=False)
+    geo_general.rotate(rotation_origin=origin, axis_vector=axis, angles=angle, units='degrees')
+
+    for key in geo_rodrigues.functions.keys():
+        coeff_rod = geo_rodrigues.functions[key].coefficients.value
+        coeff_quat = geo_quaternion.functions[key].coefficients.value
+        coeff_gen = geo_general.functions[key].coefficients.value
+
+        np.testing.assert_allclose(coeff_rod, coeff_quat, atol=1e-12)
+        np.testing.assert_allclose(coeff_rod, coeff_gen, atol=1e-12)
+
+    # Also test an axis-aligned rotation (e.g. Y axis) where rotate() uses coordinate matrix
+    # but rotate_using_rodrigues strictly enforces Rodrigues
+    axis_y = np.array([0.0, 1.0, 0.0])
+    geo_rod_y = lg.import_geometry(SAMPLE_STP, parallelize=False)
+    geo_rod_y.rotate_using_rodrigues(rotation_origin=origin, axis_vector=axis_y, angles=angle, units='degrees')
+
+    geo_rot_y = lg.import_geometry(SAMPLE_STP, parallelize=False)
+    geo_rot_y.rotate(rotation_origin=origin, axis_vector=axis_y, angles=angle, units='degrees')
+
+    for key in geo_rod_y.functions.keys():
+        coeff_rod_y = geo_rod_y.functions[key].coefficients.value
+        coeff_rot_y = geo_rot_y.functions[key].coefficients.value
+        np.testing.assert_allclose(coeff_rod_y, coeff_rot_y, atol=1e-12)
+
+
 def test_geometry_declare_component():
     """Test declaring a sub-component of a geometry."""
     recorder = csdl.Recorder(inline=True)
@@ -118,4 +162,24 @@ def test_geometry_export_iges_and_obj(tmp_path):
 
     obj_file = tmp_path / "wing.obj"
     geo.export_obj(str(obj_file))
+
+
+def test_geometry_translate_single_function():
+    """Test translating a single function of a geometry (function_indices=[0])."""
+    recorder = csdl.Recorder(inline=True)
+    recorder.start()
+
+    geo = lg.import_geometry(SAMPLE_STP, parallelize=False)
+    f0 = geo.functions[0]
+    orig_f0 = np.copy(f0.coefficients.value)
+    f1 = geo.functions[1]
+    orig_f1 = np.copy(f1.coefficients.value)
+
+    translation = np.array([1.0, 2.0, 3.0])
+    geo.translate(translation, function_indices=[0])
+
+    # f0 should move, f1 should remain unchanged
+    np.testing.assert_allclose(f0.coefficients.value, orig_f0 + translation, atol=1e-7)
+    np.testing.assert_allclose(f1.coefficients.value, orig_f1, atol=1e-7)
+
 

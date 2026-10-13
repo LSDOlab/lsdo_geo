@@ -650,7 +650,6 @@ class SectionalParameterization:
 
         # Apply translations
         for axis_input, parameter in sectional_parameters.translations:
-            axes = []
             for i in range(self.num_sections):
                 if isinstance(axis_input, int):
                     parametric_coordinate = np.ones((len(self.parameterized_points_shape_without_principal_dimension[:-1]),)) * 0.5
@@ -658,27 +657,17 @@ class SectionalParameterization:
                 elif isinstance(axis_input, csdl.Variable):
                     axis = axis_input/csdl.norm(axis_input)
                 elif isinstance(axis_input, np.ndarray):
-                    axis = axis_input/np.linalg.norm(axis_input)
+                    axis = csdl.Variable(value=axis_input/np.linalg.norm(axis_input))
                 else:
                     raise Exception(f"Invalid axis type: {type(axis_input)}. Axis should be either an int, a csdl.Variable, or a numpy array.")
             
-                axis_np = axis.value if isinstance(axis, csdl.Variable) else axis
-                axes.append(axis_np)
-                # translation = parameter[i]
-                # expanded_translation = csdl.expand(
-                #     translation * axis,
-                #     out_shape=points_principal_first[i].shape,
-                #     action=translation_expand_action,
-                # )
-                # points_principal_first = points_principal_first.set(csdl.slice[i], points_principal_first[i] + expanded_translation)
-            axes = np.stack(axes, axis=0)
-            axes = np.reshape(
-                axes,
-                (self.num_sections,) + (1,) * (len(points_principal_first.shape) - 2) + (self.num_physical_dimensions,),
-            )
-            axes = np.broadcast_to(axes, points_principal_first.shape)
-
-            points_principal_first = points_principal_first + axes * csdl.expand(parameter, out_shape=points_principal_first.shape, action=f"{parameter_vectorization_action}")
+                translation = parameter[i]
+                expanded_translation = csdl.expand(
+                    translation * axis,
+                    out_shape=points_principal_first[i].shape,
+                    action=translation_expand_action,
+                )
+                points_principal_first = points_principal_first.set(csdl.slice[i], points_principal_first[i] + expanded_translation)
             
             # axes = np.stack(axes, axis=0)
             # translations = csdl.einsum(axes, parameter, action='ij,i->ij')

@@ -150,9 +150,83 @@ class Geometry(lfs.FunctionSet):
     #     self.connections = b_spline_set.connections
 
 
+    def _apply_rotation(
+        self,
+        rotation_func,
+        rotation_origin: Union[csdl.Variable, npt.NDArray[np.float64]],
+        axis_vector: Optional[Union[csdl.Variable, npt.NDArray[np.float64]]] = None,
+        angles: Optional[Union[csdl.Variable, npt.NDArray[np.float64], float]] = None,
+        quaternion: Optional[Union[csdl.Variable, npt.NDArray[np.float64]]] = None,
+        function_indices: Optional[list[int]] = None,
+        units: Optional[str] = 'radians',
+        **kwargs,
+    ) -> None:
+        if function_indices is None:
+            function_indices = list(self.functions.keys())
+        if isinstance(function_indices, int):
+            function_indices = [function_indices]
+        if not isinstance(function_indices, list):
+            raise ValueError(f'The function indices must be a list of int, received {type(function_indices)}')
+
+        if isinstance(rotation_origin, np.ndarray):
+            rotation_origin = csdl.Variable(shape=rotation_origin.shape, value=rotation_origin)
+
+        call_kwargs = dict(rotation_origin=rotation_origin, **kwargs)
+        if quaternion is not None:
+            if isinstance(quaternion, np.ndarray):
+                quaternion = csdl.Variable(shape=quaternion.shape, value=quaternion)
+            call_kwargs['quaternion'] = quaternion
+        else:
+            if units == 'degrees':
+                angles = angles * np.pi / 180.
+                units = 'radians'
+            elif units != 'radians':
+                raise ValueError(f'Invalid units {units}.')
+
+            if isinstance(angles, np.ndarray):
+                angles = csdl.Variable(shape=angles.shape, value=angles)
+            elif isinstance(angles, (int, float)):
+                angles = csdl.Variable(shape=(1,), value=angles)
+            if angles.shape[0] > 1:
+                raise ValueError(
+                    f'Geometry rotation rotates geometry in place and requires a single angle. '
+                    f'Received {angles.shape[0]} angles. To compute rotated copies at multiple angles, '
+                    f'use rotate() from lsdo_geo.core.geometry.geometry_functions.'
+                )
+            call_kwargs['axis_vector'] = axis_vector
+            call_kwargs['angles'] = angles
+            call_kwargs['units'] = units
+
+        if len(function_indices) == 1:
+            function = self.functions[function_indices[0]]
+            coeff_pts = function.coefficients.reshape(
+                (function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])
+            )
+            rotated_coefficients = rotation_func(points=coeff_pts, **call_kwargs)
+            function.coefficients = rotated_coefficients.reshape(function.coefficients.shape)
+        else:
+            stacked_coefficients = []
+            for function_index in function_indices:
+                function = self.functions[function_index]
+                stacked_coefficients.append(
+                    function.coefficients.reshape(
+                        (function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])
+                    )
+                )
+            stacked_coefficients = csdl.vstack(stacked_coefficients)
+
+            rotated_coefficients = rotation_func(points=stacked_coefficients, **call_kwargs)
+
+            counter = 0
+            for function_index in function_indices:
+                function = self.functions[function_index]
+                num_coefficient_points = function.coefficients.size // function.coefficients.shape[-1]
+                function.coefficients = rotated_coefficients[counter:counter+num_coefficient_points, :].reshape(function.coefficients.shape)
+                counter += num_coefficient_points
+
     def rotate(self, rotation_origin:Union[csdl.Variable, npt.NDArray[np.float64]], axis_vector:Union[csdl.Variable, npt.NDArray[np.float64]],
                angles:Union[csdl.Variable, npt.NDArray[np.float64], float], function_indices:Optional[list[int]]=None, 
-               units:Optional[str]='radians') -> None:
+               units:Optional[str]='radians', method:str='rodrigues') -> None:
         '''
         Rotates the geometry about an axis.
 
@@ -168,65 +242,77 @@ class Geometry(lfs.FunctionSet):
             The indices of the functions to rotate.
         units : str
             The units of the angle of rotation. {degrees, radians}
+        method : str = 'rodrigues'
+            Rotation method to use for arbitrary axes: 'rodrigues' (default, faster) or 'quaternion'.
         '''
         from lsdo_geo.core.geometry.geometry_functions import rotate as rotate_function
-        if units == 'degrees':
-            angles = angles * np.pi / 180.
-            units = 'radians'
-        elif units == 'radians':
-            pass
-        else:
-            raise ValueError(f'Invalid units {units}.')
-        
-        if function_indices is None:
-            function_indices = list(self.functions.keys())
-        if isinstance(function_indices, int):
-            function_indices = [function_indices]
-        if not isinstance(function_indices, list):
-            raise ValueError(f'The function indices must be a list of int, received {type(function_indices)}')
-        
-        if isinstance(rotation_origin, np.ndarray):
-            rotation_origin = csdl.Variable(shape=rotation_origin.shape, value=rotation_origin)
-        # if type(axis_vector) is np.ndarray:
-        #     axis_vector = csdl.Variable(shape=axis_vector.shape, value=axis_vector)
-        if type(angles) is np.ndarray:
-            angles = csdl.Variable(shape=angles.shape, value=angles)
+        self._apply_rotation(
+            rotate_function,
+            rotation_origin=rotation_origin,
+            axis_vector=axis_vector,
+            angles=angles,
+            function_indices=function_indices,
+            units=units,
+            method=method,
+        )
 
-        # # Unvectorized:
-        # for function_index in function_indices:
-        #     function = self.functions[function_index]
-        #     rotated_coefficients = rotate_function(
-        #         points=function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])), 
-        #         rotation_origin=rotation_origin, axis_vector=axis_vector, angles=angles, units=units
-        #     )
-        #     function.coefficients = rotated_coefficients.reshape(function.coefficients.shape)
+    def rotate_using_rodrigues(self, rotation_origin:Union[csdl.Variable, npt.NDArray[np.float64]], axis_vector:Union[csdl.Variable, npt.NDArray[np.float64]],
+                               angles:Union[csdl.Variable, npt.NDArray[np.float64], float], function_indices:Optional[list[int]]=None, 
+                               units:Optional[str]='radians') -> None:
+        '''
+        Rotates the geometry about an axis using Rodrigues' rotation formula.
 
-        # Vectorized:
-        if len(function_indices) == 1:
-            function = self.functions[function_indices[0]]
-            rotated_coefficients = rotate_function(
-                points=function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])), 
-                rotation_origin=rotation_origin, axis_vector=axis_vector, angles=angles, units=units
+        Strictly enforces the Rodrigues formulation even if the rotation axis is aligned
+        with a coordinate axis.
+        '''
+        from lsdo_geo.core.geometry.geometry_functions import rotate_using_rodrigues as rodrigues_func
+        self._apply_rotation(
+            rodrigues_func,
+            rotation_origin=rotation_origin,
+            axis_vector=axis_vector,
+            angles=angles,
+            function_indices=function_indices,
+            units=units,
+        )
+
+    def rotate_using_quaternion(self, rotation_origin:Union[csdl.Variable, npt.NDArray[np.float64]], 
+                                axis_vector:Optional[Union[csdl.Variable, npt.NDArray[np.float64]]]=None,
+                                angles:Optional[Union[csdl.Variable, npt.NDArray[np.float64], float]]=None,
+                                quaternion:Optional[Union[csdl.Variable, npt.NDArray[np.float64]]]=None,
+                                function_indices:Optional[list[int]]=None,
+                                units:Optional[str]='radians') -> None:
+        '''
+        Rotates the geometry about an axis using quaternion rotation.
+
+        Parameters can either be (axis_vector, angles) or an explicit quaternion.
+        Strictly enforces the quaternion formulation even if the rotation axis is aligned
+        with a coordinate axis.
+        '''
+        # Handle case where user passes quaternion as the second positional argument
+        if axis_vector is not None and (getattr(axis_vector, 'size', None) == 4 or getattr(axis_vector, 'shape', None) == (4,)) and quaternion is None and angles is None:
+            quaternion = axis_vector
+            axis_vector = None
+
+        if quaternion is not None:
+            from lsdo_geo.core.geometry.geometry_functions import apply_quaternion_rotation
+            self._apply_rotation(
+                apply_quaternion_rotation,
+                rotation_origin=rotation_origin,
+                quaternion=quaternion,
+                function_indices=function_indices,
             )
-            function.coefficients = rotated_coefficients.reshape(function.coefficients.shape)
         else:
-            stacked_coefficients = []
-            for function_index in function_indices:
-                function = self.functions[function_index]
-                stacked_coefficients.append(function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])))
-            stacked_coefficients = csdl.vstack(stacked_coefficients)
-
-            rotated_coefficients = rotate_function(
-                points=stacked_coefficients, 
-                rotation_origin=rotation_origin, axis_vector=axis_vector, angles=angles, units=units
+            if axis_vector is None or angles is None:
+                raise ValueError("rotate_using_quaternion requires either 'quaternion' or both 'axis_vector' and 'angles'.")
+            from lsdo_geo.core.geometry.geometry_functions import rotate_using_quaternion as quat_rotate_func
+            self._apply_rotation(
+                quat_rotate_func,
+                rotation_origin=rotation_origin,
+                axis_vector=axis_vector,
+                angles=angles,
+                function_indices=function_indices,
+                units=units,
             )
-
-            counter = 0
-            for i, function_index in enumerate(function_indices):
-                function = self.functions[function_index]
-                num_coefficient_points = function.coefficients.size // function.coefficients.shape[-1]
-                function.coefficients = rotated_coefficients[counter:counter+num_coefficient_points,:].reshape(function.coefficients.shape)
-                counter += num_coefficient_points
 
 
     def translate(self, translation:Union[csdl.Variable, npt.NDArray[np.float64]], function_indices:Optional[list[int]]=None) -> None:
@@ -262,7 +348,14 @@ class Geometry(lfs.FunctionSet):
         # Vectorized:
         if len(function_indices) == 1:
             function = self.functions[function_indices[0]]
-            translated_coefficients = function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])) + translation
+            reshaped_coefficients = function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1]))
+            if len(translation.shape) == 1:
+                expanded_translation = csdl.expand(translation, reshaped_coefficients.shape, 'i->ji')
+                translated_coefficients = reshaped_coefficients + expanded_translation
+            elif translation.shape == reshaped_coefficients.shape:
+                translated_coefficients = reshaped_coefficients + translation
+            else:
+                raise ValueError(f'Translation shape {translation.shape} not compatible with coefficients shape {reshaped_coefficients.shape}.')
             function.coefficients = translated_coefficients.reshape(function.coefficients.shape)
         else:
             stacked_coefficients = []
@@ -285,57 +378,6 @@ class Geometry(lfs.FunctionSet):
                 function = self.functions[function_index]
                 num_coefficient_points = function.coefficients.size // function.coefficients.shape[-1]
                 function.coefficients = translated_coefficients[counter:counter+num_coefficient_points,:].reshape(function.coefficients.shape)
-                counter += num_coefficient_points
-
-
-    def rotate_using_quaternion(self, rotation_origin:Union[csdl.Variable,npt.NDArray[np.float64]], 
-                                quaternion:Union[csdl.Variable,npt.NDArray[np.float64]],
-                                function_indices:Optional[list[int]]=None):
-        '''
-        Rotates the geometry using a quaternion.
-
-        parameters
-        ----------
-        rotation_origin : Union[csdl.Variable,npt.NDArray[np.float64]]
-            The origin of the rotation axis.
-        quaternion : Union[csdl.Variable,npt.NDArray[np.float64]]
-            The quaternion representing the rotation.
-        function_indices : Optional[list[int]]
-            The indices of the functions to rotate.
-        '''
-        from lsdo_geo import apply_quaternion_rotation
-        if function_indices is None:
-            function_indices = list(self.functions.keys())
-        if isinstance(function_indices, int):
-            function_indices = [function_indices]
-        if not isinstance(function_indices, list):
-            raise ValueError(f'The function indices must be a list of int, received {type(function_indices)}')
-
-        if len(function_indices) == 1:
-            function = self.functions[function_indices[0]]
-            rotated_coefficients = apply_quaternion_rotation(
-                points=function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])), 
-                rotation_origin=rotation_origin, quaternion=quaternion
-            )
-            function.coefficients = rotated_coefficients.reshape(function.coefficients.shape)
-
-        else:
-            stacked_coefficients = []
-            for function_index in function_indices:
-                function = self.functions[function_index]
-                stacked_coefficients.append(function.coefficients.reshape((function.coefficients.size // function.coefficients.shape[-1], function.coefficients.shape[-1])))
-            stacked_coefficients = csdl.vstack(stacked_coefficients)
-
-            rotated_coefficients = apply_quaternion_rotation(
-                points=stacked_coefficients, 
-                rotation_origin=rotation_origin, quaternion=quaternion
-            )
-
-            counter = 0
-            for i, function_index in enumerate(function_indices):
-                function = self.functions[function_index]
-                num_coefficient_points = function.coefficients.size // function.coefficients.shape[-1]
-                function.coefficients = rotated_coefficients[counter:counter+num_coefficient_points,:].reshape(function.coefficients.shape)
                 counter += num_coefficient_points
 
 

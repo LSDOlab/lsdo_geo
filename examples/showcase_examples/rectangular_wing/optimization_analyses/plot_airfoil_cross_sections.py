@@ -1345,10 +1345,10 @@ def generate_airfoil_gallery_plot(station_data: list, output_path: str, half_spa
                         ax.add_patch(rect_pal)
                         drawn_pal_label = True
 
-        # Internal spar box representation (25% to 75% chord)
-        x_spar_front = data['x_le'] + 0.25 * data['chord']
-        x_spar_rear = data['x_le'] + 0.75 * data['chord']
-        ax.axvline(x_spar_front, color='#ff7f0e', linestyle=':', alpha=0.5, label='Front/Rear Spar (25%/75%)' if k==0 else None)
+        # Internal spar box representation (15% to 60% chord)
+        x_spar_front = data['x_le'] + 0.15 * data['chord']
+        x_spar_rear = data['x_le'] + 0.60 * data['chord']
+        ax.axvline(x_spar_front, color='#ff7f0e', linestyle=':', alpha=0.5, label='Front/Rear Spar (15%/60%)' if k==0 else None)
         ax.axvline(x_spar_rear, color='#ff7f0e', linestyle=':', alpha=0.5)
 
         # Mark LE and TE
@@ -1472,9 +1472,11 @@ def generate_shape_evolution_plot(
     ax_plan.plot(x_le_dense, y_dense, 'k-', linewidth=1.8, label='Leading Edge')
     ax_plan.plot(x_te_dense, y_dense, 'k--', linewidth=1.5, label='Trailing Edge')
 
-    # Draw 25% chord spar axis
-    x_spar_dense = x_le_dense + 0.25 * (x_te_dense - x_le_dense)
-    ax_plan.plot(x_spar_dense, y_dense, '-.', color='#d95f02', linewidth=1.5, label='Internal Spar (25% c)')
+    # Draw spar axes (15% and 60% chord)
+    x_spar_front_dense = x_le_dense + 0.15 * (x_te_dense - x_le_dense)
+    x_spar_rear_dense = x_le_dense + 0.60 * (x_te_dense - x_le_dense)
+    ax_plan.plot(x_spar_front_dense, y_dense, '-.', color='#d95f02', linewidth=1.5, label='Front Spar (15% c)')
+    ax_plan.plot(x_spar_rear_dense, y_dense, ':', color='#d95f02', linewidth=1.5, label='Rear Spar (60% c)')
 
     # Draw station cutting lines
     label_offset = max(0.02, 0.012 * half_span)

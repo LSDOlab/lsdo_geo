@@ -293,3 +293,32 @@ def test_sectional_parameterization_2d_surface():
     params.add_translation(axis=1, translation=csdl.Variable(value=np.linspace(0.0, 0.5, 5)))
     updated = sp.evaluate(params)
     assert updated.shape == (5, 4, 3)
+
+
+def test_sectional_parameterization_derivatives():
+    """Verify derivatives of sectional translation with respect to translation parameter."""
+    recorder = csdl.Recorder(inline=True)
+    recorder.start()
+
+    grid = np.zeros((4, 3, 2, 3))
+    for i in range(4):
+        for j in range(3):
+            for k in range(2):
+                grid[i, j, k] = [i * 2.0, j * 3.0, k * 1.5]
+
+    pts = csdl.Variable(value=grid)
+    sp = lg.SectionalParameterization(
+        parameterized_points=pts,
+        principal_parametric_dimension=1,
+    )
+    t_var = csdl.Variable(value=np.array([0.1, 0.2, 0.3]))
+    params = lg.SectionalParameters()
+    params.add_translation(axis=0, translation=t_var)
+    updated = sp.evaluate(params)
+
+    loss = csdl.sum(updated)
+    grad = csdl.derivative(loss, t_var)
+    assert grad is not None
+    assert np.all(np.isfinite(grad.value))
+    assert not np.allclose(grad.value, 0.0)
+

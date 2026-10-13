@@ -128,6 +128,10 @@ def construct_tight_fit_ffd_block(entities:Union[Sequence[EntityType], EntityTyp
         if entity_count >= 2:
             key_entities.append(entity_name)
 
+    enclosure_coords = np.asarray(enclosure_ffd_block.coefficients.value).reshape((-1, 3))
+    z_min = np.min(enclosure_coords[:, 2])
+    z_max = np.max(enclosure_coords[:, 2])
+
     # Evaluate to get corners of key entities
     corner_points = {}
     for i, key_entity in enumerate(key_entities):
@@ -152,15 +156,15 @@ def construct_tight_fit_ffd_block(entities:Union[Sequence[EntityType], EntityTyp
         corner_1i1 = entities[0].evaluate(parametric_coordinate_10, non_csdl=True)
         corner_1ip11 = entities[0].evaluate(parametric_coordinate_11, non_csdl=True)
 
-        corner_0i0[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[2]  # z value of first coordinate
-        corner_0ip10[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[2]  # z value of first coordinate
-        corner_1i0[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[2]  # z value of first coordinate
-        corner_1ip10[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[2]  # z value of first coordinate
+        corner_0i0[2] = z_min
+        corner_0ip10[2] = z_min
+        corner_1i0[2] = z_min
+        corner_1ip10[2] = z_min
 
-        corner_0i1[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[5]  # z value of second coordinate
-        corner_0ip11[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[5]  # z value of second coordinate
-        corner_1i1[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[5]  # z value of second coordinate
-        corner_1ip11[2] = enclosure_ffd_block.coefficients.value.reshape((-1,))[5]  # z value of second coordinate
+        corner_0i1[2] = z_max
+        corner_0ip11[2] = z_max
+        corner_1i1[2] = z_max
+        corner_1ip11[2] = z_max
 
         if i == 0:
             corner_points[f'0{i}0'] = corner_0i0

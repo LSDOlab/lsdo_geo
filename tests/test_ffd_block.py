@@ -173,3 +173,30 @@ def test_ffd_block_multiple_entities_and_non_csdl():
     np.testing.assert_allclose(outputs_np[0].reshape(-1, 3), pts1, atol=1e-4)
     np.testing.assert_allclose(outputs_np[1], pts2, atol=1e-4)
 
+
+def test_tight_fit_ffd_block_nz3():
+    """Test that construct_tight_fit_ffd_block encloses geometry with nz=3 coefficients."""
+    from lsdo_geo.core.parameterization.free_form_deformation_functions import construct_tight_fit_ffd_block
+
+    recorder = csdl.Recorder(inline=True)
+    recorder.start()
+
+    geo = lg.import_geometry(SAMPLE_STP, parallelize=False)
+    ffd = construct_tight_fit_ffd_block(
+        entities=geo,
+        num_coefficients=(2, 3, 3),
+        degree=(1, 1, 1),
+        name="tight_fit_nz3",
+    )
+
+    # Check that ffd z extent encloses the wing z extent
+    all_wing_pts = np.concatenate([f.coefficients.value.reshape(-1, 3) for f in geo.functions.values()])
+    wing_z_min, wing_z_max = all_wing_pts[:, 2].min(), all_wing_pts[:, 2].max()
+
+    ffd_coords = ffd.coefficients.value.reshape(-1, 3)
+    ffd_z_min, ffd_z_max = ffd_coords[:, 2].min(), ffd_coords[:, 2].max()
+
+    assert ffd_z_min <= wing_z_min + 1e-6
+    assert ffd_z_max >= wing_z_max - 1e-6
+
+

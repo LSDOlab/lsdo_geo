@@ -30,7 +30,7 @@ dependencies = [
     #'csdl_alpha @ git+https://github.com/LSDOlab/CSDL_alpha.git',
     #'lsdo_function_spaces @ git+https://github.com/LSDOlab/lsdo_function_spaces.git'
 ]
-version = "1.0.0"
+version = "1.1.0"
 
 [project.urls]
 Documentation = "https://lsdo-geo.readthedocs.io/en/latest/"

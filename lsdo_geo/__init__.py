@@ -3,13 +3,16 @@ lsdo_geo: Geometry representation, deformational parameterization,
 and sensitivity analysis for Multidisciplinary Design Optimization (MDO).
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 from .core.geometry.geometry import Geometry
 from .core.geometry.mesh import Mesh
 from .core.geometry.geometry_functions import (
     import_geometry,
     rotate,
+    rotate_using_rodrigues,
+    rotate_using_quaternion,
+    compute_rodrigues_rotation_matrix,
     apply_quaternion_rotation,
     hamilton_product,
 )
@@ -41,6 +44,9 @@ __all__ = [
     "Mesh",
     "import_geometry",
     "rotate",
+    "rotate_using_rodrigues",
+    "rotate_using_quaternion",
+    "compute_rodrigues_rotation_matrix",
     "apply_quaternion_rotation",
     "hamilton_product",
     # Parameterization
