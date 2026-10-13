@@ -781,4 +781,11 @@ def generate_perturbation_video(sweep_paired_rotors=True):
         print(f"Copied video to artifact directory: {dest_video}")
 
 if __name__ == '__main__':
-    generate_perturbation_video()
+    if (
+        os.environ.get("RUN_JAX_BENCHMARK", "1") == "0"
+        or os.environ.get("SKIP_VIDEO", "0") == "1"
+        or os.environ.get("SKIP_JAX_SIM", "0") == "1"
+    ):
+        print("Skipping video generation (RUN_JAX_BENCHMARK=0, SKIP_VIDEO=1, or SKIP_JAX_SIM=1).")
+    else:
+        generate_perturbation_video()

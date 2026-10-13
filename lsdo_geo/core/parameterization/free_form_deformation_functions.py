@@ -85,7 +85,9 @@ def construct_ffd_block_from_corners(entities:Union[Sequence[EntityType], Entity
 
 
 def construct_tight_fit_ffd_block(entities:Union[Sequence[EntityType], EntityType],
-                                    num_coefficients:Union[tuple[int,...], int]=2, degree:Union[tuple[int,...], int]=1, name:str='ffd_block') -> FFDBlock:
+                                  num_coefficients:Union[tuple[int,...], int]=2, degree:Union[tuple[int,...], int]=1,
+                                  name:str='ffd_block',
+                                  parallelize:bool=False) -> FFDBlock:
     '''
     Constructs an FFD block around the given entities and embeds them within.
     '''
@@ -111,7 +113,13 @@ def construct_tight_fit_ffd_block(entities:Union[Sequence[EntityType], EntityTyp
     enclosure_top_points = enclosure_ffd_block.evaluate(parametric_coordinates=parametric_coordinates_top, non_csdl=True)
     # ffd_bot_points = bot_evaluation_matrix.dot(b_spline_hyper_volume.coefficients.value)
 
-    top_points_on_wing = entities[0].project(enclosure_top_points, direction=sampling_projection_direction, plot=False)
+    num_workers = None if parallelize else 1
+    top_points_on_wing = entities[0].project(
+        enclosure_top_points,
+        direction=sampling_projection_direction,
+        plot=False,
+        num_workers=num_workers,
+    )
     # bot_points_on_wing = entities[0].project(ffd_bot_points, direction=sampling_projection_direction)
 
     # identify key surfaces
