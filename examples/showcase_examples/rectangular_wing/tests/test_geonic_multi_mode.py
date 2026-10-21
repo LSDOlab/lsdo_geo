@@ -57,18 +57,18 @@ def test_mode_resolution_and_isolation():
     with pytest.raises(ValueError, match="Invalid geonic_payload_mode"):
         parse_geonic_payload_mode(env={'GEONIC_PAYLOAD_MODE': 'nonexistent'})
 
-    # Subprocess check: GEONIC_PAYLOAD_MODE='none' must not import bsm3
+    # Subprocess check: BSM3 must never be imported
     import subprocess
     cmd = [
         sys.executable, '-c',
         "import os, sys\n"
-        "os.environ['GEONIC_PAYLOAD_MODE'] = 'none'\n"
+        "os.environ['GEONIC_PAYLOAD_MODE'] = 'both'\n"
         "from examples.showcase_examples.rectangular_wing.physics_models.geonic_payload import parse_geonic_payload_mode\n"
         "mode, use_geo = parse_geonic_payload_mode()\n"
-        "assert not use_geo\n"
+        "assert use_geo\n"
         "assert 'bsm3' not in sys.modules\n"
     ]
-    res = subprocess.run(cmd, env={**os.environ, 'GEONIC_PAYLOAD_MODE': 'none'}, capture_output=True, text=True)
+    res = subprocess.run(cmd, env={**os.environ, 'GEONIC_PAYLOAD_MODE': 'both'}, capture_output=True, text=True)
     assert res.returncode == 0, f"Failed isolation check: {res.stderr}"
 
 

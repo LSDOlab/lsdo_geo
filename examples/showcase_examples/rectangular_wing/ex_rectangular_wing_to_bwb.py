@@ -120,7 +120,7 @@ else:
     resolution = f"{num_spanwise_dvs}DV_{num_spanwise_sections}S_{num_chordwise_panels}C"
 
 # 3. Geometric Non-Interference (Geonic) payload containment mode:
-#   'none'      -> Baseline behavior: unconstrained OML, legacy payload_cg DV, no BSM3 import
+#   'none'      -> Baseline behavior: unconstrained OML, legacy payload_cg DV, no geonic containment
 #   'oversized' -> Constrain TCP0 oversized box (8 sample points, payload_center_x DV, 0.2 m buffer)
 #   'pallets'   -> Constrain TCP0 6-pallet stack (32 sample points, pallet_stack_center_x DV, 0.2 m buffer)
 #   'both'      -> Constrain both payload cases (40-point batch, equal CG consistency constraint)
@@ -130,9 +130,9 @@ if 'GEONIC_PAYLOAD_MODE' not in os.environ and 'USE_GEONIC' in os.environ:
     geonic_payload_mode = 'oversized' if str(os.environ['USE_GEONIC']).strip() == '1' else 'none'
 
 # 3b. Geometric non-interference constraint formulation method:
-#   'selective_aggregation' -> Sample points evaluated against BSM3 enclosed SDF (default)
+#   'selective_aggregation' -> Sample points evaluated against native LSDO_GEO signed distance (default)
 #   'sdfpack'               -> Continuous volumetric interference metric via sdfpack
-geonic_method: Literal['selective_aggregation', 'sdfpack'] = 'sdfpack'  # Options: 'selective_aggregation', 'sdfpack'
+geonic_method: Literal['selective_aggregation', 'sdfpack'] = 'selective_aggregation'  # Options: 'selective_aggregation', 'sdfpack'
 geonic_method = os.environ.get('GEONIC_METHOD', os.environ.get('GEONIC_MESH', geonic_method))
 
 
@@ -225,22 +225,14 @@ geonic_payload_mode, use_geonic = parse_geonic_payload_mode(mode=geonic_payload_
 geonic_method = parse_geonic_method(method=geonic_method)
 
 if use_geonic:
-    try:
-        import bsm3
-    except ImportError as e:
-        raise ImportError(
-            f"geonic_payload_mode='{geonic_payload_mode}' requires 'bsm3' to be installed. "
-            "Please install the repaired checkout at /home/andrew/optimization/BSM3 "
-            "via `pip install -e /home/andrew/optimization/BSM3 --no-deps`."
-        ) from e
     if geonic_method == 'sdfpack':
         try:
             import sdfpack
         except ImportError as e:
             raise ImportError(
                 "geonic_method='sdfpack' requires 'sdfpack' to be installed. "
-                "Please install it from /home/andrew/optimization/sdfpack "
-                "via `pip install -e /home/andrew/optimization/sdfpack --no-deps`."
+                "Please install it from /home/andrewfletcher/Desktop/code/sdfpack "
+                "via `pip install -e /home/andrewfletcher/Desktop/code/sdfpack --no-deps`."
             ) from e
         from physics_models.geonic_sdfpack import evaluate_sdfpack_geonic
     from physics_models.geonic_payload import (
@@ -1378,6 +1370,7 @@ if use_geonic:
             overall_geonic_margin.name = 'overall_geonic_margin'
 
     elif geonic_method == 'sdfpack':
+        projection_model = geometry
         if geonic_payload_mode == 'oversized':
             payload_signed_distance = all_signed_distance
             payload_signed_distance.name = 'payload_signed_distance'

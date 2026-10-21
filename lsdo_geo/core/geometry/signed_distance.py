@@ -1086,3 +1086,43 @@ class FunctionSetSignedDistanceOperation(_CustomExplicitOperation):
         self._cache_data["u_star"] = u_stars
         self._cache_data["signs"] = signs
         self._cache_data["normals"] = normals
+
+    def project(self, coefficients: np.ndarray, points: np.ndarray):
+        """
+        Evaluate signed distance for query points and return (signed_distance, forward_state).
+        Provides a drop-in execution interface compatible with external SDF evaluators.
+        """
+        outputs = {}
+        self.compute({"coefficients": coefficients, "points": points}, outputs)
+        return outputs["signed_distance"], None
+
+    def compute_vjp(
+        self,
+        coefficients: np.ndarray,
+        points: np.ndarray,
+        cotangent: np.ndarray,
+        forward_state=None,
+    ):
+        """
+        Compute VJP of signed distance w.r.t query points and coefficients.
+        Returns (d_points, d_coefficients).
+        """
+        vjp_op = FunctionSetSignedDistanceOperationVJP(
+            function_set=self.detached_function_set,
+            sign_mode=self.sign_mode,
+            eps_reg=self.eps_reg,
+            bound_tol=self.bound_tol,
+            eps_hess=self.eps_hess,
+            eps_lm=self.eps_lm,
+            cache_data=self._cache_data,
+        )
+        outputs = {}
+        vjp_op.compute(
+            {
+                "coefficients": coefficients,
+                "points": points,
+                "d_signed_distance": cotangent,
+            },
+            outputs,
+        )
+        return outputs["d_points"], outputs["d_coefficients"]

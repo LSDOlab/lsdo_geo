@@ -7,7 +7,7 @@ for TCP0 payload containment in aircraft outer mold lines (OML):
 2. 6-pallet cargo stack (shorts and longs)
 
 Implements CSDL CustomExplicitOperation classes with exact analytic/adjoint
-sensitivities with respect to BSM3 B-spline OML surface coefficients and
+sensitivities with respect to LSDO_GEO B-spline OML surface coefficients and
 payload position design variables.
 """
 from __future__ import annotations
@@ -172,7 +172,15 @@ class SDFPackOversizedInterferenceOperation(csdl.CustomExplicitOperation):
         bbox: Optional[Tuple[np.ndarray, np.ndarray] | List[np.ndarray]] = None,
     ):
         super().__init__()
-        self.projection_model = projection_model
+        from lsdo_geo import FunctionSetSignedDistanceOperation
+        if not isinstance(projection_model, FunctionSetSignedDistanceOperation):
+            self.projection_model = FunctionSetSignedDistanceOperation(
+                function_set=projection_model,
+                sign_mode="winding_number",
+                winding_chord_tolerance=float(clearance) / 10.0,
+            )
+        else:
+            self.projection_model = projection_model
         self.clearance = float(clearance)
         self.max_grid_subdivisions = int(max_grid_subdivisions)
         self.smoothing_radius = float(smoothing_radius)
@@ -285,7 +293,15 @@ class SDFPackPalletsInterferenceOperation(csdl.CustomExplicitOperation):
         bbox: Optional[Tuple[np.ndarray, np.ndarray] | List[np.ndarray]] = None,
     ):
         super().__init__()
-        self.projection_model = projection_model
+        from lsdo_geo import FunctionSetSignedDistanceOperation
+        if not isinstance(projection_model, FunctionSetSignedDistanceOperation):
+            self.projection_model = FunctionSetSignedDistanceOperation(
+                function_set=projection_model,
+                sign_mode="winding_number",
+                winding_chord_tolerance=float(clearance) / 10.0,
+            )
+        else:
+            self.projection_model = projection_model
         self.clearance = float(clearance)
         self.max_grid_subdivisions = int(max_grid_subdivisions)
         self.smoothing_radius = float(smoothing_radius)
@@ -397,8 +413,8 @@ def evaluate_sdfpack_geonic(
 
     Parameters
     ----------
-    projection_model : bsm3.FunctionSetProjectionModel
-        BSM3 projection model for the aircraft OML.
+    projection_model : FunctionSetSignedDistanceOperation | Geometry
+        LSDO_GEO signed distance operation or Geometry for the aircraft OML.
     coefficients : csdl.Variable
         Stacked B-spline coefficients of the OML geometry.
     payload_mode : str

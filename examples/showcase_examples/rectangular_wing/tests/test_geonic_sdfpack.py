@@ -13,7 +13,6 @@ import os
 import pytest
 import numpy as np
 import csdl_alpha as csdl
-import bsm3
 import lsdo_function_spaces as lfs
 import sys
 from pathlib import Path
@@ -37,7 +36,8 @@ from physics_models.geonic_sdfpack import (
     evaluate_sdfpack_geonic,
 )
 
-DEFAULT_STEP_PATH = Path("/home/andrew/optimization/BSM3/examples/basic_examples/swept_wing.stp")
+REPO_ROOT = Path(__file__).resolve().parents[4]
+DEFAULT_STEP_PATH = REPO_ROOT / "examples" / "example_geometries" / "rectangular_wing" / "rectangular_wing_naca0012_10ar.stp"
 
 
 def test_geonic_method_parsing():
@@ -117,31 +117,19 @@ def test_pallet_stack_sdf_and_grad():
 
 def test_sdfpack_oversized_op_jax_derivatives():
     """Verify SDFPackOversizedInterferenceOperation CSDL/JAX sensitivity matches finite difference."""
-    wing_fun_set = lfs.import_file_patched(file_name=str(DEFAULT_STEP_PATH), parallelize=False)
-    projection_model = bsm3.FunctionSetProjectionModel(
-        function_set=wing_fun_set,
-        warm_start_nu=15,
-        warm_start_nv=15,
-        sdf=True,
-        sdf_sign_mode="enclosed",
-    )
-    reshaped_coeffs = []
-    for _, fun in wing_fun_set.functions.items():
-        coeffs = fun.coefficients
-        reshaped_coeffs.append(coeffs.value.reshape((-1, 3)))
-    scale = 7.5
-    coeffs_np = np.vstack(reshaped_coeffs) * scale
+    from lsdo_geo import import_geometry
 
     rec = csdl.Recorder(inline=True)
     rec.start()
-    c_var = csdl.Variable(value=coeffs_np)
-    c_var.set_as_design_variable(lower=-100.0, upper=100.0)
+
+    wing_geom = import_geometry(str(DEFAULT_STEP_PATH), parallelize=False)
+    c_var = wing_geom.stack_coefficients()
     cx_var = csdl.Variable(value=np.array([3.75]))
     cx_var.set_as_design_variable(lower=0.0, upper=10.0)
 
     # Use a penetrating box so interference is positive and gradients active
     op = SDFPackOversizedInterferenceOperation(
-        projection_model=projection_model,
+        projection_model=wing_geom,
         clearance=0.2,
         max_grid_subdivisions=4,
         smoothing_radius=0.01,
@@ -183,30 +171,18 @@ def test_sdfpack_oversized_op_jax_derivatives():
 
 def test_sdfpack_pallets_op_jax_derivatives():
     """Verify SDFPackPalletsInterferenceOperation CSDL/JAX sensitivity matches finite difference."""
-    wing_fun_set = lfs.import_file_patched(file_name=str(DEFAULT_STEP_PATH), parallelize=False)
-    projection_model = bsm3.FunctionSetProjectionModel(
-        function_set=wing_fun_set,
-        warm_start_nu=15,
-        warm_start_nv=15,
-        sdf=True,
-        sdf_sign_mode="enclosed",
-    )
-    reshaped_coeffs = []
-    for _, fun in wing_fun_set.functions.items():
-        coeffs = fun.coefficients
-        reshaped_coeffs.append(coeffs.value.reshape((-1, 3)))
-    scale = 7.5
-    coeffs_np = np.vstack(reshaped_coeffs) * scale
+    from lsdo_geo import import_geometry
 
     rec = csdl.Recorder(inline=True)
     rec.start()
-    c_var = csdl.Variable(value=coeffs_np)
-    c_var.set_as_design_variable(lower=-100.0, upper=100.0)
+
+    wing_geom = import_geometry(str(DEFAULT_STEP_PATH), parallelize=False)
+    c_var = wing_geom.stack_coefficients()
     cx_var = csdl.Variable(value=np.array([12.0]))
     cx_var.set_as_design_variable(lower=0.0, upper=20.0)
 
     op = SDFPackPalletsInterferenceOperation(
-        projection_model=projection_model,
+        projection_model=wing_geom,
         clearance=0.2,
         max_grid_subdivisions=4,
         smoothing_radius=0.01,
@@ -249,21 +225,10 @@ def test_sdfpack_both_mode_evaluation_and_derivatives():
     """Verify evaluate_sdfpack_geonic in 'both' mode on NACA0012 geometry."""
     from lsdo_geo import import_geometry
 
-    repo_root = Path(__file__).resolve().parents[4]
-    cad_path = repo_root / "examples" / "example_geometries" / "rectangular_wing" / "rectangular_wing_naca0012_10ar.stp"
-
     rec = csdl.Recorder(inline=True)
     rec.start()
 
-    wing_geom = import_geometry(str(cad_path), parallelize=False)
-
-    model = bsm3.FunctionSetProjectionModel(
-        function_set=wing_geom,
-        warm_start_nu=15,
-        warm_start_nv=15,
-        sdf=True,
-        sdf_sign_mode="enclosed",
-    )
+    wing_geom = import_geometry(str(DEFAULT_STEP_PATH), parallelize=False)
 
     cx_pay = csdl.Variable(value=np.array([3.75]))
     cx_pay.set_as_design_variable(lower=0.0, upper=10.0)
@@ -273,7 +238,7 @@ def test_sdfpack_both_mode_evaluation_and_derivatives():
     coeffs = wing_geom.stack_coefficients()
 
     interf_pay, interf_pal = evaluate_sdfpack_geonic(
-        projection_model=model,
+        projection_model=wing_geom,
         coefficients=coeffs,
         payload_mode="both",
         payload_center_x=cx_pay,
