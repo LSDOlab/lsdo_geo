@@ -46,6 +46,31 @@ def aggregate_pressure_loading(panel_centers, panel_forces):
     forces = np.asarray(panel_forces, dtype=float)
     if centers.ndim != 2 or forces.ndim != 2 or centers.shape[0] != forces.shape[0]:
         raise ValueError("panel centers and forces must have matching 2-D shapes")
+
+    b = float(np.max(centers[:, 1]))
+    n_total = centers.shape[0]
+
+    # Structured quad mesh strip detection: check if panels are arranged in sequential chordwise strips
+    for nc in [20, 30, 40, 44, 46, 48, 50, 52, 54, 56, 60, 70, 80]:
+        n_tip = 4 * (nc // 2 - 1)
+        if (n_total - n_tip) > 0 and (n_total - n_tip) % nc == 0 and (n_total - n_tip) // nc >= 5:
+            te_gap = float(np.linalg.norm(centers[0] - centers[nc-1]))
+            if te_gap < 0.5:
+                n_strips = (n_total - n_tip) // nc
+                full_y = np.array([centers[s*nc : (s+1)*nc, 1].mean() for s in range(n_strips)])
+                if np.all(np.diff(full_y) > 0):
+                    y = full_y
+                    strip_lift = np.array([forces[s*nc : (s+1)*nc, 2].sum() for s in range(n_strips)])
+                    if n_tip > 0:
+                        strip_lift[-1] += forces[n_strips*nc:, 2].sum()
+                    y_smooth = full_y.copy()
+                    if len(y_smooth) >= 7:
+                        for _ in range(3):
+                            y_smooth[1:-1] = 0.25 * y_smooth[:-2] + 0.5 * y_smooth[1:-1] + 0.25 * y_smooth[2:]
+                    bounds = np.concatenate(([0.0], 0.5 * (y_smooth[:-1] + y_smooth[1:]), [b]))
+                    return y, strip_lift / np.diff(bounds), float(strip_lift.sum()), b
+
+    # Fallback heuristic: cluster by rounded y coordinates
     y_round = np.round(centers[:, 1], 4)
     u_vals, u_counts = np.unique(y_round, return_counts=True)
     dominant_quads = int(np.max(u_counts))
@@ -57,7 +82,6 @@ def aggregate_pressure_loading(panel_centers, panel_forces):
     tip_mask = ~np.isin(y_round, main_stations)
     if np.any(tip_mask):
         strip_lift[-1] += forces[tip_mask, 2].sum()
-    b = float(np.max(centers[:, 1]))
     bounds = np.concatenate(([0.0], 0.5 * (y[:-1] + y[1:]), [b]))
     return y, strip_lift / np.diff(bounds), float(strip_lift.sum()), b
 

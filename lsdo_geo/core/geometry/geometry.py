@@ -76,6 +76,20 @@ class Geometry(lfs.FunctionSet):
             return evaluated_representation
         
         return evaluated_representations
+
+    def evaluate_signed_distance(
+        self,
+        points: csdl.Variable,
+        sign_mode: str = "winding_number",
+        **kwargs,
+    ) -> csdl.Variable:
+        """
+        Evaluate signed distance field from query points to this geometry.
+        Negative inside, positive outside.
+        """
+        from lsdo_geo.core.geometry.signed_distance import FunctionSetSignedDistanceOperation
+        op = FunctionSetSignedDistanceOperation(self, sign_mode=sign_mode, **kwargs)
+        return op.evaluate(self.stack_coefficients(), points)
     
 
     def declare_component(self, function_indices:Optional[Sequence[int]]=None, 

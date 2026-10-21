@@ -16,6 +16,7 @@ from .core.geometry.geometry_functions import (
     apply_quaternion_rotation,
     hamilton_product,
 )
+from .core.geometry.signed_distance import FunctionSetSignedDistanceOperation
 from .core.parameterization.ffd_block import FFDBlock
 from .core.parameterization.free_form_deformation_functions import (
     construct_ffd_block_around_entities,
@@ -42,6 +43,7 @@ __all__ = [
     # Geometry
     "Geometry",
     "Mesh",
+    "FunctionSetSignedDistanceOperation",
     "import_geometry",
     "rotate",
     "rotate_using_rodrigues",

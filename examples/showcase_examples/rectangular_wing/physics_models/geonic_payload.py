@@ -233,7 +233,7 @@ def compute_geonic_clearance_and_margin(
     """
     Compute geonic constraint values, per-point clearance, and smooth margin.
 
-    With BSM3 enclosed convention:
+    With signed distance convention:
       payload_signed_distance: negative inside, positive outside
       geonic_constraint_values = payload_signed_distance + clearance_buffer <= 0
       geonic_clearance_per_point = -payload_signed_distance

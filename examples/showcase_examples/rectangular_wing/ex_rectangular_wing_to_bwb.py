@@ -86,7 +86,8 @@ elif 'BWB_NUM_SECTIONS' in os.environ:
 
 # b) Chordwise panel count around airfoil ring (e.g., 20, 40, 50, 60)
 #    Controls chordwise discretization around upper/lower airfoil OML.
-num_chordwise_panels: int = 50
+# num_chordwise_panels: int = 60
+num_chordwise_panels: int = 30
 if 'BWB_NUM_CHORDWISE_PANELS' in os.environ:
     num_chordwise_panels = int(os.environ['BWB_NUM_CHORDWISE_PANELS'])
 elif 'BWB_NUM_CHORD' in os.environ:
@@ -94,7 +95,8 @@ elif 'BWB_NUM_CHORD' in os.environ:
 
 # c) Spanwise design variable stations per semi-span (e.g., 5, 6, 8)
 #    Controls number of chord, sweep, twist, camber, and thickness FFD control stations.
-num_spanwise_dvs: int = 6
+# num_spanwise_dvs: int = 6
+num_spanwise_dvs: int = 5
 if 'BWB_NUM_DVS' in os.environ:
     num_spanwise_dvs = int(os.environ['BWB_NUM_DVS'])
 elif 'BWB_NUM_STATIONS' in os.environ:
@@ -122,7 +124,7 @@ else:
 #   'oversized' -> Constrain TCP0 oversized box (8 sample points, payload_center_x DV, 0.2 m buffer)
 #   'pallets'   -> Constrain TCP0 6-pallet stack (32 sample points, pallet_stack_center_x DV, 0.2 m buffer)
 #   'both'      -> Constrain both payload cases (40-point batch, equal CG consistency constraint)
-geonic_payload_mode: str = 'none'  # Options: 'none', 'oversized', 'pallets', 'both'
+geonic_payload_mode: str = 'both'  # Options: 'none', 'oversized', 'pallets', 'both'
 geonic_payload_mode = os.environ.get('GEONIC_PAYLOAD_MODE', geonic_payload_mode)
 if 'GEONIC_PAYLOAD_MODE' not in os.environ and 'USE_GEONIC' in os.environ:
     geonic_payload_mode = 'oversized' if str(os.environ['USE_GEONIC']).strip() == '1' else 'none'
@@ -130,7 +132,8 @@ if 'GEONIC_PAYLOAD_MODE' not in os.environ and 'USE_GEONIC' in os.environ:
 # 4. Viscous drag mode:
 #   'ibl'          -> Integral boundary layer drag model & attachment constraint H_max <= 2.4
 #   'constant_cd0' -> Legacy fixed baseline profile drag (CD0_base = 0.0080)
-viscous_drag_mode: Literal['ibl', 'constant_cd0'] = 'ibl'  # Options: 'ibl' or 'constant_cd0'
+# viscous_drag_mode: Literal['ibl', 'constant_cd0'] = 'ibl'  # Options: 'ibl' or 'constant_cd0'
+viscous_drag_mode: Literal['ibl', 'constant_cd0'] = 'constant_cd0'  # Options: 'ibl' or 'constant_cd0'
 viscous_drag_mode = os.environ.get('VISCOUS_DRAG_MODE', viscous_drag_mode)
 
 # 5. Sizing condition toggle: -1.0g push-down maneuver
@@ -141,12 +144,13 @@ include_neg1g_sizing: bool = False  # Options: True or False
 # 5b. Structural wingbox depth factor:
 #   Effective structural height factor relative to OML (accounts for spar cap flange
 #   centroid recession beneath OML skins/stringers, shear lag, and internal cutouts)
-box_height_factor: float = 1.0     # Options: 0.50 - 0.70 (standard preliminary design factor)
+# box_height_factor: float = 1.0     # Options: 0.50 - 0.70 (standard preliminary design factor)
+box_height_factor: float = 0.7     # Options: 0.50 - 0.70 (standard preliminary design factor)
 box_height_factor = float(os.environ.get('BOX_HEIGHT_FACTOR', box_height_factor))
 
 # 6. Airfoil shape & control surface options:
 include_camber: bool = True           # Mean camber line deformation (3 rows of control points)
-include_thickness_shape: bool = True  # Airfoil thickness distribution deformation
+include_thickness_shape: bool = False  # Airfoil thickness distribution deformation
 include_te_thickness: bool = False    # True: blunt TE (5 rows); False: pinned sharp TE (4 rows)
 include_elevator: bool = False        # Trailing-edge elevator deflection DV
 
@@ -163,7 +167,7 @@ stall_model = os.environ.get('STALL_MODEL', stall_model)
 if stall_model not in ('cl', 'stratford_closure'):
     raise ValueError(f"Unknown stall_model: '{stall_model}'. Must be 'cl' or 'stratford_closure'.")
 
-enforce_stratford_constraint: bool = True
+enforce_stratford_constraint: bool = False
 if 'ENFORCE_STRATFORD_CONSTRAINT' in os.environ:
     enforce_stratford_constraint = os.environ.get('ENFORCE_STRATFORD_CONSTRAINT', '1').strip() == '1'
 
@@ -211,14 +215,6 @@ from physics_models.geonic_payload import (
 geonic_payload_mode, use_geonic = parse_geonic_payload_mode(mode=geonic_payload_mode)
 
 if use_geonic:
-    try:
-        import bsm3
-    except ImportError as e:
-        raise ImportError(
-            f"geonic_payload_mode='{geonic_payload_mode}' requires 'bsm3' to be installed. "
-            "Please install the repaired checkout at /home/andrew/optimization/BSM3 "
-            "via `pip install -e /home/andrew/optimization/BSM3 --no-deps`."
-        ) from e
     from physics_models.geonic_payload import (
         GEONIC_CLEARANCE_M,
         PAYLOAD_LENGTH_M,
@@ -269,15 +265,20 @@ if not os.path.exists(mesh_full_path):
     print(f"Target mesh '{mesh_full_path}' not found on disk. Generating parametrically...", flush=True)
     if num_spanwise_sections == 15:
         base_mesh_file = os.path.join(geometry_directory, "rectangular_wing_naca0012_10ar.msh")
+        from optimization_analyses.generate_parametric_chord_mesh import generate_chordwise_mesh
+        generate_chordwise_mesh(base_mesh_file, mesh_full_path, num_chordwise_panels)
     elif num_spanwise_sections == 35:
         base_mesh_file = os.path.join(geometry_directory, "rectangular_wing_naca0012_35sect.msh")
+        from optimization_analyses.generate_parametric_chord_mesh import generate_chordwise_mesh
+        generate_chordwise_mesh(base_mesh_file, mesh_full_path, num_chordwise_panels)
     elif num_spanwise_sections == 60:
         base_mesh_file = os.path.join(geometry_directory, "rectangular_wing_naca0012_60sect.msh")
+        from optimization_analyses.generate_parametric_chord_mesh import generate_chordwise_mesh
+        generate_chordwise_mesh(base_mesh_file, mesh_full_path, num_chordwise_panels)
     else:
-        raise FileNotFoundError(f"No base mesh found for {num_spanwise_sections} spanwise sections.")
-    
-    from optimization_analyses.generate_parametric_chord_mesh import generate_chordwise_mesh
-    generate_chordwise_mesh(base_mesh_file, mesh_full_path, num_chordwise_panels)
+        base_mesh_file = os.path.join(geometry_directory, "rectangular_wing_naca0012_60sect.msh")
+        from optimization_analyses.generate_parametric_chord_mesh import generate_arbitrary_mesh
+        generate_arbitrary_mesh(base_mesh_file, mesh_full_path, num_spanwise_sections, num_chordwise_panels)
 
 # Geometric CAD control points are kept equivalent across resolutions (15 spanwise)
 num_spanwise_cp_target = 25
@@ -582,6 +583,16 @@ projected_panel_mesh = geometry.project(points_orig,
                                         force_reprojection=False, 
                                         plot=False
                                         )
+if len(projected_panel_mesh) != len(points_orig):
+    print(f"Notice: cached projected_panel_mesh length ({len(projected_panel_mesh)}) != points_orig length ({len(points_orig)}). Re-projecting...", flush=True)
+    projected_panel_mesh = geometry.project(points_orig, 
+                                            grid_search_density_parameter=1, 
+                                            newton_tolerance=1.e-10, 
+                                            grid_search_density_cutoff=30,
+                                            projection_tolerance=1.e-3,
+                                            force_reprojection=True, 
+                                            plot=False
+                                            )
 
 # project panel centers
 cell_types = cells_dict.keys()
@@ -602,6 +613,17 @@ projected_panel_centers = geometry.project(panel_centers,
                             force_reprojection=False, 
                             plot=False,
                             )
+if len(projected_panel_centers) != len(panel_centers):
+    print(f"Notice: cached projected_panel_centers length ({len(projected_panel_centers)}) != panel_centers length ({len(panel_centers)}). Re-projecting...", flush=True)
+    projected_panel_centers = geometry.project(panel_centers, 
+                                grid_search_density_parameter=1,
+                                newton_tolerance=1.e-10,
+                                grid_search_density_cutoff=30,
+                                projection_tolerance=1.e-1,
+                                use_line_search=True,
+                                force_reprojection=True, 
+                                plot=False,
+                                )
 
 # Build static IBL mesh topology index maps and interpolation matrix
 ibl_topology = build_ibl_mesh_topology(
@@ -1268,18 +1290,11 @@ if use_geonic:
         pallet_sample_points.name = 'pallet_sample_points'
         active_sample_points = csdl.concatenate([payload_sample_points, pallet_sample_points])
 
-    # Complete geometry function set passed for enclosed-volume signed distance
-    projection_model = bsm3.FunctionSetProjectionModel(
-        function_set=geometry,
-        warm_start_nu=50,
-        warm_start_nv=50,
-        sdf=True,
-        sdf_sign_mode='enclosed',
-    )
-    sdf_op = bsm3.FunctionSetClosestDistanceOperation(model=projection_model)
-    all_signed_distance = sdf_op.evaluate(
-        coefficients=geometry.stack_coefficients(),
+    # Native LSDO_GEO signed distance operation via geometry convenience method
+    all_signed_distance = geometry.evaluate_signed_distance(
         points=active_sample_points,
+        sign_mode='winding_number',
+        winding_chord_tolerance=GEONIC_CLEARANCE_M / 10.0,
     )
 
     if geonic_payload_mode == 'oversized':
@@ -2028,8 +2043,8 @@ else:
     )
     max_stratford = csdl.Variable(value=0.20, name='max_stratford')
     stratford_margin = csdl.Variable(value=0.19, name='stratford_margin')
-    H_upper_matrix = csdl.Variable(value=np.full((viscous_ibl_topology['num_chord_panels'], stratford_topology['num_mesh_stations']), 1.4), name='H_upper_matrix')
-    S_grid = csdl.Variable(value=np.zeros((viscous_ibl_topology['num_chord_panels'], stratford_topology['num_mesh_stations'])), name='S_grid')
+    H_upper_matrix = csdl.Variable(value=np.full((ibl_topology['num_chord_panels'], stratford_topology['num_mesh_stations']), 1.4), name='H_upper_matrix')
+    S_grid = csdl.Variable(value=np.zeros((ibl_topology['num_chord_panels'], stratford_topology['num_mesh_stations'])), name='S_grid')
     S_dense_2d = csdl.Variable(value=np.zeros((31, 41)), name='S_dense_2d')
 
 # 1. Sectional Cl drag polar bucket: regularizes planform by penalizing extreme section Cl
