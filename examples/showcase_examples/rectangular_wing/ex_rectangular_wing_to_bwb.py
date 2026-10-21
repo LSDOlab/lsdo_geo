@@ -129,6 +129,13 @@ geonic_payload_mode = os.environ.get('GEONIC_PAYLOAD_MODE', geonic_payload_mode)
 if 'GEONIC_PAYLOAD_MODE' not in os.environ and 'USE_GEONIC' in os.environ:
     geonic_payload_mode = 'oversized' if str(os.environ['USE_GEONIC']).strip() == '1' else 'none'
 
+# 3b. Geometric non-interference constraint formulation method:
+#   'selective_aggregation' -> Sample points evaluated against BSM3 enclosed SDF (default)
+#   'sdfpack'               -> Continuous volumetric interference metric via sdfpack
+geonic_method: Literal['selective_aggregation', 'sdfpack'] = 'sdfpack'  # Options: 'selective_aggregation', 'sdfpack'
+geonic_method = os.environ.get('GEONIC_METHOD', os.environ.get('GEONIC_MESH', geonic_method))
+
+
 # 4. Viscous drag mode:
 #   'ibl'          -> Integral boundary layer drag model & attachment constraint H_max <= 2.4
 #   'constant_cd0' -> Legacy fixed baseline profile drag (CD0_base = 0.0080)
@@ -207,14 +214,35 @@ from optimization_analyses.stall_closure import (
     evaluate_stall_closure,
 )
 
-# Parse and validate geonic payload mode
+# Parse and validate geonic payload mode and formulation method
 from physics_models.geonic_payload import (
     VALID_GEONIC_PAYLOAD_MODES,
+    VALID_GEONIC_METHODS,
     parse_geonic_payload_mode,
+    parse_geonic_method,
 )
 geonic_payload_mode, use_geonic = parse_geonic_payload_mode(mode=geonic_payload_mode)
+geonic_method = parse_geonic_method(method=geonic_method)
 
 if use_geonic:
+    try:
+        import bsm3
+    except ImportError as e:
+        raise ImportError(
+            f"geonic_payload_mode='{geonic_payload_mode}' requires 'bsm3' to be installed. "
+            "Please install the repaired checkout at /home/andrew/optimization/BSM3 "
+            "via `pip install -e /home/andrew/optimization/BSM3 --no-deps`."
+        ) from e
+    if geonic_method == 'sdfpack':
+        try:
+            import sdfpack
+        except ImportError as e:
+            raise ImportError(
+                "geonic_method='sdfpack' requires 'sdfpack' to be installed. "
+                "Please install it from /home/andrew/optimization/sdfpack "
+                "via `pip install -e /home/andrew/optimization/sdfpack --no-deps`."
+            ) from e
+        from physics_models.geonic_sdfpack import evaluate_sdfpack_geonic
     from physics_models.geonic_payload import (
         GEONIC_CLEARANCE_M,
         PAYLOAD_LENGTH_M,
@@ -1297,57 +1325,134 @@ if use_geonic:
         winding_chord_tolerance=GEONIC_CLEARANCE_M / 10.0,
     )
 
-    if geonic_payload_mode == 'oversized':
-        payload_signed_distance = all_signed_distance
-        payload_signed_distance.name = 'payload_signed_distance'
-        geonic_constraint_values, geonic_clearance_per_point, geonic_margin = (
-            compute_geonic_clearance_and_margin(payload_signed_distance, clearance_buffer=GEONIC_CLEARANCE_M, rho=50.0)
-        )
-        geonic_constraint_values.name = 'geonic_payload_oml_clearance'
-        geonic_clearance_per_point.name = 'geonic_clearance_per_point'
-        geonic_margin.name = 'geonic_margin'
-        geonic_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
+    if geonic_method == 'selective_aggregation':
+        if geonic_payload_mode == 'oversized':
+            payload_signed_distance = all_signed_distance
+            payload_signed_distance.name = 'payload_signed_distance'
+            geonic_constraint_values, geonic_clearance_per_point, geonic_margin = (
+                compute_geonic_clearance_and_margin(payload_signed_distance, clearance_buffer=GEONIC_CLEARANCE_M, rho=50.0)
+            )
+            geonic_constraint_values.name = 'geonic_payload_oml_clearance'
+            geonic_clearance_per_point.name = 'geonic_clearance_per_point'
+            geonic_margin.name = 'geonic_margin'
+            geonic_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
 
-    elif geonic_payload_mode == 'pallets':
-        pallet_signed_distance = all_signed_distance
-        pallet_signed_distance.name = 'pallet_signed_distance'
-        pallet_constraint_values, pallet_clearance_per_point, pallet_margin = (
-            compute_geonic_clearance_and_margin(pallet_signed_distance, clearance_buffer=GEONIC_CLEARANCE_M, rho=50.0)
-        )
-        pallet_constraint_values.name = 'geonic_pallet_oml_clearance'
-        pallet_clearance_per_point.name = 'pallet_clearance_per_point'
-        pallet_margin.name = 'pallet_margin'
-        pallet_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
-        geonic_margin = pallet_margin
+        elif geonic_payload_mode == 'pallets':
+            pallet_signed_distance = all_signed_distance
+            pallet_signed_distance.name = 'pallet_signed_distance'
+            pallet_constraint_values, pallet_clearance_per_point, pallet_margin = (
+                compute_geonic_clearance_and_margin(pallet_signed_distance, clearance_buffer=GEONIC_CLEARANCE_M, rho=50.0)
+            )
+            pallet_constraint_values.name = 'geonic_pallet_oml_clearance'
+            pallet_clearance_per_point.name = 'pallet_clearance_per_point'
+            pallet_margin.name = 'pallet_margin'
+            pallet_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
+            geonic_margin = pallet_margin
 
-    elif geonic_payload_mode == 'both':
-        num_pay_pts = int(payload_sample_points.shape[0])
-        payload_signed_distance = all_signed_distance[:num_pay_pts]
-        payload_signed_distance.name = 'payload_signed_distance'
-        pallet_signed_distance = all_signed_distance[num_pay_pts:]
-        pallet_signed_distance.name = 'pallet_signed_distance'
+        elif geonic_payload_mode == 'both':
+            num_pay_pts = int(payload_sample_points.shape[0])
+            payload_signed_distance = all_signed_distance[:num_pay_pts]
+            payload_signed_distance.name = 'payload_signed_distance'
+            pallet_signed_distance = all_signed_distance[num_pay_pts:]
+            pallet_signed_distance.name = 'pallet_signed_distance'
 
-        geonic_constraint_values, geonic_clearance_per_point, geonic_margin = (
-            compute_geonic_clearance_and_margin(payload_signed_distance, clearance_buffer=GEONIC_CLEARANCE_M, rho=50.0)
-        )
-        geonic_constraint_values.name = 'geonic_payload_oml_clearance'
-        geonic_clearance_per_point.name = 'geonic_clearance_per_point'
-        geonic_margin.name = 'geonic_margin'
-        geonic_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
+            geonic_constraint_values, geonic_clearance_per_point, geonic_margin = (
+                compute_geonic_clearance_and_margin(payload_signed_distance, clearance_buffer=GEONIC_CLEARANCE_M, rho=50.0)
+            )
+            geonic_constraint_values.name = 'geonic_payload_oml_clearance'
+            geonic_clearance_per_point.name = 'geonic_clearance_per_point'
+            geonic_margin.name = 'geonic_margin'
+            geonic_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
 
-        pallet_constraint_values, pallet_clearance_per_point, pallet_margin = (
-            compute_geonic_clearance_and_margin(pallet_signed_distance, clearance_buffer=GEONIC_CLEARANCE_M, rho=50.0)
-        )
-        pallet_constraint_values.name = 'geonic_pallet_oml_clearance'
-        pallet_clearance_per_point.name = 'pallet_clearance_per_point'
-        pallet_margin.name = 'pallet_margin'
-        pallet_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
+            pallet_constraint_values, pallet_clearance_per_point, pallet_margin = (
+                compute_geonic_clearance_and_margin(pallet_signed_distance, clearance_buffer=GEONIC_CLEARANCE_M, rho=50.0)
+            )
+            pallet_constraint_values.name = 'geonic_pallet_oml_clearance'
+            pallet_clearance_per_point.name = 'pallet_clearance_per_point'
+            pallet_margin.name = 'pallet_margin'
+            pallet_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
 
-        # Overall diagnostic margin
-        all_constraint_values = all_signed_distance + GEONIC_CLEARANCE_M
-        overall_geonic_margin = -csdl.maximum(all_constraint_values, axes=(0,), rho=50.0)
-        overall_geonic_margin.name = 'overall_geonic_margin'
+            # Overall diagnostic margin
+            all_constraint_values = all_signed_distance + GEONIC_CLEARANCE_M
+            overall_geonic_margin = -csdl.maximum(all_constraint_values, axes=(0,), rho=50.0)
+            overall_geonic_margin.name = 'overall_geonic_margin'
 
+    elif geonic_method == 'sdfpack':
+        if geonic_payload_mode == 'oversized':
+            payload_signed_distance = all_signed_distance
+            payload_signed_distance.name = 'payload_signed_distance'
+            geonic_clearance_per_point = -payload_signed_distance
+            geonic_clearance_per_point.name = 'geonic_clearance_per_point'
+
+            geonic_constraint_values = evaluate_sdfpack_geonic(
+                projection_model=projection_model,
+                coefficients=geometry.stack_coefficients(),
+                payload_mode='oversized',
+                payload_center_x=payload_center_x,
+                clearance=GEONIC_CLEARANCE_M,
+            )
+            geonic_constraint_values.name = 'geonic_payload_oml_clearance'
+            geonic_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
+            geonic_margin = -geonic_constraint_values
+            geonic_margin.name = 'geonic_margin'
+
+        elif geonic_payload_mode == 'pallets':
+            pallet_signed_distance = all_signed_distance
+            pallet_signed_distance.name = 'pallet_signed_distance'
+            pallet_clearance_per_point = -pallet_signed_distance
+            pallet_clearance_per_point.name = 'pallet_clearance_per_point'
+
+            pallet_constraint_values = evaluate_sdfpack_geonic(
+                projection_model=projection_model,
+                coefficients=geometry.stack_coefficients(),
+                payload_mode='pallets',
+                pallet_stack_center_x=pallet_stack_center_x,
+                clearance=GEONIC_CLEARANCE_M,
+            )
+            pallet_constraint_values.name = 'geonic_pallet_oml_clearance'
+            pallet_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
+            pallet_margin = -pallet_constraint_values
+            pallet_margin.name = 'pallet_margin'
+            geonic_margin = pallet_margin
+
+        elif geonic_payload_mode == 'both':
+            num_pay_pts = int(payload_sample_points.shape[0])
+            payload_signed_distance = all_signed_distance[:num_pay_pts]
+            payload_signed_distance.name = 'payload_signed_distance'
+            pallet_signed_distance = all_signed_distance[num_pay_pts:]
+            pallet_signed_distance.name = 'pallet_signed_distance'
+
+            geonic_clearance_per_point = -payload_signed_distance
+            geonic_clearance_per_point.name = 'geonic_clearance_per_point'
+            pallet_clearance_per_point = -pallet_signed_distance
+            pallet_clearance_per_point.name = 'pallet_clearance_per_point'
+
+            geonic_constraint_values, pallet_constraint_values = evaluate_sdfpack_geonic(
+                projection_model=projection_model,
+                coefficients=geometry.stack_coefficients(),
+                payload_mode='both',
+                payload_center_x=payload_center_x,
+                pallet_stack_center_x=pallet_stack_center_x,
+                clearance=GEONIC_CLEARANCE_M,
+            )
+            geonic_constraint_values.name = 'geonic_payload_oml_clearance'
+            geonic_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
+            pallet_constraint_values.name = 'geonic_pallet_oml_clearance'
+            pallet_constraint_values.set_as_constraint(upper=0.0, scaler=1.0)
+
+            geonic_margin = -geonic_constraint_values
+            geonic_margin.name = 'geonic_margin'
+            pallet_margin = -pallet_constraint_values
+            pallet_margin.name = 'pallet_margin'
+
+            overall_geonic_margin = -csdl.maximum(
+                csdl.concatenate([geonic_constraint_values, pallet_constraint_values]),
+                axes=(0,),
+                rho=50.0,
+            )
+            overall_geonic_margin.name = 'overall_geonic_margin'
+
+    if geonic_payload_mode == 'both':
         # CG consistency equality constraint: payload_center_x - pallet_stack_center_x = 0
         payload_cg_consistency = payload_center_x - pallet_stack_center_x
         payload_cg_consistency.name = 'payload_cg_consistency_constraint'
@@ -1950,9 +2055,10 @@ strip_delta_M_cruise = wave_drag_results[0]['delta_M']
 strip_delta_M_eff_cruise = wave_drag_results[0]['delta_M_eff']
 min_strip_mach_margin_cruise = -csdl.maximum(strip_delta_M_cruise, axes=(0,), rho=50.0)  # min(Mcrit - M)
 
-# Base parasite drag coefficient (NACA 0012 base skin friction + form drag: CD0 = 0.0080)
-# Viscous drag mode evaluation: 'ibl' (direct integral boundary layer) vs 'constant_cd0' (legacy CD0_base = 0.0080)
-CD0_base = 0.0080
+# Base parasite drag coefficient (NACA 0012 base skin friction + form drag: CD0 = 0.0050)
+# Viscous drag mode evaluation: 'ibl' (direct integral boundary layer) vs 'constant_cd0' (legacy CD0_base = 0.0050)
+# CD0_base = 0.0080
+CD0_base = 0.0050
 
 ibl_results = evaluate_bwb_viscous_ibl(
     cp_node0=Cp[0],
@@ -2589,7 +2695,7 @@ if run_pre_diagnostics:
 
     if use_geonic:
         print(f"================ GEONIC PAYLOAD NON-INTERFERENCE DIAGNOSTIC ================")
-        print(f"Mode: {geonic_payload_mode.upper()} | Buffer Requirement: {GEONIC_CLEARANCE_M:.2f} m")
+        print(f"Mode: {geonic_payload_mode.upper()} | Method: {geonic_method.upper()} | Buffer Requirement: {GEONIC_CLEARANCE_M:.2f} m")
 
         if geonic_payload_mode in {'oversized', 'both'}:
             pay_cx_val = float(np.asarray(jax_sim[payload_center_x]).flatten()[0])
@@ -2692,7 +2798,8 @@ if __name__ == '__main__':
             simulator=jax_sim,
         )
         max_iter = int(os.environ.get('MAX_ITER', '500'))
-        slsqp_acc = float(os.environ.get('SLSQP_ACC', '1.e-4'))
+        # slsqp_acc = float(os.environ.get('SLSQP_ACC', '1.e-4'))
+        slsqp_acc = float(os.environ.get('SLSQP_ACC', '1.e-5'))
         optimizer = modopt.PySLSQP(
             optimization_problem,
             # solver_options={'maxiter': max_iter, 'acc': 1.e-5},
@@ -3251,6 +3358,7 @@ if __name__ == '__main__':
                     scale_factor=float(scale_factor),
                     use_geonic=bool(use_geonic),
                     geonic_payload_mode=str(geonic_payload_mode),
+                    geonic_method=str(geonic_method),
                     num_chord_stations=int(num_chord_stations),
                     num_stations=int(num_stations),
                     num_spanwise_sections=int(num_spanwise_sections),
@@ -3262,6 +3370,7 @@ if __name__ == '__main__':
                     cache_dict[f'dv_opt_{dv_name}'] = np.asarray(jax_sim[dv_info.variable])
 
                 cache_dict['geonic_payload_mode'] = str(geonic_payload_mode)
+                cache_dict['geonic_method'] = str(geonic_method)
                 if use_geonic:
                     if geonic_payload_mode in {'oversized', 'both'}:
                         cache_dict['payload_center_x'] = float(np.asarray(jax_sim[payload_center_x]).flatten()[0])
@@ -3460,6 +3569,7 @@ if __name__ == '__main__':
                     num_spanwise_dvs=int(num_spanwise_dvs),
                     use_geonic=bool(use_geonic),
                     geonic_payload_mode=str(geonic_payload_mode),
+                    geonic_method=str(geonic_method),
                     dv_names=np.array(list(design_variables.keys()), dtype=str),
                     dv_metadata_json=str(dv_metadata_json),
                     x_scaler=x_scaler_opt,

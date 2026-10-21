@@ -21,6 +21,9 @@ GEONIC_CLEARANCE_M: float = 0.2
 # Valid geonic payload modes
 VALID_GEONIC_PAYLOAD_MODES: set[str] = {'none', 'oversized', 'pallets', 'both'}
 
+# Valid geonic constraint formulation methods
+VALID_GEONIC_METHODS: set[str] = {'selective_aggregation', 'sdfpack'}
+
 # -----------------------------------------------------------------------------
 # 1. OVERSIZED PAYLOAD DIMENSIONS (33 x 13 x 10 ft)
 # -----------------------------------------------------------------------------
@@ -84,6 +87,40 @@ def parse_geonic_payload_mode(
 
     use_geonic = (mode != 'none')
     return mode, use_geonic
+
+
+def parse_geonic_method(
+    method: str | None = None,
+    env: dict | None = None,
+) -> str:
+    """
+    Parse and validate the geonic non-interference constraint formulation method.
+
+    Parameters
+    ----------
+    method : str | None
+        Explicit method string ('selective_aggregation', 'sdfpack').
+    env : dict | None
+        Environment mapping (defaults to os.environ).
+
+    Returns
+    -------
+    str
+        Validated method string.
+    """
+    if env is None:
+        env = os.environ
+
+    if method is None:
+        method = env.get('GEONIC_METHOD', env.get('GEONIC_MESH', 'selective_aggregation'))
+
+    method = str(method).strip().lower()
+    if method not in VALID_GEONIC_METHODS:
+        raise ValueError(
+            f"Invalid geonic_method: '{method}'. Must be one of {sorted(VALID_GEONIC_METHODS)}."
+        )
+
+    return method
 
 
 def build_geonic_payload_sample_points(

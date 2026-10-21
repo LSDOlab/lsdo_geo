@@ -183,3 +183,26 @@ def test_geometry_translate_single_function():
     np.testing.assert_allclose(f1.coefficients.value, orig_f1, atol=1e-7)
 
 
+def test_geometry_project_multi_point_line_search():
+    """Verify that multi-point batch projection on CAD geometry works with use_line_search=True."""
+    recorder = csdl.Recorder(inline=True)
+    recorder.start()
+
+    geo = lg.import_geometry(SAMPLE_STP, parallelize=False)
+    pts = np.zeros((10, 3))
+    pts[:, 0] = np.linspace(0.1, 0.9, 10)
+    pts[:, 1] = 0.5
+    pts[:, 2] = 0.01
+
+    proj_no_ls = geo.project(pts, use_line_search=False, do_pickles=False)
+    proj_ls = geo.project(pts, use_line_search=True, do_pickles=False)
+
+    eval_no_ls = geo.evaluate(proj_no_ls, non_csdl=True)
+    eval_ls = geo.evaluate(proj_ls, non_csdl=True)
+
+    # All points in the batch must converge identically
+    diffs = np.linalg.norm(eval_ls - eval_no_ls, axis=1)
+    np.testing.assert_allclose(diffs, 0.0, atol=1e-4)
+
+
+
