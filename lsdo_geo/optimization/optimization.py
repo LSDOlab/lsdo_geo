@@ -76,6 +76,203 @@ def step(x:csdl.Variable) -> csdl.Variable:
     '''
     return csdl.relu(x)/x
 
+try:
+    _CustomExplicitOperation = csdl.experimental.CustomExplicitOperationBeta
+except AttributeError:
+    _CustomExplicitOperation = csdl.CustomExplicitOperation
+
+
+def _unbroadcast(grad: np.ndarray, target_shape: tuple[int, ...]) -> np.ndarray:
+    """Sum out broadcast dimensions to match target_shape."""
+    if grad.shape == target_shape:
+        return grad
+    lead_dims = len(grad.shape) - len(target_shape)
+    for _ in range(lead_dims):
+        grad = np.sum(grad, axis=0)
+    for i, dim in enumerate(target_shape):
+        if dim == 1:
+            grad = np.sum(grad, axis=i, keepdims=True)
+    return grad.reshape(target_shape)
+
+
+class _ZeroVJPOp(_CustomExplicitOperation):
+    """
+    Zero VJP operation for 3rd and higher-order derivatives of QuadraticPenalty.
+    Recursively registers itself as its own VJP, evaluating to exact zeros for any order >= 3.
+    """
+    def __init__(self, target_shapes: dict[str, tuple[int, ...]]):
+        super().__init__()
+        self.target_shapes = target_shapes
+
+    def evaluate(self, inputs: dict[str, csdl.Variable], d_outputs: dict[str, csdl.Variable]) -> dict[str, csdl.Variable]:
+        first_input = next(iter(inputs.values()))
+        self.declare_input('ref', first_input)
+        outs = {}
+        for k, shape in self.target_shapes.items():
+            outs[k] = self.create_output(f'zero_{k}', shape)
+        self.declare_vjp_function(_ZeroVJPOp, target_shapes={'ref': first_input.shape})
+        return outs
+
+    def compute(self, inputs: dict[str, np.ndarray], outputs: dict[str, np.ndarray]):
+        for k, shape in self.target_shapes.items():
+            outputs[f'zero_{k}'] = np.zeros(shape)
+
+
+class QuadraticPenaltyVJP2Op(_CustomExplicitOperation):
+    """
+    Second-order VJP (Hessian-vector product) for QuadraticPenalty.
+
+    Inputs:
+      - constraint (c)
+      - penalty_factor (rho)
+      - cot_penalty (cot_p / bar_y)
+      - cot_d_constraint (v_c)
+      - cot_d_penalty_factor (v_rho)
+
+    Cotangents:
+      - w.r.t. c:      2 * cot_p * (rho * v_c + v_rho * c) * 1_{c > 0}
+      - w.r.t. rho:    _unbroadcast(2 * cot_p * (c * v_c) * 1_{c > 0}, rho.shape)
+      - w.r.t. cot_p:  sum((2 * rho * c * v_c + c^2 * v_rho) * 1_{c > 0})
+    """
+    def evaluate(self, inputs: dict[str, csdl.Variable], d_outputs: dict[str, csdl.Variable]) -> dict[str, csdl.Variable]:
+        c = inputs['constraint']
+        rho = inputs['penalty_factor']
+        cot_p = inputs['cot_penalty']
+
+        self.declare_input('constraint', c)
+        self.declare_input('penalty_factor', rho)
+        self.declare_input('cot_penalty', cot_p)
+
+        v_c = d_outputs.get('d_constraint') if 'd_constraint' in d_outputs else d_outputs.get('constraint')
+        if v_c is None:
+            v_c = csdl.Variable(value=np.zeros(c.shape))
+        self.declare_input('cot_d_constraint', v_c)
+
+        v_rho = d_outputs.get('d_penalty_factor') if 'd_penalty_factor' in d_outputs else d_outputs.get('penalty_factor')
+        if v_rho is None:
+            v_rho = csdl.Variable(value=np.zeros(rho.shape))
+        self.declare_input('cot_d_penalty_factor', v_rho)
+
+        d2_c = self.create_output('d2_constraint', c.shape)
+        d2_rho = self.create_output('d2_penalty_factor', rho.shape)
+        d2_cot_p = self.create_output('d2_cot_penalty', cot_p.shape)
+
+        # 3rd-order and higher derivatives are identically 0
+        self.declare_vjp_function(_ZeroVJPOp, target_shapes={k: v.shape for k, v in self.input_dict.items()})
+
+        return {
+            'constraint': d2_c,
+            'penalty_factor': d2_rho,
+            'cot_penalty': d2_cot_p,
+        }
+
+    def compute(self, inputs: dict[str, np.ndarray], outputs: dict[str, np.ndarray]):
+        c = np.asarray(inputs['constraint'], dtype=np.float64)
+        rho = np.asarray(inputs['penalty_factor'], dtype=np.float64)
+        cot_p = np.asarray(inputs['cot_penalty'], dtype=np.float64)
+        v_c = np.asarray(inputs['cot_d_constraint'], dtype=np.float64)
+        v_rho = np.asarray(inputs['cot_d_penalty_factor'], dtype=np.float64)
+
+        mask = (c > 0.0)
+        outputs['d2_constraint'] = np.where(mask, 2.0 * cot_p * (rho * v_c + v_rho * c), 0.0)
+        raw_d2_rho = np.where(mask, 2.0 * cot_p * (c * v_c), 0.0)
+        outputs['d2_penalty_factor'] = _unbroadcast(raw_d2_rho, rho.shape)
+        raw_cot_p = np.where(mask, 2.0 * rho * c * v_c + (c**2) * v_rho, 0.0)
+        outputs['d2_cot_penalty'] = np.array([np.sum(raw_cot_p)]).reshape(cot_p.shape)
+
+
+class QuadraticPenaltyVJP1Op(_CustomExplicitOperation):
+    """
+    First-order VJP (gradient) for QuadraticPenalty.
+
+    Inputs:
+      - constraint (c)
+      - penalty_factor (rho)
+      - cot_penalty (cot_p / bar_y)
+
+    Cotangents:
+      - w.r.t. c:    2 * cot_p * rho * c * 1_{c > 0}
+      - w.r.t. rho:  _unbroadcast(cot_p * c^2 * 1_{c > 0}, rho.shape)
+    """
+    def evaluate(self, inputs: dict[str, csdl.Variable], d_outputs: dict[str, csdl.Variable]) -> dict[str, csdl.Variable]:
+        c = inputs['constraint']
+        rho = inputs['penalty_factor']
+        cot_p = d_outputs.get('penalty')
+        if cot_p is None:
+            cot_p = csdl.Variable(value=np.zeros((1,)))
+
+        self.declare_input('constraint', c)
+        self.declare_input('penalty_factor', rho)
+        self.declare_input('cot_penalty', cot_p)
+
+        d_c = self.create_output('d_constraint', c.shape)
+        d_rho = self.create_output('d_penalty_factor', rho.shape)
+
+        self.declare_vjp_function(QuadraticPenaltyVJP2Op)
+
+        return {
+            'constraint': d_c,
+            'penalty_factor': d_rho,
+        }
+
+    def compute(self, inputs: dict[str, np.ndarray], outputs: dict[str, np.ndarray]):
+        c = np.asarray(inputs['constraint'], dtype=np.float64)
+        rho = np.asarray(inputs['penalty_factor'], dtype=np.float64)
+        cot_p = np.asarray(inputs['cot_penalty'], dtype=np.float64)
+
+        mask = (c > 0.0)
+        outputs['d_constraint'] = np.where(mask, 2.0 * cot_p * rho * c, 0.0)
+        raw_d_rho = np.where(mask, cot_p * (c**2), 0.0)
+        outputs['d_penalty_factor'] = _unbroadcast(raw_d_rho, rho.shape)
+
+
+class QuadraticPenaltyOperation(_CustomExplicitOperation):
+    """
+    CustomOperation for the true quadratic penalty with an if statement:
+      0 if c <= 0, else c^T rho c.
+
+    Supports arbitrary n-th order derivatives. Every derivative order after
+    the 2nd derivative is identically 0.
+    """
+    def evaluate(
+        self,
+        constraint: csdl.Variable,
+        penalty_factor: Union[float, npt.NDArray[np.float64], csdl.Variable] = 1.0,
+    ) -> csdl.Variable:
+        if penalty_factor is None:
+            penalty_factor = 1.0
+        self.declare_input('constraint', constraint)
+        self.declare_input('penalty_factor', penalty_factor)
+
+        out = self.create_output('penalty', (1,))
+        self.declare_vjp_function(QuadraticPenaltyVJP1Op)
+        return out
+
+    def compute(self, inputs: dict[str, np.ndarray], outputs: dict[str, np.ndarray]):
+        c = np.asarray(inputs['constraint'], dtype=np.float64)
+        rho = np.asarray(inputs['penalty_factor'], dtype=np.float64)
+
+        # True quadratic penalty with an if statement: 0 if c <= 0, else c^T rho c
+        if np.all(c <= 0.0):
+            outputs['penalty'] = np.array([0.0])
+        else:
+            mask = (c > 0.0)
+            active_c = np.where(mask, c, 0.0)
+            val = np.sum(rho * (active_c**2))
+            outputs['penalty'] = np.array([val]).reshape((1,))
+
+
+QuadraticPenalty = QuadraticPenaltyOperation
+QuadraticPenaltyOp = QuadraticPenaltyOperation
+
+
+def quadratic_penalty(
+    constraint: csdl.Variable,
+    penalty_factor: Union[float, npt.NDArray[np.float64], csdl.Variable] = 1.0,
+) -> csdl.Variable:
+    """Evaluates the quadratic penalty: 0 if c <= 0, else c^T rho c."""
+    return QuadraticPenaltyOperation().evaluate(constraint=constraint, penalty_factor=penalty_factor)
+
 @dataclass
 class DesignVariable:
     variable:csdl.Variable
@@ -246,10 +443,11 @@ class Optimization:
                 # lagrangian = lagrangian + csdl.vdot(constraint_lagrange_multipliers, activated_constraint*smoothed_constraint) + (constraint_lagrange_multipliers - positive_lagrange_multipliers) - lagrange_multiplier_regularization
                 # lagrangian = lagrangian + csdl.vdot(constraint_lagrange_multipliers, smoothed_constraint) + csdl.sum(constraint_lagrange_multipliers - positive_lagrange_multipliers)
             if quadratic_penalty_factor is not None:
-                # Softplus smoothing for the quadratic penalty term
-                # smoothed_constraint = softplus(constraint, quadratic_activation_factor)
-                smoothed_constraint = csdl.softplus(constraint)
-                lagrangian += csdl.vdot(smoothed_constraint, quadratic_penalty_factor*smoothed_constraint)
+                # Quadratic penalty operation: 0 if c <= 0, else c^T rho c
+                lagrangian += QuadraticPenaltyOperation().evaluate(
+                    constraint=constraint,
+                    penalty_factor=quadratic_penalty_factor,
+                )
                 
         lagrangian : csdl.Variable = lagrangian
         self.lagrangian = lagrangian

@@ -1,3 +1,4 @@
+import os
 import time
 import csdl_alpha as csdl
 import numpy as np
