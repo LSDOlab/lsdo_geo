@@ -408,6 +408,8 @@ def evaluate_stall_closure(
         'f_attached_min': f_min,
         'r_gamma': r_gamma,
         'mu_w_stall': mu_w_stall,
+        'Di_Trefftz_stall': Di_Trefftz_stall,
+        'L_wake_stall': L_wake_stall,
         'Di_Trefftz_reconciled': Di_Trefftz_reconciled,
         'lift_ratio_stall': lift_ratio_stall,
         'k_reconcile': lift_ratio_stall,
