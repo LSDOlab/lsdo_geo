@@ -139,6 +139,119 @@ right_fuselage_ffd_block = construct_ffd_block_around_entities(entities=right_fu
 left_propeller_ffd_block = construct_ffd_block_around_entities(entities=left_propeller, num_coefficients=(2, 2, 2), degree=(1, 1, 1), name="left_propeller_ffd_block")
 right_propeller_ffd_block = construct_ffd_block_around_entities(entities=right_propeller, num_coefficients=(2, 2, 2), degree=(1, 1, 1), name="right_propeller_ffd_block")
 
+# # region Visualize Geometry and FFD Volumes
+# # High-resolution rendering of CAD geometry and all 6 FFD control volumes for paper publication
+# show_ffd_plot = True
+# if show_ffd_plot:
+#     import pyvista as pv
+
+#     # 4K UHD resolution for high-DPI paper figures and screenshots
+#     plotter = pv.Plotter(window_size=[3840, 2160])
+#     plotter.set_background("white")
+
+#     # Component geometry with original color scheme and smooth surface shading
+#     components = [
+#         (wing, "#3498db", "Wing"),
+#         (tail, "#e67e22", "Tail"),
+#         (left_fuselage, "#95a5a6", "Left Fuselage"),
+#         (right_fuselage, "#95a5a6", "Right Fuselage"),
+#         (left_propeller, "#e74c3c", "Left Propeller"),
+#         (right_propeller, "#e74c3c", "Right Propeller"),
+#     ]
+#     for comp, col, name in components:
+#         comp_meshes = [elem["mesh"] if isinstance(elem, dict) and "mesh" in elem else elem for elem in comp.plot(show=False)]
+#         for m in comp_meshes:
+#             if m is not None:
+#                 plotter.add_mesh(
+#                     m,
+#                     color=col,
+#                     smooth_shading=True,
+#                     specular=0.6,
+#                     specular_power=25,
+#                     ambient=0.25,
+#                     diffuse=0.75,
+#                 )
+
+#     # FFD control volumes: translucent boundary faces, 3D lattice wireframe, and control point spheres
+#     ffd_blocks = [
+#         (wing_ffd_block, "#2980b9", "Wing FFD"),
+#         (tail_ffd_block, "#d35400", "Tail FFD"),
+#         (left_fuselage_ffd_block, "#7f8c8d", "Left Fuselage FFD"),
+#         (right_fuselage_ffd_block, "#7f8c8d", "Right Fuselage FFD"),
+#         (left_propeller_ffd_block, "#c0392b", "Left Propeller FFD"),
+#         (right_propeller_ffd_block, "#c0392b", "Right Propeller FFD"),
+#     ]
+
+#     for blk, col, name in ffd_blocks:
+#         # 1. Translucent outer boundary faces
+#         elem = blk.plot(plot_embedded_points=False, show=False)
+#         for e in elem:
+#             if isinstance(e["mesh"], pv.StructuredGrid):
+#                 plotter.add_mesh(e["mesh"], color=col, opacity=0.15, smooth_shading=True)
+
+#         # 2. Control points as spheres
+#         coeffs = blk.coefficients.value
+#         nx, ny, nz, _ = coeffs.shape
+#         pts = coeffs.reshape(-1, 3)
+#         cloud = pv.PolyData(pts)
+#         plotter.add_mesh(cloud, color=col, point_size=16, render_points_as_spheres=True)
+
+#         # 3. Structured 3D lattice grid lines connecting adjacent control points
+#         lines = []
+#         for j in range(ny):
+#             for k in range(nz):
+#                 for i in range(nx - 1):
+#                     lines.extend([2, i * ny * nz + j * nz + k, (i + 1) * ny * nz + j * nz + k])
+#         for i in range(nx):
+#             for k in range(nz):
+#                 for j in range(ny - 1):
+#                     lines.extend([2, i * ny * nz + j * nz + k, i * ny * nz + (j + 1) * nz + k])
+#         for i in range(nx):
+#             for j in range(ny):
+#                 for k in range(nz - 1):
+#                     lines.extend([2, i * ny * nz + j * nz + k, i * ny * nz + j * nz + (k + 1)])
+#         wireframe = pv.PolyData(pts, lines=lines)
+#         plotter.add_mesh(wireframe, color=col, line_width=3.0)
+
+#     # Lighting and rendering enhancements
+#     plotter.enable_anti_aliasing("ssaa")
+#     plotter.enable_lightkit()
+
+#     # Elevated three-quarter perspective framing the entire aircraft and FFD volumes
+#     plotter.camera.position = (-30.0, -65.0, 42.0)
+#     plotter.camera.focal_point = (16.0, 0.0, 1.0)
+#     plotter.camera.up = (0.0, 0.0, 1.0)
+#     plotter.reset_camera()
+#     plotter.camera.zoom(2.28)
+
+#     # Save a high-resolution screenshot and tightly crop all white space around the model
+#     output_dir = os.path.dirname(os.path.abspath(__file__))
+#     paper_screenshot_path = os.path.join(output_dir, "laser_powered_uav_ffd_volumes.png")
+#     plotter.screenshot(paper_screenshot_path)
+
+#     from PIL import Image
+#     im = Image.open(paper_screenshot_path)
+#     arr = np.array(im)[:, :, :3]
+#     mask = np.any(arr < 250, axis=-1)
+#     if np.any(mask):
+#         r = np.where(mask.any(axis=1))[0]
+#         c = np.where(mask.any(axis=0))[0]
+#         pad = 15  # Minimal 15px margin around outer extremities
+#         r_min = max(0, r[0] - pad)
+#         r_max = min(arr.shape[0], r[-1] + 1 + pad)
+#         c_min = max(0, c[0] - pad)
+#         c_max = min(arr.shape[1], c[-1] + 1 + pad)
+#         im_cropped = im.crop((c_min, r_min, c_max, r_max))
+#         im_cropped.save(paper_screenshot_path)
+#         print(f"Tightly cropped screenshot saved to '{paper_screenshot_path}' ({im_cropped.size[0]}x{im_cropped.size[1]} px with white space removed).")
+
+#     print(f"Displaying interactive FFD plot...")
+#     plotter.show()
+# exit(0)  # Exit after saving the screenshot to avoid running the rest of the script
+# # endregion Visualize Geometry and FFD Volumes
+
+
+
 # Sectional Parameterizations
 wing_sectional_parameterization = SectionalParameterization(name="wing_sectional_parameterization", parameterized_points=wing_ffd_block.coefficients, principal_parametric_dimension=1)
 tail_sectional_parameterization = SectionalParameterization(name="tail_sectional_parameterization", parameterized_points=tail_ffd_block.coefficients, principal_parametric_dimension=1)

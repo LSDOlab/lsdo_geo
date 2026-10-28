@@ -9,6 +9,11 @@ the standard `ex_lift_plus_cruise.py` script to avoid code duplication.
 """
 
 import os
+try:
+    with open('/proc/self/oom_score_adj', 'w') as f:
+        f.write('1000\n')
+except Exception:
+    pass
 os.environ["JAX_PLATFORMS"] = "cpu"
 import sys
 import time
@@ -75,6 +80,7 @@ CREATE_VIDEO = False
 ENABLE_INEQUALITIES = os.environ.get("BENCH_ENABLE_INEQUALITIES", "False").lower() in ("true", "1", "yes")
 N_LHS_SAMPLES = int(os.environ.get("BENCH_N_SAMPLES", "100"))
 SEED = 42
+SOLVER_BACKEND = os.environ.get("BENCH_SOLVER_BACKEND", "jax").lower()
 
 # Pass inequality toggle to standard script
 os.environ["LPC_ENABLE_INEQUALITIES"] = str(ENABLE_INEQUALITIES)
@@ -92,24 +98,37 @@ from ex_lift_plus_cruise import (
     computed_metrics,
     jax_outputs,
     rotor_names,
+    parameterization_solver,
+    ineq_clearance_vars,
     generate_perturbation_video,
 )
 
 if CREATE_VIDEO:
     generate_perturbation_video()
 else:
-    print("=== Setting up JaxSimulator for LHS Benchmarking ===")
-    t_comp_start = time.time()
-    sim = csdl.experimental.JaxSimulator(
-        recorder=recorder,
-        additional_inputs=jax_inputs,
-        additional_outputs=jax_outputs,
-        gpu=False,
-    )
-    iteration_log.clear()
-    sim.run()
-    compile_time = time.time() - t_comp_start
-    print(f"JAX Compilation finished in {compile_time:.2f} seconds.\n")
+    if SOLVER_BACKEND == "inline":
+        print("=== Setting up Inline Newton Solver for LHS Benchmarking ===")
+        solver = parameterization_solver.optimizer.solver
+        orig_print = solver._inline_print_nl_status
+        def logged_print(iter_num, did_converge):
+            iteration_log.append(int(iter_num))
+            return orig_print(iter_num, did_converge)
+        solver._inline_print_nl_status = logged_print
+        compile_time = 0.0
+        sim = None
+    else:
+        print("=== Setting up JaxSimulator for LHS Benchmarking ===")
+        t_comp_start = time.time()
+        sim = csdl.experimental.JaxSimulator(
+            recorder=recorder,
+            additional_inputs=jax_inputs,
+            additional_outputs=jax_outputs,
+            gpu=False,
+        )
+        iteration_log.clear()
+        sim.run()
+        compile_time = time.time() - t_comp_start
+        print(f"JAX Compilation finished in {compile_time:.2f} seconds.\n")
 
     baseline_values = np.array([float(np.asarray(inp.value).flatten()[0]) for inp in jax_inputs])
 
@@ -147,15 +166,26 @@ else:
     unconverged_samples = []
     max_residuals = []
 
+    if ENABLE_INEQUALITIES:
+        pkl_filename = "examples/showcase_examples/lift_plus_cruise/lift_plus_cruise_with_inequalities_lhs_timing_results.pkl"
+    else:
+        pkl_filename = "examples/showcase_examples/lift_plus_cruise/lift_plus_cruise_lhs_timing_results.pkl"
+
     print(f"\n=== Starting Benchmark Timing Across {N_LHS_SAMPLES} LHS Samples ===")
     total_benchmark_start = time.perf_counter()
 
     for i, sample in enumerate(lhs_samples):
         for j, var_value in enumerate(sample):
-            sim[jax_inputs[j]] = np.array([var_value])
+            if SOLVER_BACKEND == "inline":
+                jax_inputs[j].set_value(np.array([var_value]))
+            else:
+                sim[jax_inputs[j]] = np.array([var_value])
 
         t_start = time.perf_counter()
-        sim.run()
+        if SOLVER_BACKEND == "inline":
+            solver._inline_solve_()
+        else:
+            sim.run()
         t_end = time.perf_counter()
         sample_duration = t_end - t_start
         sample_timings.append(sample_duration)
@@ -170,8 +200,13 @@ else:
         has_nan = False
 
         for j in range(len(jax_inputs)):
-            val_comp = sim[computed_metrics[j]]
-            val_target = sim[jax_inputs[j]]
+            if SOLVER_BACKEND == "inline":
+                val_comp = np.array(computed_metrics[j].value)
+                val_target = np.array(jax_inputs[j].value)
+            else:
+                val_comp = sim[computed_metrics[j]]
+                val_target = sim[jax_inputs[j]]
+
             if np.isnan(val_comp).any() or np.isnan(val_target).any():
                 has_nan = True
                 break
@@ -180,7 +215,27 @@ else:
                 sample_max_res = err
 
         max_residuals.append(sample_max_res)
-        converged = (not has_nan) and (sample_max_res < 1e-3)
+
+        # Check strict equality constraints (first 12 variables)
+        strict_eq_err = 0.0
+        for j in range(12):
+            if SOLVER_BACKEND == "inline":
+                err_s = float(np.max(np.abs(computed_metrics[j].value - sample[j])))
+            else:
+                err_s = float(np.max(np.abs(sim[computed_metrics[j]] - sim[jax_inputs[j]])))
+            if err_s > strict_eq_err:
+                strict_eq_err = err_s
+
+        # Check inequality clearance margins (dist - min_dist >= 0)
+        min_clearance_margin = 0.0
+        if ENABLE_INEQUALITIES and ineq_clearance_vars:
+            margins = []
+            for cname, cvar, cmin in ineq_clearance_vars:
+                cval = float(np.asarray(cvar.value).flatten()[0])
+                margins.append(cval - cmin)
+            min_clearance_margin = float(np.min(margins))
+
+        converged = (not has_nan) and (strict_eq_err < 1e-3) and (min_clearance_margin >= -1e-3)
 
         if not converged:
             unconverged_samples.append({
@@ -188,14 +243,45 @@ else:
                 "sample": sample,
                 "has_nan": has_nan,
                 "max_residual": sample_max_res,
+                "strict_eq_err": strict_eq_err,
+                "min_clearance_margin": min_clearance_margin,
                 "iterations": it_count,
             })
 
-        if (i + 1) % 10 == 0 or (i + 1) == N_LHS_SAMPLES:
-            print(
-                f"  Sample {i+1:3d}/{N_LHS_SAMPLES} | Solve Time: {sample_duration*1000:6.2f} ms | "
-                f"Iters: {it_count:2d} | Max Res: {sample_max_res:.2e} | Status: {'CONVERGED' if converged else 'FAILED'}"
-            )
+        print(
+            f"  Sample {i+1:3d}/{N_LHS_SAMPLES} | Solve Time: {sample_duration:6.2f} s | "
+            f"Iters: {it_count:2d} | Max Res: {sample_max_res:.2e} | Strict Res: {strict_eq_err:.2e} | "
+            f"Min Clr: {min_clearance_margin:+.4f} m | Status: {'CONVERGED' if converged else 'FAILED'}",
+            flush=True,
+        )
+
+        # Periodic checkpoint
+        if (i + 1) % 5 == 0 or (i + 1) == N_LHS_SAMPLES:
+            cur_timings_ms = np.array(sample_timings) * 1000.0
+            cur_iters = np.array(sample_iterations)
+            ckpt_dict = {
+                "sample_timings": sample_timings,
+                "sample_iterations": sample_iterations,
+                "sample_input_difference_norms": sample_input_difference_norms,
+                "max_residuals": max_residuals,
+                "unconverged_samples": unconverged_samples,
+                "n_samples": i + 1,
+                "total_target_samples": N_LHS_SAMPLES,
+                "baseline_values": baseline_values,
+                "variable_names": variable_names,
+                "compile_time": compile_time,
+                "total_benchmark_time": time.perf_counter() - total_benchmark_start,
+                "mean_ms": float(np.mean(cur_timings_ms)),
+                "median_ms": float(np.median(cur_timings_ms)),
+                "min_ms": float(np.min(cur_timings_ms)),
+                "max_ms": float(np.max(cur_timings_ms)),
+                "std_ms": float(np.std(cur_timings_ms)),
+                "mean_iterations": float(np.mean(cur_iters)),
+                "median_iterations": int(np.median(cur_iters)),
+                "enable_inequalities": ENABLE_INEQUALITIES,
+            }
+            with open(pkl_filename, "wb") as f:
+                pickle.dump(ckpt_dict, f)
 
     total_benchmark_time = time.perf_counter() - total_benchmark_start
     timings_ms = np.array(sample_timings) * 1000.0

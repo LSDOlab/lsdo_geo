@@ -28,6 +28,11 @@ Y_SEP = 0.8702 / ((H_SEP - 1.1) ** 1.2721)  # ~0.62326 (H1 - 3.0445 at H=2.4)
 S0_HEAD = -P_HEAD * (H_SEP - 1.1) / Y_SEP   # ~ -1.63955 (dH/dy at separation onset)
 BETA_CONTINUATION = 20.0  # Smooth transition sharpness for linear continuation
 
+# Squire-Young trailing-edge wake parameters
+U_TE_RATIO_FLOOR = 0.85 # Minimum physical trailing-edge velocity recovery ratio
+BETA_U_TE = 30.0        # Softplus sharpness for trailing-edge velocity floor
+EXP_SQUIRE_YOUNG = 3.20 # Classical attached-wake exponent (Squire & Young 1938, Young 1939)
+
 
 def sp_floor(x, floor: float, beta: float):
     """Normalized smooth softplus floor: smooth_floor(x, floor) >= floor."""
@@ -332,10 +337,14 @@ def evaluate_bwb_viscous_ibl(
     ds_last = csdl.sqrt(csdl.sum(diff_last**2, axes=(1,)) + 1e-12)
     c_local = dx_centers + s0_station + 0.5 * ds_last
 
-    # Squire-Young momentum-deficit relation
+    # Squire-Young momentum-deficit relation with physical attached-wake exponent
+    # and smooth floor on trailing-edge velocity recovery ratio to prevent inverse-gradient exploitation.
+    u_ratio_upper = sp_floor(Ue_te_upper / v_cruise, U_TE_RATIO_FLOOR, BETA_U_TE)
+    u_ratio_lower = sp_floor(Ue_te_lower / v_cruise, U_TE_RATIO_FLOOR, BETA_U_TE)
+
     cd_section = (2.0 / c_local) * (
-        theta_te_upper * ((Ue_te_upper / v_cruise) ** ((H_te_upper + 5.0) / 2.0)) +
-        theta_te_lower * ((Ue_te_lower / v_cruise) ** ((H_te_lower + 5.0) / 2.0))
+        theta_te_upper * (u_ratio_upper ** EXP_SQUIRE_YOUNG) +
+        theta_te_lower * (u_ratio_lower ** EXP_SQUIRE_YOUNG)
     )
     cd_section.name = 'CD_ibl_section'
 

@@ -30,6 +30,7 @@ from lsdo_geo import (
     ParameterizationSolver,
     GeometricVariables,
     construct_ffd_block_around_entities,
+    construct_ffd_block_from_corners,
     SectionalParameterization,
     SectionalParameters,
 )
@@ -37,7 +38,7 @@ from lsdo_geo import (
 lfs.num_workers = 1
 
 # Configuration flag (can be overridden via environment variable)
-ENABLE_INEQUALITIES = os.environ.get("LPC_ENABLE_INEQUALITIES", "False").lower() in ("true", "1", "yes")
+ENABLE_INEQUALITIES = os.environ.get("LPC_ENABLE_INEQUALITIES", "True").lower() in ("true", "1", "yes")
 
 # ==============================================================================
 # 1. Geometry Import and Component Declarations
@@ -182,14 +183,26 @@ parameterization_solver = ParameterizationSolver()
 geometric_variables = GeometricVariables()
 
 # --- Wing Parameterization ---
-wing_ffd_block = construct_ffd_block_around_entities(
-    name="wing_ffd_block", entities=wing, num_coefficients=(2, 11, 2), degree=(1, 3, 1)
-)
+corners = np.zeros((2, 7, 2, 3))
+corners[0, :, :, 0] = 8.892
+corners[1, :, :, 0] = 14.333
+corners[:, 0, :, 1] = -25.25
+corners[:, 1, :, 1] = -17.0
+corners[:, 2, :, 1] = -14.736
+corners[:, 3, :, 1] = 0.0
+corners[:, 4, :, 1] = 14.736
+corners[:, 5, :, 1] = 17.0
+corners[:, 6, :, 1] = 25.25
+corners[:, :, 0, 2] = 7.5
+corners[:, :, 1, 2] = 9.133
+
+wing_ffd_block = construct_ffd_block_from_corners(entities=wing, corners=corners)
 wing_sec = SectionalParameterization(
     name="wing_sec", parameterized_points=wing_ffd_block.coefficients, principal_parametric_dimension=1
 )
 
-wing_span_stretch = csdl.Variable(name="wing_span_stretch", value=0.0)
+wing_inner_span_stretch = csdl.Variable(name="wing_inner_span_stretch", value=0.0)
+wing_outer_span_stretch = csdl.Variable(name="wing_outer_span_stretch", value=0.0)
 wing_root_chord_stretch = csdl.Variable(name="wing_root_chord_stretch", value=0.0)
 wing_tip_chord_stretch = csdl.Variable(name="wing_tip_chord_stretch", value=0.0)
 wing_translation_x = csdl.Variable(name="wing_translation_x", value=0.0)
@@ -198,21 +211,33 @@ wing_translation_z = csdl.Variable(name="wing_translation_z", value=0.0)
 wing_tip_twist_dv = csdl.Variable(name="wing_tip_twist", value=0.0)  # in degrees
 wing_tip_twist_rad = wing_tip_twist_dv * (np.pi / 180.0)
 
-parameterization_solver.add_state(state=wing_span_stretch)
+# Unconstrained proportional stretch: equal cost ensures equivalent stretch/compression
+parameterization_solver.add_state(state=wing_inner_span_stretch, cost=1.0)
+parameterization_solver.add_state(state=wing_outer_span_stretch, cost=1.0)
 parameterization_solver.add_state(state=wing_root_chord_stretch)
 parameterization_solver.add_state(state=wing_tip_chord_stretch)
 parameterization_solver.add_state(state=wing_translation_x)
 parameterization_solver.add_state(state=wing_translation_z)
 
+# Modes for 7-station FFD:
+# Stations along half-span: root (0.0), inner boom (14.736), outer boom (17.0), tip (25.25)
+# a_pos stretches inboard of inner boom (y <= 14.736) and translates outboard uniformly
+#   diff between outer boom and inner boom = 0.0000 (preserves rotor-rotor distance)
+# b_pos stretches outboard of inner boom (y > 14.736) with inner boom fixed at 0.0000
+# When wing_inner_span_stretch == wing_outer_span_stretch, a_pos + b_pos produces exact uniform linear span stretch.
+y1, y2, y3 = 14.736, 17.0, 25.25
+a_pos = np.array([0.0, y1 / y3, y1 / y3, y1 / y3])
+b_pos = np.array([0.0, 0.0, (y2 - y1) / y3, (y3 - y1) / y3])
+
+a_coeffs = np.concatenate((-a_pos[:0:-1], a_pos))
+b_coeffs = np.concatenate((-b_pos[:0:-1], b_pos))
+
+sec_coords_7 = np.linspace(0.0, 1.0, 7).reshape((-1, 1))
+
 wing_chord_bspline = lfs.Function(
     name="wing_chord_bspline",
     space=linear_3_space,
     coefficients=csdl.concatenate((wing_tip_chord_stretch, wing_root_chord_stretch, wing_tip_chord_stretch)),
-)
-wing_span_bspline = lfs.Function(
-    name="wing_span_bspline",
-    space=linear_2_space,
-    coefficients=csdl.concatenate((-wing_span_stretch, wing_span_stretch)),
 )
 wing_tx_bspline = lfs.Function(name="wing_tx_bspline", space=constant_space, coefficients=wing_translation_x)
 wing_tz_bspline = lfs.Function(name="wing_tz_bspline", space=constant_space, coefficients=wing_translation_z)
@@ -224,13 +249,17 @@ wing_twist_bspline = lfs.Function(
     coefficients=csdl.concatenate((wing_tip_twist_rad, csdl.Variable(value=0.0), wing_tip_twist_rad)),
 )
 
-sec_coords_11 = np.linspace(0.0, 1.0, wing_sec.num_sections).reshape((-1, 1))
+sectional_span_translation = (
+    csdl.expand(wing_inner_span_stretch, (7, 1)) * a_coeffs.reshape((-1, 1)) +
+    csdl.expand(wing_outer_span_stretch, (7, 1)) * b_coeffs.reshape((-1, 1))
+)
+
 wing_params = SectionalParameters()
-wing_params.add_stretch(0, wing_chord_bspline.evaluate(sec_coords_11))
-wing_params.add_translation(1, wing_span_bspline.evaluate(sec_coords_11))
-wing_params.add_translation(0, wing_tx_bspline.evaluate(sec_coords_11))
-wing_params.add_translation(2, wing_tz_bspline.evaluate(sec_coords_11))
-wing_params.add_rotation(1, wing_twist_bspline.evaluate(sec_coords_11))
+wing_params.add_stretch(0, wing_chord_bspline.evaluate(sec_coords_7))
+wing_params.add_translation(1, sectional_span_translation)
+wing_params.add_translation(0, wing_tx_bspline.evaluate(sec_coords_7))
+wing_params.add_translation(2, wing_tz_bspline.evaluate(sec_coords_7))
+wing_params.add_rotation(1, wing_twist_bspline.evaluate(sec_coords_7))
 
 wing_ffd_coeffs = wing_sec.evaluate(wing_params, plot=False)
 wing.set_coefficients(wing_ffd_block.evaluate_ffd(wing_ffd_coeffs, plot=False))
@@ -268,6 +297,7 @@ h_tail_span_bspline = lfs.Function(
 h_tail_tx_bspline = lfs.Function(name="h_tail_tx_bspline", space=constant_space, coefficients=h_tail_translation_x)
 h_tail_tz_bspline = lfs.Function(name="h_tail_tz_bspline", space=constant_space, coefficients=h_tail_translation_z)
 
+sec_coords_11 = np.linspace(0.0, 1.0, 11).reshape((-1, 1))
 ht_params = SectionalParameters()
 ht_params.add_stretch(0, h_tail_chord_bspline.evaluate(sec_coords_11))
 ht_params.add_translation(1, h_tail_span_bspline.evaluate(sec_coords_11))
@@ -316,6 +346,7 @@ for i, comp_set in enumerate(rotor_components):
     r_ffd = construct_ffd_block_around_entities(
         name=f"{rotor_names[i]}_ffd", entities=comp_set, num_coefficients=(2, 2, 2), degree=(1, 1, 1)
     )
+    rotor_ffd_blocks.append(r_ffd)
     r_sec = SectionalParameterization(
         name=f"{rotor_names[i]}_sec", parameterized_points=r_ffd.coefficients, principal_parametric_dimension=2
     )
@@ -373,6 +404,124 @@ vtail_trans = csdl.Variable(name="vtail_trans", shape=(3,), value=0.0)
 for fn in v_tail.functions.values():
     fn.coefficients = fn.coefficients + csdl.expand(vtail_trans, fn.coefficients.shape, action="k->ijk")
 parameterization_solver.add_state(state=vtail_trans)
+
+# # region Visualize Geometry and FFD Volumes
+# # High-resolution rendering of CAD geometry and all 12 FFD control volumes for paper publication
+# show_ffd_plot = True
+# if show_ffd_plot:
+#     import pyvista as pv
+
+#     # 4K UHD resolution for high-DPI paper figures and screenshots
+#     plotter = pv.Plotter(window_size=[3840, 2160])
+#     plotter.set_background("white")
+
+#     # Component geometry with original color scheme and smooth surface shading
+#     components = [
+#         (wing, "#3498db", "Wing"),
+#         (h_tail, "#2ecc71", "Horizontal Tail"),
+#         (v_tail, "#1abc9c", "Vertical Tail"),
+#         (fuselage, "#95a5a6", "Fuselage"),
+#         (nose_hub, "#7f8c8d", "Nose Hub"),
+#     ]
+#     for p in pp_components:
+#         components.append((p, "#e74c3c", "Pusher Propeller"))
+#     for comp_set in rotor_components:
+#         for comp in comp_set:
+#             components.append((comp, "#e67e22", "Lift Rotor"))
+#     for boom in boom_components:
+#         components.append((boom, "#f39c12", "Boom"))
+
+#     for comp, col, name in components:
+#         comp_meshes = [elem["mesh"] if isinstance(elem, dict) and "mesh" in elem else elem for elem in comp.plot(show=False)]
+#         for m in comp_meshes:
+#             if m is not None:
+#                 plotter.add_mesh(
+#                     m,
+#                     color=col,
+#                     smooth_shading=True,
+#                     specular=0.6,
+#                     specular_power=25,
+#                     ambient=0.25,
+#                     diffuse=0.75,
+#                 )
+
+#     # FFD control volumes: translucent boundary faces, 3D lattice wireframe, and control point spheres
+#     ffd_blocks = [
+#         (wing_ffd_block, "#2980b9", "Wing FFD"),
+#         (h_tail_ffd_block, "#27ae60", "Horizontal Tail FFD"),
+#         (fuselage_ffd_block, "#7f8c8d", "Fuselage FFD"),
+#         (pp_ffd, "#c0392b", "Pusher Propeller FFD"),
+#     ]
+#     for i, r_ffd in enumerate(rotor_ffd_blocks):
+#         ffd_blocks.append((r_ffd, "#d35400", f"Lift Rotor {i+1} FFD"))
+
+#     for blk, col, name in ffd_blocks:
+#         # 1. Translucent outer boundary faces
+#         elem = blk.plot(plot_embedded_points=False, show=False)
+#         for e in elem:
+#             if isinstance(e["mesh"], pv.StructuredGrid):
+#                 plotter.add_mesh(e["mesh"], color=col, opacity=0.15, smooth_shading=True)
+
+#         # 2. Control points as spheres
+#         coeffs = blk.coefficients.value
+#         nx, ny, nz, _ = coeffs.shape
+#         pts = coeffs.reshape(-1, 3)
+#         cloud = pv.PolyData(pts)
+#         plotter.add_mesh(cloud, color=col, point_size=16, render_points_as_spheres=True)
+
+#         # 3. Structured 3D lattice grid lines connecting adjacent control points
+#         lines = []
+#         for j in range(ny):
+#             for k in range(nz):
+#                 for i in range(nx - 1):
+#                     lines.extend([2, i * ny * nz + j * nz + k, (i + 1) * ny * nz + j * nz + k])
+#         for i in range(nx):
+#             for k in range(nz):
+#                 for j in range(ny - 1):
+#                     lines.extend([2, i * ny * nz + j * nz + k, i * ny * nz + (j + 1) * nz + k])
+#         for i in range(nx):
+#             for j in range(ny):
+#                 for k in range(nz - 1):
+#                     lines.extend([2, i * ny * nz + j * nz + k, i * ny * nz + j * nz + (k + 1)])
+#         wireframe = pv.PolyData(pts, lines=lines)
+#         plotter.add_mesh(wireframe, color=col, line_width=3.0)
+
+#     # Lighting and rendering enhancements
+#     plotter.enable_anti_aliasing("ssaa")
+#     plotter.enable_lightkit()
+
+#     # Elevated three-quarter perspective framing the entire aircraft and FFD volumes
+#     plotter.camera.position = (-50.0, -50.0, 40.0)
+#     plotter.camera.focal_point = (15.0, 0.0, 5.0)
+#     plotter.camera.up = (0.0, 0.0, 1.0)
+#     plotter.reset_camera()
+#     plotter.camera.zoom(1.80)
+
+#     # Save a high-resolution screenshot and tightly crop all white space around the model
+#     output_dir = os.path.dirname(os.path.abspath(__file__))
+#     paper_screenshot_path = os.path.join(output_dir, "lift_plus_cruise_ffd_volumes.png")
+#     plotter.screenshot(paper_screenshot_path)
+
+#     from PIL import Image
+#     im = Image.open(paper_screenshot_path)
+#     arr = np.array(im)[:, :, :3]
+#     mask = np.any(arr < 250, axis=-1)
+#     if np.any(mask):
+#         r = np.where(mask.any(axis=1))[0]
+#         c = np.where(mask.any(axis=0))[0]
+#         pad = 15  # Minimal 15px margin around outer extremities
+#         r_min = max(0, r[0] - pad)
+#         r_max = min(arr.shape[0], r[-1] + 1 + pad)
+#         c_min = max(0, c[0] - pad)
+#         c_max = min(arr.shape[1], c[-1] + 1 + pad)
+#         im_cropped = im.crop((c_min, r_min, c_max, r_max))
+#         im_cropped.save(paper_screenshot_path)
+#         print(f"Tightly cropped screenshot saved to '{paper_screenshot_path}' ({im_cropped.size[0]}x{im_cropped.size[1]} px with white space removed).")
+
+#     print(f"Displaying interactive FFD plot...")
+#     plotter.show()
+# exit(0)  # Exit after saving the screenshot to avoid running the rest of the script
+# # endregion Visualize Geometry and FFD Volumes
 
 # ==============================================================================
 # 4. Computed Geometric Values & Target Design Variables
@@ -467,11 +616,15 @@ geometric_variables.add_variable(pusher_fuse_conn, pusher_fuse_conn.value)
 # --- Lift Rotor Radii and Boom Connections ---
 rotor_radii_comp = []
 rotor_radii_dv = []
+ROTOR_PENALTY_VALUE = float(os.environ.get("LPC_ROTOR_PENALTY", "1.0"))
+INEQ_ACTIVATION_FACTOR = float(os.environ.get("LPC_INEQ_ACTIVATION", "5.0"))
+
 for i in range(8):
     p1, p2 = rotor_edges[i]
     r_comp = csdl.norm(geometry.evaluate(p1) - geometry.evaluate(p2)) / 2.0
     r_dv = csdl.Variable(name=f"{rotor_names[i]}_radius", value=r_comp.value)
-    geometric_variables.add_variable(r_comp, r_dv)
+    # Weak enforcement of rotor radius when inequalities are enabled
+    geometric_variables.add_variable(r_comp, r_dv, penalty_value=ROTOR_PENALTY_VALUE if ENABLE_INEQUALITIES else None)
     rotor_radii_comp.append(r_comp)
     rotor_radii_dv.append(r_dv)
 
@@ -480,8 +633,8 @@ for i in range(8):
 
 # --- Optional Inequality Constraints ---
 if ENABLE_INEQUALITIES:
-    inner_outer_min_dist = 0.4
-    inner_fuse_min_dist = 0.4
+    inner_outer_min_dist = 0.30
+    inner_fuse_min_dist = 0.40
 
     r_front_left_dist = geometry.evaluate(rotor_edges[5][1])[1] - geometry.evaluate(rotor_edges[4][0])[1]
     r_front_right_dist = geometry.evaluate(rotor_edges[7][1])[1] - geometry.evaluate(rotor_edges[6][0])[1]
@@ -496,7 +649,12 @@ if ENABLE_INEQUALITIES:
     ]:
         constraint = -(dist - inner_outer_min_dist)
         constraint.add_name(name)
-        parameterization_solver.add_inequality_constraint(constraint=constraint, quadratic_penalty_factor=1.0e3, linear_penalty_factor=0.0)
+        parameterization_solver.add_inequality_constraint(
+            constraint=constraint,
+            linear_penalty_factor=None,
+            linear_activation_factor=INEQ_ACTIVATION_FACTOR,
+            quadratic_penalty_factor=None,
+        )
 
     fri_fuse_dist = geometry.evaluate(rotor_edges[6][1])[1] - geometry.evaluate(fuselage_fri_collision_parametric)[1]
     fli_fuse_dist = geometry.evaluate(fuselage_fli_collision_parametric)[1] - geometry.evaluate(rotor_edges[5][0])[1]
@@ -504,7 +662,23 @@ if ENABLE_INEQUALITIES:
     for dist, name in [(fri_fuse_dist, "ineq_fri_fuselage"), (fli_fuse_dist, "ineq_fli_fuselage")]:
         constraint = -(dist - inner_fuse_min_dist)
         constraint.add_name(name)
-        parameterization_solver.add_inequality_constraint(constraint=constraint, quadratic_penalty_factor=1.0e3, linear_penalty_factor=0.0)
+        parameterization_solver.add_inequality_constraint(
+            constraint=constraint,
+            linear_penalty_factor=None,
+            linear_activation_factor=INEQ_ACTIVATION_FACTOR,
+            quadratic_penalty_factor=None,
+        )
+
+    ineq_clearance_vars = [
+        ("fl_rotor_rotor", r_front_left_dist, inner_outer_min_dist),
+        ("fr_rotor_rotor", r_front_right_dist, inner_outer_min_dist),
+        ("rl_rotor_rotor", r_rear_left_dist, inner_outer_min_dist),
+        ("rr_rotor_rotor", r_rear_right_dist, inner_outer_min_dist),
+        ("fri_fuselage", fri_fuse_dist, inner_fuse_min_dist),
+        ("fli_fuselage", fli_fuse_dist, inner_fuse_min_dist),
+    ]
+else:
+    ineq_clearance_vars = []
 
 print("=== Parameterization Model Diagnostics ===")
 num_states = sum(s.state.size for s in parameterization_solver.states)
@@ -523,7 +697,13 @@ print("=" * 45 + "\n")
 t_eval_start = time.time()
 parameterization_solver.evaluate(geometric_variables)
 t_eval_end = time.time()
-print(f"Initial parameterization solve completed in {t_eval_end - t_eval_start:.2f} seconds.\n")
+print(f"Initial parameterization solve completed in {t_eval_end - t_eval_start:.2f} seconds.")
+print(f"  wing_inner_span_stretch: {wing_inner_span_stretch.value[0]:.6f}")
+print(f"  wing_outer_span_stretch: {wing_outer_span_stretch.value[0]:.6f}")
+if ENABLE_INEQUALITIES:
+    print(f"  rear_left_rotor_dist:    {r_rear_left_dist.value[0]:.4f} m (min = {inner_outer_min_dist})")
+    print(f"  fli_fuse_dist:           {fli_fuse_dist.value[0]:.4f} m (min = {inner_fuse_min_dist})")
+print()
 
 # ==============================================================================
 # 5. Shared Interface for Evaluation, Perturbations, and Benchmarking

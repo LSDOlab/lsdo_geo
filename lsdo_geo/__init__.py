@@ -36,6 +36,9 @@ from .core.parameterization.parameterization_solver import (
 from .optimization import (
     Optimization,
     NewtonOptimizer,
+    QuadraticPenaltyOperation,
+    QuadraticPenalty,
+    quadratic_penalty,
 )
 
 __all__ = [
@@ -65,4 +68,7 @@ __all__ = [
     # Optimization
     "Optimization",
     "NewtonOptimizer",
+    "QuadraticPenaltyOperation",
+    "QuadraticPenalty",
+    "quadratic_penalty",
 ]

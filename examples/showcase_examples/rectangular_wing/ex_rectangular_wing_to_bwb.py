@@ -86,8 +86,9 @@ elif 'BWB_NUM_SECTIONS' in os.environ:
 
 # b) Chordwise panel count around airfoil ring (e.g., 20, 40, 50, 60)
 #    Controls chordwise discretization around upper/lower airfoil OML.
-# num_chordwise_panels: int = 60
-num_chordwise_panels: int = 50
+num_chordwise_panels: int = 60
+# num_chordwise_panels: int = 50
+# num_chordwise_panels: int = 30
 if 'BWB_NUM_CHORDWISE_PANELS' in os.environ:
     num_chordwise_panels = int(os.environ['BWB_NUM_CHORDWISE_PANELS'])
 elif 'BWB_NUM_CHORD' in os.environ:
@@ -95,8 +96,8 @@ elif 'BWB_NUM_CHORD' in os.environ:
 
 # c) Spanwise design variable stations per semi-span (e.g., 5, 6, 8)
 #    Controls number of chord, sweep, twist, camber, and thickness FFD control stations.
-# num_spanwise_dvs: int = 6
-num_spanwise_dvs: int = 5
+num_spanwise_dvs: int = 6
+# num_spanwise_dvs: int = 5
 if 'BWB_NUM_DVS' in os.environ:
     num_spanwise_dvs = int(os.environ['BWB_NUM_DVS'])
 elif 'BWB_NUM_STATIONS' in os.environ:
@@ -137,8 +138,8 @@ geonic_method = os.environ.get('GEONIC_METHOD', os.environ.get('GEONIC_MESH', ge
 
 
 # 4. Viscous drag mode:
-#   'ibl'          -> Integral boundary layer drag model & attachment constraint H_max <= 2.4
-#   'constant_cd0' -> Legacy fixed baseline profile drag (CD0_base = 0.0080)
+#   'ibl'          -> Integral boundary layer drag model (+ miscellaneous parasite CD0_misc)
+#   'constant_cd0' -> Fixed baseline profile drag (CD0_base + CD0_misc = 0.0085)
 viscous_drag_mode: Literal['ibl', 'constant_cd0'] = 'ibl'  # Options: 'ibl' or 'constant_cd0'
 # viscous_drag_mode: Literal['ibl', 'constant_cd0'] = 'constant_cd0'  # Options: 'ibl' or 'constant_cd0'
 viscous_drag_mode = os.environ.get('VISCOUS_DRAG_MODE', viscous_drag_mode)
@@ -152,7 +153,7 @@ include_neg1g_sizing: bool = False  # Options: True or False
 #   Effective structural height factor relative to OML (accounts for spar cap flange
 #   centroid recession beneath OML skins/stringers, shear lag, and internal cutouts)
 # box_height_factor: float = 1.0     # Options: 0.50 - 0.70 (standard preliminary design factor)
-box_height_factor: float = 0.7     # Options: 0.50 - 0.70 (standard preliminary design factor)
+box_height_factor: float = 0.8     # Options: 0.50 - 0.70 (standard preliminary design factor)
 box_height_factor = float(os.environ.get('BOX_HEIGHT_FACTOR', box_height_factor))
 
 # 6. Airfoil shape & control surface options:
@@ -178,9 +179,23 @@ enforce_stratford_constraint: bool = True
 if 'ENFORCE_STRATFORD_CONSTRAINT' in os.environ:
     enforce_stratford_constraint = os.environ.get('ENFORCE_STRATFORD_CONSTRAINT', '1').strip() == '1'
 
+# 7c. Wake-load consistency penalty:
+#   Penalizes mismatch between near-field surface pressure loading and scaled far-field wake loading.
+#   Uses a deadband one-sided quadratic penalty so discretization noise (< threshold) is 100% unpenalized.
+include_wake_load_penalty: bool = True
+if 'INCLUDE_WAKE_LOAD_PENALTY' in os.environ:
+    include_wake_load_penalty = os.environ.get('INCLUDE_WAKE_LOAD_PENALTY', '1').strip() == '1'
+
+wake_load_penalty_weight: float = float(os.environ.get('WAKE_LOAD_PENALTY_WEIGHT', 20.0))
+wake_load_penalty_threshold: float = float(os.environ.get('WAKE_LOAD_PENALTY_THRESHOLD', 0.10))
+
 # 8. Scale factor & warm start:
 scale_factor: float = 7.5             # Scale factor (7.5 for 50 m full-scale BWB; 1.0 for wind-tunnel scale)
-warm_start: bool = False              # Warm start DVs from prior run
+warm_start: bool = os.environ.get('WARM_START', '1').strip().lower() not in ('0', 'false', 'no')
+warm_start_folder: str = os.environ.get(
+    'BWB_WARM_START_FOLDER',
+    'rectangular_wing_to_bwb_aerostructural_optimization_outputs/2026-10-23_18.38.34.200350'
+)
 
 # 9. Diagnostics & pre-flight verification:
 run_pre_diagnostics: bool = False      # Run initial JAX evaluation and print comprehensive diagnostic report before optimization
@@ -731,6 +746,21 @@ y_mid = 0.5 * (y_aero_c[:-1] + y_aero_c[1:])
 y_aero_bounds = np.concatenate([[0.0], y_mid, [b_tip_initial]])
 dy_aero_init = np.diff(y_aero_bounds)
 
+# Build static mapping matrix from full-span TE edges to right half-span aero strips
+te_edges_arr = np.asarray(TE_properties[2])
+te_pts_init = points_orig[te_edges_arr]
+te_y_init = np.mean(te_pts_init[:, :, 1], axis=1)
+right_te_indices = np.where(te_y_init > 0.0)[0]
+M_te_right = np.zeros((num_strips, len(te_edges_arr)))
+if len(right_te_indices) == num_strips:
+    sorted_order = np.argsort(te_y_init[right_te_indices])
+    for s_i in range(num_strips):
+        M_te_right[s_i, right_te_indices[sorted_order[s_i]]] = 1.0
+else:
+    for te_idx in right_te_indices:
+        s_i = int(np.argmin(np.abs(y_strip_centers - te_y_init[te_idx])))
+        M_te_right[s_i, te_idx] = 1.0
+
 y_drag_centers_init = 0.5 * (y_drag_span[:-1] + y_drag_span[1:])
 num_aero_strips = len(y_aero_c)
 M_interp_drag = np.zeros((num_drag_strips, num_aero_strips))
@@ -834,11 +864,11 @@ class DVInfo:
     upper: Union[float, npt.NDArray[np.float64]]
     scaler: float = 1.0
 
-init_file = 'rectangular_wing_to_bwb_aerostructural_optimization_outputs/2026-09-09_12.44.58.866121/x.out'
+init_file = os.path.join(warm_start_folder, 'x.out') if (warm_start and os.path.exists(warm_start_folder)) else 'rectangular_wing_to_bwb_aerostructural_optimization_outputs/2026-09-09_12.44.58.866121/x.out'
 
 thickness_space = lfs.BSplineSpace(num_parametric_dimensions=1, degree=2, coefficients_shape=(num_thickness_stations,))
-ttop_dvs = csdl.Variable(shape=(num_thickness_stations,), value=np.ones(num_thickness_stations) * 0.01)
-tweb_dvs = csdl.Variable(shape=(num_thickness_stations,), value=np.ones(num_thickness_stations) * 0.01)
+ttop_dvs = csdl.Variable(shape=(num_thickness_stations,), value=np.ones(num_thickness_stations) * 0.05)
+tweb_dvs = csdl.Variable(shape=(num_thickness_stations,), value=np.ones(num_thickness_stations) * 0.05)
 
 twist_lower = np.full(num_chord_stations, -15.0 * np.pi / 180.0)
 twist_lower[0] = 0.0  # fix root twist to 0
@@ -872,7 +902,7 @@ thick_shape_scaler = 1.0 / 10.0  # Scales [-50.0, 50.0] with 1/10 scaler (larger
 #   thick_scaler = 50.0  (1.0 / t_nominal)
 t_min_base = 0.0010 / 7.5
 t_max_base = 0.5000 / 7.5
-t_nom_base = 0.0200 / 7.5
+t_nom_base = 0.0500 / 7.5
 
 t_min_gauge = t_min_base * scale_factor
 t_max_gauge = t_max_base * scale_factor
@@ -896,12 +926,12 @@ if formulation == 'ar_area':
 
     design_variables: dict[str, DVInfo] = {
         'taper_control_points': DVInfo(variable=taper_control_points, lower=0.05, upper=1.25, scaler=1.0),
-        'aspect_ratio': DVInfo(variable=aspect_ratio, lower=2.0, upper=15.0, scaler=0.5),
+        'aspect_ratio': DVInfo(variable=aspect_ratio, lower=5.0, upper=15.0, scaler=0.5),
         'sweep_angle_control_points': DVInfo(variable=sweep_angle_control_points, lower=0.0*np.pi/180, upper=60.0*np.pi/180, scaler=1.e1),
         'tc_target_control_points': DVInfo(variable=tc_target_control_points, lower=tc_lower, upper=tc_upper, scaler=tc_scaler),
         'twist_dvs': DVInfo(variable=twist_dvs, lower=twist_lower, upper=twist_upper, scaler=1.e1),
-        'pitch': DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
-        'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
+        'pitch': DVInfo(variable=pitch, lower=-2.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
+        'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=20.0*np.pi/180, scaler=1.e1),
     }
     if geonic_payload_mode == 'none':
         design_variables['payload_cg'] = DVInfo(
@@ -943,7 +973,36 @@ if formulation == 'ar_area':
             variable=thickness_shape_dvs, lower=thick_shape_lower, upper=thick_shape_upper, scaler=thick_shape_scaler
         )
     if include_neg1g_sizing:
-        design_variables['pitch_neg1g'] = DVInfo(variable=pitch_neg1g, lower=-35.0*np.pi/180, upper=10.0*np.pi/180, scaler=1.e1)
+        design_variables['pitch_neg1g'] = DVInfo(variable=pitch_neg1g, lower=-20.0*np.pi/180, upper=10.0*np.pi/180, scaler=1.e1)
+
+    if warm_start:
+        warm_start_npz = os.path.join(warm_start_folder, 'lift_and_moment_data.npz')
+        if os.path.exists(warm_start_npz):
+            prior_data = np.load(warm_start_npz, allow_pickle=True)
+            prior_chord_dvs = np.asarray(prior_data['dv_opt_chord_stretch_dvs'])
+            if prior_chord_dvs.shape == chord_stretch_dvs.shape:
+                print(f"Warm starting design variables from {warm_start_npz}...")
+                chord_stretch_dvs.value = prior_chord_dvs
+                sweep_dvs.value = np.asarray(prior_data['dv_opt_sweep_dvs'])
+                thickness_stretch_dvs.value = np.asarray(prior_data['dv_opt_thickness_stretch_dvs'])
+                twist_dvs.value = np.asarray(prior_data['dv_opt_twist_dvs'])
+                ttop_dvs.value = np.asarray(prior_data['dv_opt_ttop_dvs'])
+                tweb_dvs.value = np.asarray(prior_data['dv_opt_tweb_dvs'])
+                if include_camber and 'dv_opt_camber_dvs' in prior_data:
+                    camber_dvs.value = np.asarray(prior_data['dv_opt_camber_dvs'])
+                if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
+                    thickness_shape_dvs.value = np.asarray(prior_data['dv_opt_thickness_shape_dvs'])
+            else:
+                print(f"Warm start resolution mismatch (prior: {prior_chord_dvs.shape}, current: {chord_stretch_dvs.shape}), skipping station DVs...")
+            span_stretch_dv.value = np.asarray(prior_data['dv_opt_span_stretch_dv']).reshape((1,))
+            pitch.value = float(np.asarray(prior_data['dv_opt_pitch']).flatten()[0])
+            pitch_ss.value = float(np.asarray(prior_data['dv_opt_pitch_ss']).flatten()[0])
+            if 'dv_opt_misc_cg' in prior_data:
+                misc_cg.value = float(np.asarray(prior_data['dv_opt_misc_cg']).flatten()[0])
+            if use_geonic and geonic_payload_mode in {'oversized', 'both'} and 'dv_opt_payload_center_x' in prior_data:
+                payload_center_x.value = float(np.asarray(prior_data['dv_opt_payload_center_x']).flatten()[0])
+            if use_geonic and geonic_payload_mode in {'pallets', 'both'} and 'dv_opt_pallet_stack_center_x' in prior_data:
+                pallet_stack_center_x.value = float(np.asarray(prior_data['dv_opt_pallet_stack_center_x']).flatten()[0])
 
     # ParameterizationSolver drives chord stretch states, thickness stretch states, 1 span stretch state, and sweep translation states
     chord_stretch_states = csdl.Variable(shape=(num_chord_stations,), value=np.zeros(num_chord_stations))
@@ -1002,7 +1061,7 @@ elif formulation == 'chord_span':
 
     initial_chord = 1.0 * scale_factor  # 0.3162 m baseline chord
     chord_stretch_lower = -0.85 * initial_chord  # (prevents chord collapsing below 15% of baseline)
-    chord_stretch_upper = 10.0 * initial_chord    
+    chord_stretch_upper = 6.0 * initial_chord    
 
     initial_thickness = 0.12 * initial_chord  # 0.0379 m baseline NACA 0012 thickness
     thickness_stretch_lower = -0.95 * initial_thickness
@@ -1014,8 +1073,8 @@ elif formulation == 'chord_span':
     sweep_upper = np.full(num_chord_stations, 4.0 * scale_factor)
     sweep_upper[0] = 0.0
 
-    span_stretch_lower = -4.5 * scale_factor
-    span_stretch_upper = 20.0 * scale_factor
+    span_stretch_lower = -2.5 * scale_factor
+    span_stretch_upper = 5.0 * scale_factor
 
     design_variables: dict[str, DVInfo] = {
         'chord_stretch_dvs': DVInfo(variable=chord_stretch_dvs, lower=chord_stretch_lower, upper=chord_stretch_upper, scaler=1.0 / scale_factor),
@@ -1023,8 +1082,8 @@ elif formulation == 'chord_span':
         'thickness_stretch_dvs': DVInfo(variable=thickness_stretch_dvs, lower=thickness_stretch_lower, upper=thickness_stretch_upper, scaler=1.0 / initial_thickness),
         'twist_dvs': DVInfo(variable=twist_dvs, lower=twist_lower, upper=twist_upper, scaler=1.e1),
         'span_stretch_dv': DVInfo(variable=span_stretch_dv, lower=span_stretch_lower, upper=span_stretch_upper, scaler=1.0 / scale_factor),
-        'pitch': DVInfo(variable=pitch, lower=-10.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
-        'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=35.0*np.pi/180, scaler=1.e1),
+        'pitch': DVInfo(variable=pitch, lower=-2.0*np.pi/180, upper=15.0*np.pi/180, scaler=1.e1),
+        'pitch_ss': DVInfo(variable=pitch_ss, lower=0.0*np.pi/180, upper=20.0*np.pi/180, scaler=1.e1),
     }
     if geonic_payload_mode == 'none':
         design_variables['payload_cg'] = DVInfo(
@@ -1059,7 +1118,36 @@ elif formulation == 'chord_span':
             variable=thickness_shape_dvs, lower=thick_shape_lower, upper=thick_shape_upper, scaler=thick_shape_scaler
         )
     if include_neg1g_sizing:
-        design_variables['pitch_neg1g'] = DVInfo(variable=pitch_neg1g, lower=-35.0*np.pi/180, upper=10.0*np.pi/180, scaler=1.e1)
+        design_variables['pitch_neg1g'] = DVInfo(variable=pitch_neg1g, lower=-20.0*np.pi/180, upper=10.0*np.pi/180, scaler=1.e1)
+
+    if warm_start:
+        warm_start_npz = os.path.join(warm_start_folder, 'lift_and_moment_data.npz')
+        if os.path.exists(warm_start_npz):
+            prior_data = np.load(warm_start_npz, allow_pickle=True)
+            prior_chord_dvs = np.asarray(prior_data['dv_opt_chord_stretch_dvs'])
+            if prior_chord_dvs.shape == chord_stretch_dvs.shape:
+                print(f"Warm starting design variables from {warm_start_npz}...")
+                chord_stretch_dvs.value = prior_chord_dvs
+                sweep_dvs.value = np.asarray(prior_data['dv_opt_sweep_dvs'])
+                thickness_stretch_dvs.value = np.asarray(prior_data['dv_opt_thickness_stretch_dvs'])
+                twist_dvs.value = np.asarray(prior_data['dv_opt_twist_dvs'])
+                ttop_dvs.value = np.asarray(prior_data['dv_opt_ttop_dvs'])
+                tweb_dvs.value = np.asarray(prior_data['dv_opt_tweb_dvs'])
+                if include_camber and 'dv_opt_camber_dvs' in prior_data:
+                    camber_dvs.value = np.asarray(prior_data['dv_opt_camber_dvs'])
+                if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
+                    thickness_shape_dvs.value = np.asarray(prior_data['dv_opt_thickness_shape_dvs'])
+            else:
+                print(f"Warm start resolution mismatch (prior: {prior_chord_dvs.shape}, current: {chord_stretch_dvs.shape}), skipping station DVs...")
+            span_stretch_dv.value = np.asarray(prior_data['dv_opt_span_stretch_dv']).reshape((1,))
+            pitch.value = float(np.asarray(prior_data['dv_opt_pitch']).flatten()[0])
+            pitch_ss.value = float(np.asarray(prior_data['dv_opt_pitch_ss']).flatten()[0])
+            if 'dv_opt_misc_cg' in prior_data:
+                misc_cg.value = float(np.asarray(prior_data['dv_opt_misc_cg']).flatten()[0])
+            if use_geonic and geonic_payload_mode in {'oversized', 'both'} and 'dv_opt_payload_center_x' in prior_data:
+                payload_center_x.value = float(np.asarray(prior_data['dv_opt_payload_center_x']).flatten()[0])
+            if use_geonic and geonic_payload_mode in {'pallets', 'both'} and 'dv_opt_pallet_stack_center_x' in prior_data:
+                pallet_stack_center_x.value = float(np.asarray(prior_data['dv_opt_pallet_stack_center_x']).flatten()[0])
 
     chord_params = csdl.concatenate(
         [chord_stretch_dvs[i] for i in range(num_chord_stations - 1, 0, -1)] +
@@ -2048,10 +2136,12 @@ strip_delta_M_cruise = wave_drag_results[0]['delta_M']
 strip_delta_M_eff_cruise = wave_drag_results[0]['delta_M_eff']
 min_strip_mach_margin_cruise = -csdl.maximum(strip_delta_M_cruise, axes=(0,), rho=50.0)  # min(Mcrit - M)
 
-# Base parasite drag coefficient (NACA 0012 base skin friction + form drag: CD0 = 0.0050)
-# Viscous drag mode evaluation: 'ibl' (direct integral boundary layer) vs 'constant_cd0' (legacy CD0_base = 0.0050)
-# CD0_base = 0.0080
+# Base parasite drag coefficient (NACA 0012 base skin friction + form drag: CD0_base = 0.0050)
+# Miscellaneous parasite drag increment (nacelles, pylons, vertical fins/winglets, gaps, excrescences: CD0_misc = 0.0035)
+# Viscous drag mode evaluation: 'ibl' (direct integral boundary layer + CD0_misc) vs 'constant_cd0' (CD0_total = 0.0085)
 CD0_base = 0.0050
+CD0_misc = float(os.environ.get('CD0_MISC', 0.0035))  # 35 drag counts for misc parasite drag
+CD0_total = CD0_base + CD0_misc
 
 ibl_results = evaluate_bwb_viscous_ibl(
     cp_node0=Cp[0],
@@ -2081,9 +2171,13 @@ H_section_both = ibl_results['H_section_both']
 H_upper_matrix = ibl_results['H_upper_matrix']
 
 if viscous_drag_mode == 'ibl':
-    cd_viscous_elem = ibl_results['cd_viscous_elem']
-    CD_viscous = CD_viscous_ibl
-    D_viscous = D_viscous_ibl
+    cd_viscous_elem = ibl_results['cd_viscous_elem'] + CD0_misc
+    CD_viscous = CD_viscous_ibl + CD0_misc
+    CD_viscous.name = 'CD_viscous'
+    D_viscous = D_viscous_ibl + CD0_misc * q_inf * total_strip_area
+    D_viscous.name = 'D_viscous'
+    CD_ibl_section = CD_ibl_section + CD0_misc
+    CD_ibl_section.name = 'CD_ibl_section'
 
     # Fit 101-CP cubic B-spline with root symmetry S'(0)=0 to the 100 drag strip section max H values
     # Reuses the exact precomputed matrix inverse M_cl_ss_inv and B-spline space cl_ss_fit_space
@@ -2131,10 +2225,14 @@ if viscous_drag_mode == 'ibl':
     if enforce_stratford_constraint:
         dv_stratford_constraints.set_as_constraint(upper=0.39, scaler=1.0 / 0.39)
 else:
-    cd_viscous_elem = CD0_base
-    CD_viscous = csdl.Variable(value=CD0_base, name='CD_viscous')
-    D_viscous = CD0_base * q_inf * total_strip_area
+    cd_viscous_elem = CD0_total
+    CD_viscous = csdl.Variable(value=CD0_total, name='CD_viscous')
+    D_viscous = CD0_total * q_inf * total_strip_area
     D_viscous.name = 'D_viscous'
+    CD_ibl_section = csdl.Variable(
+        value=np.full((ibl_topology['num_stations'],), CD0_total),
+        name='CD_ibl_section',
+    )
     dv_H_stations = csdl.Variable(value=np.full((num_stations,), 1.4), name='dv_H_stations')
     dv_stratford_constraints = csdl.Variable(
         value=np.full((stratford_topology['num_constraints'],), 0.20),
@@ -2179,6 +2277,9 @@ if stall_model == 'stratford_closure':
     Di_Trefftz_reconciled = stall_cruise['Di_Trefftz_reconciled']
     CDi_Trefftz_reconciled = Di_Trefftz_reconciled / (q_inf * planform_area)
     CDi_Trefftz_reconciled.name = 'CDi_Trefftz_reconciled'
+    Di_Trefftz_stall = stall_cruise['Di_Trefftz_stall']
+    CDi_Trefftz_stall = Di_Trefftz_stall / (q_inf * planform_area)
+    CDi_Trefftz_stall.name = 'CDi_Trefftz_stall'
     D_separation_cruise = stall_cruise['D_separation']
     f_attached_cruise = stall_cruise['f_attached']
     f_attached_min_cruise = stall_cruise['f_attached_min']
@@ -2203,15 +2304,22 @@ if stall_model == 'stratford_closure':
     lift_effective_cruise = L_corr_cruise
 
     CD_separation_cruise = D_separation_cruise / (q_inf * planform_area)
+    # Always use reconciled Trefftz induced drag to enforce momentum conservation and prevent wake deflation exploitation
+    Di_trefftz_active = Di_Trefftz_reconciled
+    CDi_trefftz_active = CDi_Trefftz_reconciled
+
     if induced_drag_objective == 'mixed':
-        CDi_active = csdl.maximum(CDi_Fourier, CDi_Trefftz_reconciled, rho=2.*1.e3)
-        Di_chosen = csdl.maximum(Di_Fourier, Di_Trefftz_reconciled, rho=2.*1.e3)
+        CDi_active = csdl.maximum(CDi_Fourier, CDi_trefftz_active, rho=2.*1.e3)
+        Di_chosen = csdl.maximum(Di_Fourier, Di_trefftz_active, rho=2.*1.e3)
     else:
-        CDi_active = CDi_Trefftz_reconciled
-        Di_chosen = Di_Trefftz_reconciled
+        CDi_active = CDi_trefftz_active
+        Di_chosen = Di_trefftz_active
 
     CD_active = CDi_active + CD_profile + CD_separation_cruise + CD_wave_cruise
     D_total = Di_chosen + D_profile + D_separation_cruise + D_wave_cruise
+
+    panel_forces_z_right = panel_forces_corr_cruise[:, 2]
+    mu_w_cruise = mu_w_stall_cruise
 
 else:
     # 2. Unified aerodynamic section stall parameters (applicable to all flight conditions)
@@ -2255,6 +2363,9 @@ else:
 
     pitch_moment = M[0, 1]
 
+    panel_forces_z_right = panel_forces_right_cruise[:, 2]
+    mu_w_cruise = mu_w[0:1]
+
 # Reference values for scaling constraints and objective function
 payload_weight_val = float(np.asarray(payload_weight.value).flatten()[0]) if hasattr(payload_weight, 'value') else float(payload_weight)
 misc_weight_val = float(np.asarray(misc_weight.value).flatten()[0]) if hasattr(misc_weight, 'value') else float(misc_weight)
@@ -2262,6 +2373,65 @@ total_fixed_weight_val = payload_weight_val + misc_weight_val
 W_ref = 2.0 * total_fixed_weight_val  # reference cruise weight [N]
 D_ref = W_ref / 50. # reference drag [N] (~1/20 of payload weight if we assume L/D ~ 20)
 c_ref = scale_factor * 1.0 # Initial chord length
+
+# 7c. Wake-load consistency penalty:
+#   Penalizes mismatch between near-field surface pressure loading and scaled far-field wake loading.
+#   Uses a deadband one-sided quadratic penalty so discretization noise (< threshold) is 100% unpenalized.
+if include_wake_load_penalty:
+    # Near-field sectional lift from integrated surface pressures
+    lift_pressure_strips = csdl.matvec(csdl.Variable(value=W_strip), panel_forces_z_right)
+    lift_pressure_strips.name = 'lift_pressure_strips'
+    L_pressure_right = csdl.sum(lift_pressure_strips)
+    L_pressure_right.name = 'L_pressure_right'
+
+    # Far-field sectional lift from wake circulation (Prandtl-Glauert compressible domain)
+    beta_cruise = csdl.sqrt(1.0 - atm_mach_numbers[0]**2)
+    mu_w_flat = csdl.reshape(mu_w_cruise, (len(TE_edges),))
+    mu_w_right = csdl.matvec(csdl.Variable(value=M_te_right), mu_w_flat)
+    mu_w_right.name = 'mu_w_right'
+    mu_w_mag = csdl.sqrt(mu_w_right ** 2 + 1e-12)
+
+    lift_wake_strips = (rho_array[0] * cruise_speed / beta_cruise) * mu_w_mag * dy_aero_dyn
+    lift_wake_strips.name = 'lift_wake_strips'
+    L_wake_right = csdl.sum(lift_wake_strips)
+    L_wake_right.name = 'L_wake_right'
+
+    # Scale wake loading to match total pressure lift to isolate shape mismatch from scaling
+    k_wake_scale = L_pressure_right / (L_wake_right + 1e-8)
+    k_wake_scale.name = 'k_wake_scale'
+    lift_wake_scaled = k_wake_scale * lift_wake_strips
+    delta_loading = lift_pressure_strips - lift_wake_scaled
+
+    norm_pres_sq = csdl.sum(lift_pressure_strips ** 2) + 1e-8
+    wake_shape_mismatch_sq = csdl.sum(delta_loading ** 2) / norm_pres_sq
+    wake_load_mismatch = csdl.sqrt(wake_shape_mismatch_sq + (k_wake_scale - 1.0)**2 + 1e-12)
+    wake_load_mismatch.name = 'wake_load_mismatch'
+
+    # One-sided deadband quadratic penalty: 100% zero below threshold, quadratic above
+    delta_mismatch = wake_load_mismatch - wake_load_penalty_threshold
+    excess_mismatch = (1.0 / 50.0) * csdl.softplus(50.0 * delta_mismatch)
+    excess_mismatch.name = 'wake_excess_mismatch'
+
+    D_wake_load_penalty = wake_load_penalty_weight * D_ref * (excess_mismatch ** 2)
+    D_wake_load_penalty.name = 'D_wake_load_penalty'
+    CD_wake_load_penalty = D_wake_load_penalty / (q_inf * planform_area)
+    CD_wake_load_penalty.name = 'CD_wake_load_penalty'
+else:
+    wake_load_mismatch = csdl.Variable(value=0.0)
+    wake_load_mismatch.name = 'wake_load_mismatch'
+    excess_mismatch = csdl.Variable(value=0.0)
+    excess_mismatch.name = 'wake_excess_mismatch'
+    k_wake_scale = csdl.Variable(value=1.0)
+    k_wake_scale.name = 'k_wake_scale'
+    D_wake_load_penalty = csdl.Variable(value=0.0)
+    D_wake_load_penalty.name = 'D_wake_load_penalty'
+    CD_wake_load_penalty = csdl.Variable(value=0.0)
+    CD_wake_load_penalty.name = 'CD_wake_load_penalty'
+
+CD_active = CD_active + CD_wake_load_penalty
+CD_active.name = 'CD_active'
+D_total = D_total + D_wake_load_penalty
+D_total.name = 'D_total'
 
 # D_total in Newtons = 0.5 * rho * V^2 * S * CD
 objective = 0.5 * rho_array[0] * (cruise_speed ** 2) * planform_area * CD_active
@@ -2553,6 +2723,8 @@ if stall_model == 'stratford_closure':
     additional_outs += [
         Di_Trefftz_reconciled,
         CDi_Trefftz_reconciled,
+        Di_Trefftz_stall,
+        CDi_Trefftz_stall,
         D_separation_cruise,
         f_attached_cruise,
         f_attached_min_cruise,
@@ -2565,6 +2737,14 @@ if stall_model == 'stratford_closure':
         panel_forces_corr_ss,
         static_margin_inviscid,
     ]
+additional_outs += [
+    CD_active,
+    wake_load_mismatch,
+    excess_mismatch,
+    k_wake_scale,
+    D_wake_load_penalty,
+    CD_wake_load_penalty,
+]
 additional_outs += geometry_coefficients
 
 jax_sim = csdl.experimental.JaxSimulator(
@@ -2780,6 +2960,17 @@ if run_pre_diagnostics:
     else:
         print(f"Stall Model: CL EMPIRICAL (Critical Cl = {cl_crit:.2f})\n")
 
+    if include_wake_load_penalty:
+        mismatch_val = float(np.asarray(jax_sim[wake_load_mismatch]).flatten()[0])
+        excess_val = float(np.asarray(jax_sim[excess_mismatch]).flatten()[0])
+        k_scale_val = float(np.asarray(jax_sim[k_wake_scale]).flatten()[0])
+        d_pen_val = float(np.asarray(jax_sim[D_wake_load_penalty]).flatten()[0])
+        cd_pen_val = float(np.asarray(jax_sim[CD_wake_load_penalty]).flatten()[0])
+        pen_status = "ACTIVE" if excess_val > 1e-4 else "INACTIVE (Within Deadband)"
+        print(f"================ WAKE-LOAD CONSISTENCY PENALTY ================")
+        print(f"Wake Mismatch: {mismatch_val*100:.2f}% (Threshold: {wake_load_penalty_threshold*100:.1f}%) | Lift Scale k: {k_scale_val:.4f} | Status: {pen_status}")
+        print(f"Penalty Drag: {d_pen_val:.1f} N ({cd_pen_val*1e4:.2f} counts) | Weight: {wake_load_penalty_weight:.1f}\n")
+
 if os.environ.get('DIAGNOSTIC_ONLY', 'false').lower() == 'true':
     sys.exit(0)
 
@@ -2914,6 +3105,22 @@ if __name__ == '__main__':
     num_iterations = x_history.shape[0]
     if num_iterations == 0:
         print(f"No optimization history found in {latest_folder}. Skipping post-processing plot rendering.")
+        # Print final viscous summary for diagnostic and testing purposes
+        cd_visc_final = float(np.asarray(jax_sim[CD_viscous]).flatten()[0])
+        d_visc_final = float(np.asarray(jax_sim[D_viscous]).flatten()[0])
+        hmax_final = float(np.asarray(jax_sim[H_max_ibl]).flatten()[0])
+        att_margin_final = float(np.asarray(jax_sim[ibl_attachment_margin]).flatten()[0])
+        min_cp_final = float(np.asarray(jax_sim[ibl_min_cp]).flatten()[0])
+        cp_cut_margin_final = float(np.asarray(jax_sim[ibl_cp_cutoff_margin]).flatten()[0])
+        att_st_final = "ATTACHED (FEASIBLE)" if att_margin_final >= 0.0 else "SEPARATED (VIOLATED)"
+        print(f"\n================ VISCOUS DRAG FINAL SUMMARY ================")
+        print(f"Selected Mode: {viscous_drag_mode.upper()}")
+        print(f"CD_viscous:    {cd_visc_final*1e4:.2f} counts ({cd_visc_final:.6f})")
+        print(f"D_viscous:     {d_visc_final:.1f} N")
+        print(f"H_max_ibl:     {hmax_final:.4f} (Limit: 2.40)")
+        print(f"Attach Margin: {att_margin_final:+.4f} ({att_st_final})")
+        print(f"Min Cp:        {min_cp_final:.4f} (Cutoff Margin: {cp_cut_margin_final:+.4f})")
+        print(f"============================================================\n")
         exit()
     
     # Set up pyvista offscreen rendering and video frames directory
@@ -3021,7 +3228,7 @@ if __name__ == '__main__':
         min_mach_margin = float(np.asarray(jax_sim[min_strip_mach_margin_cruise]).flatten()[0])
         min_mdd_margin = float(np.asarray(jax_sim[min_strip_mdd_margin_cruise]).flatten()[0])
 
-        cd_active_val = (cdi_fourier_val if induced_drag_objective == 'fourier' else cd_trefftz_val) + cd_profile_val + cd_wave_val
+        cd_active_val = float(np.asarray(jax_sim[CD_active]).flatten()[0])
         cd_history.append(cd_active_val * 1e4)  # Active total CD in drag counts (x 1e4)
         cl_history.append(cl_val)
         sref_history.append(sref_val)
@@ -3234,6 +3441,13 @@ if __name__ == '__main__':
         else:
             viscous_hud_str = f"Viscous: CONST_CD0 (CD0=80.0 cts)\n"
 
+        if include_wake_load_penalty:
+            pen_cd_iter = float(np.asarray(jax_sim[CD_wake_load_penalty]).flatten()[0])
+            mism_iter = float(np.asarray(jax_sim[wake_load_mismatch]).flatten()[0])
+            wake_hud_str = f"Wake Penalty: {pen_cd_iter*1e4:.1f} cts | Mismatch: {mism_iter*100:.1f}%\n"
+        else:
+            wake_hud_str = ""
+
         # Add iteration counter label using unscaled physical values
         plotter.add_text(
             f"Iteration {iteration}/{num_iterations - 1}\n"
@@ -3241,6 +3455,7 @@ if __name__ == '__main__':
             f"CD_tot={cd_active_val*1e4:.1f} cts (CDi={(cdi_fourier_val if induced_drag_objective=='fourier' else cd_trefftz_val)*1e4:.1f}, CDprof={cd_profile_val*1e4:.1f}, CDwave={cd_wave_val*1e4:.1f})\n"
             f"D_tot={d_total_val:.1f} N | Λ_qc_max={max_qc_sw_deg:.1f}° | Λ_0.5_max={max_hc_sw_deg:.1f}° | min(Mdd-M)={min_mdd_margin:+.4f}\n"
             f"{viscous_hud_str}"
+            f"{wake_hud_str}"
             f"{geonic_hud_str}"
             f"{dv_str}\n"
             f"{elev_str}Pitch={np.degrees(pitch_val):.1f}°  Pitch_ss={np.degrees(pitch_ss_val):.1f}°{pitch_neg1g_str}\n"
@@ -3420,6 +3635,8 @@ if __name__ == '__main__':
                     cache_dict['d_separation_cruise'] = float(np.asarray(jax_sim[D_separation_cruise]).flatten()[0])
                     cache_dict['di_trefftz_reconciled'] = float(np.asarray(jax_sim[Di_Trefftz_reconciled]).flatten()[0])
                     cache_dict['cdi_trefftz_reconciled'] = float(np.asarray(jax_sim[CDi_Trefftz_reconciled]).flatten()[0])
+                    cache_dict['di_trefftz_stall'] = float(np.asarray(jax_sim[Di_Trefftz_stall]).flatten()[0])
+                    cache_dict['cdi_trefftz_stall'] = float(np.asarray(jax_sim[CDi_Trefftz_stall]).flatten()[0])
                     cache_dict['k_reconcile_cruise'] = float(np.asarray(jax_sim[k_reconcile_cruise]).flatten()[0])
                     cache_dict['res_wake_lift_cruise'] = float(np.asarray(jax_sim[res_wake_lift_cruise]).flatten()[0])
                     cache_dict['mu_w_stall_cruise'] = np.asarray(jax_sim[mu_w_stall_cruise])
@@ -3427,6 +3644,15 @@ if __name__ == '__main__':
                     cache_dict['panel_forces_corr_ss'] = np.asarray(jax_sim[panel_forces_corr_ss])
                     cache_dict['static_margin_inviscid'] = float(np.asarray(jax_sim[static_margin_inviscid]).flatten()[0])
                     cache_dict['static_margin_corrected'] = float(np.asarray(jax_sim[static_margin]).flatten()[0])
+
+                cache_dict['include_wake_load_penalty'] = bool(include_wake_load_penalty)
+                cache_dict['wake_load_penalty_weight'] = float(wake_load_penalty_weight)
+                cache_dict['wake_load_penalty_threshold'] = float(wake_load_penalty_threshold)
+                cache_dict['wake_load_mismatch'] = float(np.asarray(jax_sim[wake_load_mismatch]).flatten()[0])
+                cache_dict['excess_mismatch'] = float(np.asarray(jax_sim[excess_mismatch]).flatten()[0])
+                cache_dict['k_wake_scale'] = float(np.asarray(jax_sim[k_wake_scale]).flatten()[0])
+                cache_dict['d_wake_load_penalty'] = float(np.asarray(jax_sim[D_wake_load_penalty]).flatten()[0])
+                cache_dict['cd_wake_load_penalty'] = float(np.asarray(jax_sim[CD_wake_load_penalty]).flatten()[0])
 
                 np.savez_compressed(cache_file_opt, **cache_dict)
                 print(f"Cached panel telemetry saved to: {cache_file_opt}")
@@ -3488,7 +3714,19 @@ if __name__ == '__main__':
                         'panel_forces_corr_ss': cache_dict['panel_forces_corr_ss'],
                         'static_margin_inviscid': cache_dict['static_margin_inviscid'],
                         'static_margin_corrected': cache_dict['static_margin_corrected'],
+                        'di_trefftz_stall': cache_dict['di_trefftz_stall'],
+                        'cdi_trefftz_stall': cache_dict['cdi_trefftz_stall'],
                     })
+                stall_telemetry.update({
+                    'include_wake_load_penalty': bool(include_wake_load_penalty),
+                    'wake_load_penalty_weight': float(wake_load_penalty_weight),
+                    'wake_load_penalty_threshold': float(wake_load_penalty_threshold),
+                    'wake_load_mismatch': float(np.asarray(jax_sim[wake_load_mismatch]).flatten()[0]),
+                    'excess_mismatch': float(np.asarray(jax_sim[excess_mismatch]).flatten()[0]),
+                    'k_wake_scale': float(np.asarray(jax_sim[k_wake_scale]).flatten()[0]),
+                    'd_wake_load_penalty': float(np.asarray(jax_sim[D_wake_load_penalty]).flatten()[0]),
+                    'cd_wake_load_penalty': float(np.asarray(jax_sim[CD_wake_load_penalty]).flatten()[0]),
+                })
                 np.savez_compressed(stall_cache_opt, **stall_telemetry)
                 print(f"Cached stall closure telemetry saved to: {stall_cache_opt}")
 
