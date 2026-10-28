@@ -21,13 +21,17 @@ import sys
 import glob
 import shutil
 from typing import Dict, Any, Optional, Tuple, List
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from matplotlib.colors import Normalize
 from scipy.interpolate import CubicSpline
 
-REPO_ROOT = '/home/andrew/optimization/lsdo_geo'
+# Robust NumPy 2.0+ trapezoidal integration compatibility
+_trapezoid = getattr(np, 'trapezoid', getattr(np, 'trapz', None))
+
+REPO_ROOT = str(Path(__file__).resolve().parents[4])
 if os.path.exists(REPO_ROOT) and REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
@@ -469,8 +473,8 @@ def process_stall_closure_fields(data: Dict[str, Any]) -> Dict[str, Any]:
         proc['l_prime_inv'] = l_prime_inv
         proc['l_prime_corr'] = l_prime_corr
         proc['delta_l_prime'] = np.maximum(l_prime_inv - l_prime_corr, 0.0)
-        proc['l_total_inv'] = 2.0 * float(np.trapz(l_prime_inv, y_fine))
-        proc['l_total_corr'] = 2.0 * float(np.trapz(l_prime_corr, y_fine))
+        proc['l_total_inv'] = 2.0 * float(_trapezoid(l_prime_inv, y_fine))
+        proc['l_total_corr'] = 2.0 * float(_trapezoid(l_prime_corr, y_fine))
 
         proc['fz_ss_inv'] = fz_prime_ss_inv
         proc['fz_ss_corr'] = fz_prime_ss_corr
@@ -554,8 +558,8 @@ def process_stall_closure_fields(data: Dict[str, Any]) -> Dict[str, Any]:
         proc['l_prime_inv'] = l_inv
         proc['l_prime_corr'] = l_corr
         proc['delta_l_prime'] = l_inv - l_corr
-        proc['l_total_inv'] = 2.0 * float(np.trapz(l_inv, y_fine))
-        proc['l_total_corr'] = 2.0 * float(np.trapz(l_corr, y_fine))
+        proc['l_total_inv'] = 2.0 * float(_trapezoid(l_inv, y_fine))
+        proc['l_total_corr'] = 2.0 * float(_trapezoid(l_corr, y_fine))
         proc['fz_ss_inv'] = l_inv * 2.5
         proc['fz_ss_corr'] = l_corr * 2.5
         proc['delta_fz_ss'] = proc['delta_l_prime'] * 2.5
@@ -906,6 +910,12 @@ def plot_stall_closure_diagnostics(
         print(f"Saved stall closure telemetry cache to: {output_npz}")
 
     generate_stall_closure_figure(proc, output_fig)
+    # Also save/copy as stall_closure.png for convenient reference
+    alias_fig = os.path.join(output_folder, 'stall_closure.png')
+    try:
+        shutil.copyfile(output_fig, alias_fig)
+    except Exception:
+        pass
 
     art_target = artifact_dir or (DEFAULT_ARTIFACT_DIR if os.path.exists(DEFAULT_ARTIFACT_DIR) else None)
     if art_target and os.path.exists(art_target):

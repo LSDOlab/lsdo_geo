@@ -979,25 +979,34 @@ if formulation == 'ar_area':
         warm_start_npz = os.path.join(warm_start_folder, 'lift_and_moment_data.npz')
         if os.path.exists(warm_start_npz):
             prior_data = np.load(warm_start_npz, allow_pickle=True)
-            prior_chord_dvs = np.asarray(prior_data['dv_opt_chord_stretch_dvs'])
-            if prior_chord_dvs.shape == chord_stretch_dvs.shape:
-                print(f"Warm starting design variables from {warm_start_npz}...")
-                chord_stretch_dvs.value = prior_chord_dvs
-                sweep_dvs.value = np.asarray(prior_data['dv_opt_sweep_dvs'])
-                thickness_stretch_dvs.value = np.asarray(prior_data['dv_opt_thickness_stretch_dvs'])
-                twist_dvs.value = np.asarray(prior_data['dv_opt_twist_dvs'])
-                ttop_dvs.value = np.asarray(prior_data['dv_opt_ttop_dvs'])
-                tweb_dvs.value = np.asarray(prior_data['dv_opt_tweb_dvs'])
-                if include_camber and 'dv_opt_camber_dvs' in prior_data:
-                    camber_dvs.value = np.asarray(prior_data['dv_opt_camber_dvs'])
-                if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
-                    thickness_shape_dvs.value = np.asarray(prior_data['dv_opt_thickness_shape_dvs'])
-            else:
-                print(f"Warm start resolution mismatch (prior: {prior_chord_dvs.shape}, current: {chord_stretch_dvs.shape}), skipping station DVs...")
-            span_stretch_dv.value = np.asarray(prior_data['dv_opt_span_stretch_dv']).reshape((1,))
-            pitch.value = float(np.asarray(prior_data['dv_opt_pitch']).flatten()[0])
-            pitch_ss.value = float(np.asarray(prior_data['dv_opt_pitch_ss']).flatten()[0])
-            if 'dv_opt_misc_cg' in prior_data:
+            if 'dv_opt_taper_control_points' in prior_data:
+                prior_taper = np.asarray(prior_data['dv_opt_taper_control_points'])
+                if prior_taper.shape == taper_control_points.shape:
+                    print(f"Warm starting design variables from {warm_start_npz}...")
+                    taper_control_points.value = prior_taper
+                    if 'dv_opt_aspect_ratio' in prior_data:
+                        aspect_ratio.value = np.asarray(prior_data['dv_opt_aspect_ratio'])
+                    if 'dv_opt_sweep_angle_control_points' in prior_data:
+                        sweep_angle_control_points.value = np.asarray(prior_data['dv_opt_sweep_angle_control_points'])
+                    if 'dv_opt_tc_target_control_points' in prior_data:
+                        tc_target_control_points.value = np.asarray(prior_data['dv_opt_tc_target_control_points'])
+                    if 'dv_opt_twist_dvs' in prior_data:
+                        twist_dvs.value = np.asarray(prior_data['dv_opt_twist_dvs'])
+                    if 'dv_opt_ttop_dvs' in prior_data:
+                        ttop_dvs.value = np.asarray(prior_data['dv_opt_ttop_dvs'])
+                    if 'dv_opt_tweb_dvs' in prior_data:
+                        tweb_dvs.value = np.asarray(prior_data['dv_opt_tweb_dvs'])
+                    if include_camber and 'dv_opt_camber_dvs' in prior_data:
+                        camber_dvs.value = np.asarray(prior_data['dv_opt_camber_dvs'])
+                    if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
+                        thickness_shape_dvs.value = np.asarray(prior_data['dv_opt_thickness_shape_dvs'])
+                else:
+                    print(f"Warm start resolution mismatch (prior: {prior_taper.shape}, current: {taper_control_points.shape}), skipping station DVs...")
+            if 'dv_opt_pitch' in prior_data:
+                pitch.value = float(np.asarray(prior_data['dv_opt_pitch']).flatten()[0])
+            if 'dv_opt_pitch_ss' in prior_data:
+                pitch_ss.value = float(np.asarray(prior_data['dv_opt_pitch_ss']).flatten()[0])
+            if 'dv_opt_misc_cg' in prior_data and use_geonic:
                 misc_cg.value = float(np.asarray(prior_data['dv_opt_misc_cg']).flatten()[0])
             if use_geonic and geonic_payload_mode in {'oversized', 'both'} and 'dv_opt_payload_center_x' in prior_data:
                 payload_center_x.value = float(np.asarray(prior_data['dv_opt_payload_center_x']).flatten()[0])
@@ -1124,25 +1133,29 @@ elif formulation == 'chord_span':
         warm_start_npz = os.path.join(warm_start_folder, 'lift_and_moment_data.npz')
         if os.path.exists(warm_start_npz):
             prior_data = np.load(warm_start_npz, allow_pickle=True)
-            prior_chord_dvs = np.asarray(prior_data['dv_opt_chord_stretch_dvs'])
-            if prior_chord_dvs.shape == chord_stretch_dvs.shape:
-                print(f"Warm starting design variables from {warm_start_npz}...")
-                chord_stretch_dvs.value = prior_chord_dvs
-                sweep_dvs.value = np.asarray(prior_data['dv_opt_sweep_dvs'])
-                thickness_stretch_dvs.value = np.asarray(prior_data['dv_opt_thickness_stretch_dvs'])
-                twist_dvs.value = np.asarray(prior_data['dv_opt_twist_dvs'])
-                ttop_dvs.value = np.asarray(prior_data['dv_opt_ttop_dvs'])
-                tweb_dvs.value = np.asarray(prior_data['dv_opt_tweb_dvs'])
-                if include_camber and 'dv_opt_camber_dvs' in prior_data:
-                    camber_dvs.value = np.asarray(prior_data['dv_opt_camber_dvs'])
-                if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
-                    thickness_shape_dvs.value = np.asarray(prior_data['dv_opt_thickness_shape_dvs'])
-            else:
-                print(f"Warm start resolution mismatch (prior: {prior_chord_dvs.shape}, current: {chord_stretch_dvs.shape}), skipping station DVs...")
-            span_stretch_dv.value = np.asarray(prior_data['dv_opt_span_stretch_dv']).reshape((1,))
-            pitch.value = float(np.asarray(prior_data['dv_opt_pitch']).flatten()[0])
-            pitch_ss.value = float(np.asarray(prior_data['dv_opt_pitch_ss']).flatten()[0])
-            if 'dv_opt_misc_cg' in prior_data:
+            if 'dv_opt_chord_stretch_dvs' in prior_data:
+                prior_chord_dvs = np.asarray(prior_data['dv_opt_chord_stretch_dvs'])
+                if prior_chord_dvs.shape == chord_stretch_dvs.shape:
+                    print(f"Warm starting design variables from {warm_start_npz}...")
+                    chord_stretch_dvs.value = prior_chord_dvs
+                    sweep_dvs.value = np.asarray(prior_data['dv_opt_sweep_dvs'])
+                    thickness_stretch_dvs.value = np.asarray(prior_data['dv_opt_thickness_stretch_dvs'])
+                    twist_dvs.value = np.asarray(prior_data['dv_opt_twist_dvs'])
+                    ttop_dvs.value = np.asarray(prior_data['dv_opt_ttop_dvs'])
+                    tweb_dvs.value = np.asarray(prior_data['dv_opt_tweb_dvs'])
+                    if include_camber and 'dv_opt_camber_dvs' in prior_data:
+                        camber_dvs.value = np.asarray(prior_data['dv_opt_camber_dvs'])
+                    if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
+                        thickness_shape_dvs.value = np.asarray(prior_data['dv_opt_thickness_shape_dvs'])
+                else:
+                    print(f"Warm start resolution mismatch (prior: {prior_chord_dvs.shape}, current: {chord_stretch_dvs.shape}), skipping station DVs...")
+            if 'dv_opt_span_stretch_dv' in prior_data:
+                span_stretch_dv.value = np.asarray(prior_data['dv_opt_span_stretch_dv']).reshape((1,))
+            if 'dv_opt_pitch' in prior_data:
+                pitch.value = float(np.asarray(prior_data['dv_opt_pitch']).flatten()[0])
+            if 'dv_opt_pitch_ss' in prior_data:
+                pitch_ss.value = float(np.asarray(prior_data['dv_opt_pitch_ss']).flatten()[0])
+            if 'dv_opt_misc_cg' in prior_data and use_geonic:
                 misc_cg.value = float(np.asarray(prior_data['dv_opt_misc_cg']).flatten()[0])
             if use_geonic and geonic_payload_mode in {'oversized', 'both'} and 'dv_opt_payload_center_x' in prior_data:
                 payload_center_x.value = float(np.asarray(prior_data['dv_opt_payload_center_x']).flatten()[0])
@@ -3105,6 +3118,8 @@ if __name__ == '__main__':
     num_iterations = x_history.shape[0]
     if num_iterations == 0:
         print(f"No optimization history found in {latest_folder}. Skipping post-processing plot rendering.")
+        # Ensure jax_sim is evaluated before extracting outputs
+        jax_sim.run()
         # Print final viscous summary for diagnostic and testing purposes
         cd_visc_final = float(np.asarray(jax_sim[CD_viscous]).flatten()[0])
         d_visc_final = float(np.asarray(jax_sim[D_viscous]).flatten()[0])

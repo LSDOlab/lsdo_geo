@@ -22,6 +22,8 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
+_trapezoid = getattr(np, 'trapezoid', getattr(np, 'trapz', None))
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SHOWCASE_DIR = REPO_ROOT / "examples" / "showcase_examples" / "rectangular_wing"
 if str(SHOWCASE_DIR) not in sys.path:
@@ -167,8 +169,8 @@ def collect_and_plot(artifact_dir=None):
         p_curve = _curve_on_grid(yp, dp, b, eta, pressure_lift)
         diff = p_curve - w_curve
 
-        denom = b * np.trapz(p_curve**2, eta)
-        l2_norm = float(np.sqrt(b * np.trapz(diff**2, eta) / denom))
+        denom = b * _trapezoid(p_curve**2, eta)
+        l2_norm = float(np.sqrt(b * _trapezoid(diff**2, eta) / denom))
         max_norm = float(np.max(np.abs(diff)) / np.max(np.abs(p_curve)))
 
         results[case_name] = {
@@ -221,7 +223,7 @@ def collect_and_plot(artifact_dir=None):
     if "35S_50C" in results:
         ref_p = results["35S_50C"]["pressure"]
         eta = results["35S_50C"]["eta"]
-        p_tot = np.trapz(ref_p, eta)
+        p_tot = _trapezoid(ref_p, eta)
         ell = (4.0 * p_tot / np.pi) * np.sqrt(np.clip(1.0 - eta**2, 0.0, 1.0))
         ax1.plot(eta, ell, "k--", linewidth=1.5, alpha=0.6, label="Elliptical Ref")
 
