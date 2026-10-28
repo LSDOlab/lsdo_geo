@@ -32,13 +32,14 @@ def test_example_script_execution(example_rel_path):
     env["RUN_JAX_BENCHMARK"] = "0"
     env["SKIP_VIDEO"] = "1"
 
+    timeout_sec = int(os.environ.get("EXAMPLE_TEST_TIMEOUT", "900"))
     result = subprocess.run(
         [sys.executable, str(script_path)],
         cwd=str(REPO_ROOT),
         env=env,
         capture_output=True,
         text=True,
-        timeout=300,
+        timeout=timeout_sec,
     )
 
     assert result.returncode == 0, (

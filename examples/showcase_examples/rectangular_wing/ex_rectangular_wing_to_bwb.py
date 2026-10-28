@@ -86,8 +86,8 @@ elif 'BWB_NUM_SECTIONS' in os.environ:
 
 # b) Chordwise panel count around airfoil ring (e.g., 20, 40, 50, 60)
 #    Controls chordwise discretization around upper/lower airfoil OML.
-num_chordwise_panels: int = 60
-# num_chordwise_panels: int = 50
+# num_chordwise_panels: int = 60
+num_chordwise_panels: int = 50
 # num_chordwise_panels: int = 30
 if 'BWB_NUM_CHORDWISE_PANELS' in os.environ:
     num_chordwise_panels = int(os.environ['BWB_NUM_CHORDWISE_PANELS'])
@@ -96,8 +96,8 @@ elif 'BWB_NUM_CHORD' in os.environ:
 
 # c) Spanwise design variable stations per semi-span (e.g., 5, 6, 8)
 #    Controls number of chord, sweep, twist, camber, and thickness FFD control stations.
-num_spanwise_dvs: int = 6
-# num_spanwise_dvs: int = 5
+# num_spanwise_dvs: int = 6
+num_spanwise_dvs: int = 5
 if 'BWB_NUM_DVS' in os.environ:
     num_spanwise_dvs = int(os.environ['BWB_NUM_DVS'])
 elif 'BWB_NUM_STATIONS' in os.environ:
