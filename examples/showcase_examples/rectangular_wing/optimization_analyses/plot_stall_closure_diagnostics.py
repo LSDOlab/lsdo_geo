@@ -344,18 +344,17 @@ def process_stall_closure_fields(data: Dict[str, Any]) -> Dict[str, Any]:
     proc['f_ss'] = f_ss
     proc['f_min_ss'] = float(data.get('f_attached_min_ss', np.min(f_ss)))
 
-    # Span coordinates for f
-    n_mesh = len(f_cr)
-    proc['eta_stations'] = np.linspace(0.05, 0.98, n_mesh)
-    proc['y_stations'] = proc['eta_stations'] * y_max
-
     # Sectional lift distributions and 2.5g pull-up loads from panel forces
     pf_inv_cr = data.get('panel_forces_right_cruise', None)
     pf_corr_cr = data.get('panel_forces_corr_cruise', None)
     pf_inv_ss = data.get('panel_forces_right_ss', None)
     pf_corr_ss = data.get('panel_forces_corr_ss', None)
 
-    if pf_inv_cr is not None and pts_right is not None:
+    y_centers = None
+    b_tip = y_max
+    main_stations = None
+
+    if pts_right is not None and pts_right.ndim == 2:
         y_round = np.round(pts_right[:, 1], 4)
         y_unique, counts = np.unique(y_round, return_counts=True)
         max_count = int(np.max(counts))
@@ -365,7 +364,21 @@ def process_stall_closure_fields(data: Dict[str, Any]) -> Dict[str, Any]:
         if len(main_stations) < 3:
             main_stations = y_unique[counts >= max(max_count // 2, 2)]
 
-        y_centers = []
+        y_centers = np.array([float(np.mean(pts_right[y_round == y_val, 1])) for y_val in main_stations])
+        b_tip = float(np.max(pts_right[:, 1]))
+        if b_tip <= y_centers[-1]:
+            b_tip = float(y_centers[-1]) * 1.02
+
+    # Span coordinates for f - map to authentic mesh station spanwise locations
+    n_mesh = len(f_cr)
+    if y_centers is not None and len(y_centers) == n_mesh:
+        proc['y_stations'] = y_centers
+        proc['eta_stations'] = y_centers / b_tip
+    else:
+        proc['eta_stations'] = np.linspace(0.04, 0.98, n_mesh)
+        proc['y_stations'] = proc['eta_stations'] * b_tip
+
+    if pf_inv_cr is not None and pts_right is not None and main_stations is not None:
         L_c_inv = []
         L_c_corr = []
         L_ss_inv = []
@@ -378,7 +391,6 @@ def process_stall_closure_fields(data: Dict[str, Any]) -> Dict[str, Any]:
 
         for y_val in main_stations:
             mask = (y_round == y_val)
-            y_centers.append(float(np.mean(pts_right[mask, 1])))
             L_c_inv.append(float(np.sum(fz_inv_c[mask])))
             L_c_corr.append(float(np.sum(fz_corr_c[mask])))
             L_ss_inv.append(float(np.sum(fz_inv_s[mask])))
@@ -391,11 +403,6 @@ def process_stall_closure_fields(data: Dict[str, Any]) -> Dict[str, Any]:
             L_c_corr[-1] += float(np.sum(fz_corr_c[tip_mask]))
             L_ss_inv[-1] += float(np.sum(fz_inv_s[tip_mask]))
             L_ss_corr[-1] += float(np.sum(fz_corr_s[tip_mask]))
-
-        y_centers = np.array(y_centers)
-        b_tip = float(np.max(pts_right[:, 1]))
-        if b_tip <= y_centers[-1]:
-            b_tip = float(y_centers[-1]) * 1.02
 
         # Exact strip boundaries and widths dy
         bounds = np.zeros(len(y_centers) + 1)
@@ -560,20 +567,17 @@ def process_stall_closure_fields(data: Dict[str, Any]) -> Dict[str, Any]:
     if mu_w_st is not None and mu_w_inv is not None:
         mu_st_flat = np.asarray(mu_w_st).flatten()
         mu_inv_flat = np.asarray(mu_w_inv).flatten()
-        # Full TE in VortexAD contains both wing halves (e.g. 28 edges = 14 right + 14 left).
+        # Full TE in VortexAD contains both symmetric wing halves (left + right).
         # We plot the right half-span trailing edge (root to tip).
-        if len(mu_st_flat) == 28:
-            n_edges = 14
-            mu_st_right = np.abs(mu_st_flat[:14])
-            mu_inv_right = np.abs(mu_inv_flat[:14])
-        else:
-            n_edges = len(mu_st_flat)
-            mu_st_right = np.abs(mu_st_flat)
-            mu_inv_right = np.abs(mu_inv_flat[:n_edges])
+        n_edges = len(mu_st_flat) // 2
+        mu_st_right = np.abs(mu_st_flat[:n_edges])
+        mu_inv_right = np.abs(mu_inv_flat[:n_edges])
 
         wake_eta = data.get('final_wake_eta', None)
         if wake_eta is not None and len(wake_eta) == n_edges:
             proc['wake_eta'] = np.asarray(wake_eta)
+        elif y_centers is not None and len(y_centers) == n_edges:
+            proc['wake_eta'] = y_centers / b_tip
         else:
             proc['wake_eta'] = np.linspace(0.04, 0.98, n_edges)
         proc['mu_w_inv'] = mu_inv_right
@@ -772,7 +776,7 @@ def generate_stall_closure_figure(
     # Panel E: Total Aircraft Drag Breakdown & Separation Profile Drag Rise
     # -------------------------------------------------------------------------
     ax5 = fig.add_subplot(gs[2, 0])
-    cats = ['Attached\nBaseline', 'Stall-Closed\nState']
+    cats = ['Cruise Baseline\n(Attached Flow)', 'Cruise State\n(Stall-Closed)']
     di_base = proc['di_trefftz'] / 1e3
     di_rec = proc['di_reconciled'] / 1e3
     d_visc = proc['d_viscous'] / 1e3
@@ -796,16 +800,23 @@ def generate_stall_closure_figure(
     total_closed = di_rec + d_visc + d_wave + d_sep
     ax5.text(x_pos[0], total_base + 2.0, f"{total_base:.1f} kN", ha='center', fontweight='bold', fontsize=9.5)
     if d_sep > 0.05:
-        ax5.text(x_pos[1], total_closed + 2.0, f"{total_closed:.1f} kN\n(+{d_sep:.1f} kN sep)", ha='center', fontweight='bold', fontsize=9.5, color=c_corr)
+        ax5.text(x_pos[1], total_closed + 2.0, f"{total_closed:.1f} kN\n(+{d_sep:.1f} kN sep, Cruise)", ha='center', fontweight='bold', fontsize=9.5, color=c_corr)
     else:
         ax5.text(x_pos[1], total_closed + 2.0, f"{total_closed:.1f} kN\n(Attached, $f \\approx 1.0$)", ha='center', fontweight='bold', fontsize=9.5, color=c_att)
 
     ax5.set_xticks(x_pos)
     ax5.set_xticklabels(cats, fontweight='bold')
-    ax5.set_ylabel(r'Total Aircraft Drag Force [kN]')
+    ax5.set_ylabel(r'Cruise Aircraft Drag Force [kN]')
     ax5.set_ylim(0.0, max(total_base, total_closed) * 1.50)
-    ax5.set_title(r'(E) Aircraft Drag Decomposition & Post-Stall Drag Rise', fontweight='bold', pad=8)
+    ax5.set_title(r'(E) Cruise (1.0g) Drag Breakdown & Separation Profile Drag', fontweight='bold', pad=8)
     ax5.legend(loc='upper center', bbox_to_anchor=(0.5, 0.98), framealpha=0.92, ncol=2, fontsize=8.5)
+    ax5.text(
+        0.5, -0.22,
+        r"$\mathbf{Note:}$ Drag breakdown is for Cruise (1.0g Node 0), where flow is mostly attached ($f_{\min} = " + f"{proc['f_min_cruise']:.3f}$" + r", $D_{\mathrm{sep}} = " + f"{d_sep:.2f}$" + r"\,\mathrm{kN}$ / 1.5% drag)." + "\n" +
+        r"Severe post-stall separation ($f_{\min} = " + f"{proc['f_min_ss']:.3f}$" + r") occurs during the 2.5g pull-up maneuver shown in (A) and (F).",
+        transform=ax5.transAxes, ha='center', va='top', fontsize=8.2, color='#333333',
+        bbox=dict(boxstyle='round,pad=0.35', facecolor='#f8f9fa', edgecolor='#cccccc', alpha=0.9)
+    )
 
     # -------------------------------------------------------------------------
     # Panel F: Structural Pull-Up Maneuver (2.5g) Sectional Force & Relief

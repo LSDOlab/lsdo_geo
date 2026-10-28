@@ -71,7 +71,7 @@ recorder.start()
 #   'chord_span' -> Direct chord stretch, sweep translation, span stretch, twist, camber/thickness shape DVs
 #   'ar_area'    -> Regularized cubic B-spline taper ratios, aspect ratio, Galerkin sweep weak-form, planform area target
 ParamerizationType = Literal['ar_area', 'chord_span']
-formulation: ParamerizationType = 'chord_span'  # Options: 'chord_span' or 'ar_area'
+formulation: ParamerizationType = 'ar_area'  # Options: 'chord_span' or 'ar_area'
 formulation = os.environ.get('BWB_FORMULATION', formulation)
 
 # 2. Analysis mesh and design variable discretization toggles:
@@ -87,7 +87,7 @@ elif 'BWB_NUM_SECTIONS' in os.environ:
 # b) Chordwise panel count around airfoil ring (e.g., 20, 40, 50, 60)
 #    Controls chordwise discretization around upper/lower airfoil OML.
 # num_chordwise_panels: int = 60
-num_chordwise_panels: int = 30
+num_chordwise_panels: int = 50
 if 'BWB_NUM_CHORDWISE_PANELS' in os.environ:
     num_chordwise_panels = int(os.environ['BWB_NUM_CHORDWISE_PANELS'])
 elif 'BWB_NUM_CHORD' in os.environ:
@@ -124,7 +124,7 @@ else:
 #   'oversized' -> Constrain TCP0 oversized box (8 sample points, payload_center_x DV, 0.2 m buffer)
 #   'pallets'   -> Constrain TCP0 6-pallet stack (32 sample points, pallet_stack_center_x DV, 0.2 m buffer)
 #   'both'      -> Constrain both payload cases (40-point batch, equal CG consistency constraint)
-geonic_payload_mode: str = 'both'  # Options: 'none', 'oversized', 'pallets', 'both'
+geonic_payload_mode: str = 'none'  # Options: 'none', 'oversized', 'pallets', 'both'
 geonic_payload_mode = os.environ.get('GEONIC_PAYLOAD_MODE', geonic_payload_mode)
 if 'GEONIC_PAYLOAD_MODE' not in os.environ and 'USE_GEONIC' in os.environ:
     geonic_payload_mode = 'oversized' if str(os.environ['USE_GEONIC']).strip() == '1' else 'none'
@@ -139,8 +139,8 @@ geonic_method = os.environ.get('GEONIC_METHOD', os.environ.get('GEONIC_MESH', ge
 # 4. Viscous drag mode:
 #   'ibl'          -> Integral boundary layer drag model & attachment constraint H_max <= 2.4
 #   'constant_cd0' -> Legacy fixed baseline profile drag (CD0_base = 0.0080)
-# viscous_drag_mode: Literal['ibl', 'constant_cd0'] = 'ibl'  # Options: 'ibl' or 'constant_cd0'
-viscous_drag_mode: Literal['ibl', 'constant_cd0'] = 'constant_cd0'  # Options: 'ibl' or 'constant_cd0'
+viscous_drag_mode: Literal['ibl', 'constant_cd0'] = 'ibl'  # Options: 'ibl' or 'constant_cd0'
+# viscous_drag_mode: Literal['ibl', 'constant_cd0'] = 'constant_cd0'  # Options: 'ibl' or 'constant_cd0'
 viscous_drag_mode = os.environ.get('VISCOUS_DRAG_MODE', viscous_drag_mode)
 
 # 5. Sizing condition toggle: -1.0g push-down maneuver
@@ -157,12 +157,12 @@ box_height_factor = float(os.environ.get('BOX_HEIGHT_FACTOR', box_height_factor)
 
 # 6. Airfoil shape & control surface options:
 include_camber: bool = True           # Mean camber line deformation (3 rows of control points)
-include_thickness_shape: bool = False  # Airfoil thickness distribution deformation
+include_thickness_shape: bool = True  # Airfoil thickness distribution deformation
 include_te_thickness: bool = False    # True: blunt TE (5 rows); False: pinned sharp TE (4 rows)
 include_elevator: bool = False        # Trailing-edge elevator deflection DV
 
 # 7. Aerodynamics and drag formulation:
-induced_drag_objective: Literal['trefftz', 'fourier', 'mixed'] = 'trefftz'  # Options: 'trefftz', 'fourier', 'mixed'
+induced_drag_objective: Literal['trefftz', 'fourier', 'mixed'] = 'mixed'  # Options: 'trefftz', 'fourier', 'mixed'
 include_cl_polar: bool = False        # Apply quadratic drag polar bucket k_polar * (Cl - Cl_ideal)^2
 include_stall_drag: bool = True       # Apply smooth aerodynamic stall penalty when Cl > Cl_crit
 
@@ -174,7 +174,7 @@ stall_model = os.environ.get('STALL_MODEL', stall_model)
 if stall_model not in ('cl', 'stratford_closure'):
     raise ValueError(f"Unknown stall_model: '{stall_model}'. Must be 'cl' or 'stratford_closure'.")
 
-enforce_stratford_constraint: bool = False
+enforce_stratford_constraint: bool = True
 if 'ENFORCE_STRATFORD_CONSTRAINT' in os.environ:
     enforce_stratford_constraint = os.environ.get('ENFORCE_STRATFORD_CONSTRAINT', '1').strip() == '1'
 
@@ -183,7 +183,7 @@ scale_factor: float = 7.5             # Scale factor (7.5 for 50 m full-scale BW
 warm_start: bool = False              # Warm start DVs from prior run
 
 # 9. Diagnostics & pre-flight verification:
-run_pre_diagnostics: bool = True      # Run initial JAX evaluation and print comprehensive diagnostic report before optimization
+run_pre_diagnostics: bool = False      # Run initial JAX evaluation and print comprehensive diagnostic report before optimization
 # =============================================================================
 
 # Validate viscous drag mode
@@ -3342,6 +3342,9 @@ if __name__ == '__main__':
                     induced_drag_objective=str(induced_drag_objective),
                     sref_val=sref_val_opt,
                     ar_val=ar_val_opt,
+                    mach_cruise=float(cruise_cond['mach']),
+                    q_cruise=float(cruise_cond['dynamic_pressure_Pa']),
+                    altitude_m=float(cruise_cond['altitude_m']),
                     formulation=str(formulation),
                     resolution=str(resolution),
                     include_camber=bool(include_camber),
@@ -3510,8 +3513,9 @@ if __name__ == '__main__':
                     ar_val=ar_val_opt,
                     cd_wave_val=cd_wave_val_opt,
                     d_wave_val=d_wave_val_opt,
-                    mach_cruise=0.70,
+                    mach_cruise=float(cruise_cond['mach']),
                     q_cruise=float(cruise_cond['dynamic_pressure_Pa']),
+                    altitude_m=float(cruise_cond['altitude_m']),
                 )
                 print(f"Cached wave drag telemetry saved to: {wave_cache_opt}")
             except Exception as e:
@@ -3725,9 +3729,10 @@ if __name__ == '__main__':
     print(f"============================================================\n")
     
     import shutil
-    current_conv_id = '0ac41e2d-0335-41d9-9f48-d6791df931f1'
+    current_conv_id = 'ae98c491-cb6a-4455-8a09-a0df739801c2'
     candidate_ids = [
         current_conv_id,
+        '0ac41e2d-0335-41d9-9f48-d6791df931f1',
         'ce0e9874-a39a-41db-b481-5008cc744a13',
         '0c0a47e5-2e16-41bb-9139-10357c23c5ee',
         '3256dd7c-d4c8-4c73-887d-131361f9d0c3',
@@ -3814,6 +3819,9 @@ if __name__ == '__main__':
             jax_sim=jax_sim,
             main_script=sys.modules[__name__],
             artifact_dir=artifact_dir,
+            mach_cruise=float(cruise_cond['mach']),
+            q_cruise=float(cruise_cond['dynamic_pressure_Pa']),
+            altitude_m=float(cruise_cond['altitude_m']),
         )
         print("Automatic wave drag distribution analysis completed successfully.")
     except Exception as exc:

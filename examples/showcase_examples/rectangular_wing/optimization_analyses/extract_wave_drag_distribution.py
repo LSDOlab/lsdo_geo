@@ -56,12 +56,48 @@ KAPPA_A = 0.87
 LOCK_COEFFICIENT = 20.0
 LOCK_ACTIVATION_SHARPNESS = 100.0
 DELTA_M_DD_TO_CRIT = (0.1 / 80.0) ** (1.0 / 3.0)  # ~0.1077217
-Q_CRUISE_DEFAULT = 10320.72  # Pa at 30,000 ft ISA, M = 0.70
-MACH_CRUISE_DEFAULT = 0.70
+
+# Dynamic nominal cruise condition defaults from physics_models.flight_conditions
+try:
+    from physics_models.flight_conditions import (
+        get_nominal_flight_conditions,
+        CRUISE_MACH,
+        CRUISE_ALTITUDE_M,
+        CRUISE_ALTITUDE_FT,
+    )
+    _nom_cond = get_nominal_flight_conditions()
+    MACH_CRUISE_DEFAULT = float(_nom_cond['cruise']['mach'])
+    Q_CRUISE_DEFAULT = float(_nom_cond['cruise']['dynamic_pressure_Pa'])
+    ALTITUDE_M_DEFAULT = float(_nom_cond['cruise']['altitude_m'])
+except Exception:
+    MACH_CRUISE_DEFAULT = float(os.environ.get('CRUISE_MACH', 0.75))
+    ALTITUDE_M_DEFAULT = float(os.environ.get('CRUISE_ALTITUDE_M', 33000.0 * 0.3048))
+    Q_CRUISE_DEFAULT = 10316.54
 
 
-def compute_korn_lock_numpy(strip_tc, strip_sweep_halfchord, strip_cl, mach_cruise=MACH_CRUISE_DEFAULT):
+def detect_cruise_mach(strip_wave_cd, strip_M_crit, default_mach=MACH_CRUISE_DEFAULT):
+    """Detect or recover flight Mach number from strip wave drag and critical Mach data."""
+    if strip_wave_cd is not None and strip_M_crit is not None:
+        cd = np.asarray(strip_wave_cd, dtype=float).flatten()
+        mcrit = np.asarray(strip_M_crit, dtype=float).flatten()
+        # Find active drag strips where wave drag is non-negligible (> 1e-6)
+        active_mask = (cd > 1.0e-6) & np.isfinite(cd) & np.isfinite(mcrit)
+        if np.sum(active_mask) >= 3:
+            # Under Korn-Lock: cd = 20 * (delta_M_eff)^4
+            # On active strips with delta_M > 0, delta_M_eff ~ delta_M = M_inf - M_crit
+            rec_mach = mcrit[active_mask] + (cd[active_mask] / LOCK_COEFFICIENT) ** 0.25
+            median_rec = float(np.median(rec_mach))
+            for snap_m in [0.70, 0.72, 0.75, 0.78, 0.80, 0.82, 0.85]:
+                if abs(median_rec - snap_m) < 0.005:
+                    return snap_m
+            return round(median_rec, 4)
+    return default_mach
+
+
+def compute_korn_lock_numpy(strip_tc, strip_sweep_halfchord, strip_cl, mach_cruise=None):
     """Vectorized NumPy evaluation of Korn-Lock wave drag relations."""
+    if mach_cruise is None:
+        mach_cruise = MACH_CRUISE_DEFAULT
     eps_cl = 1.0e-5
     abs_cl = np.sqrt(strip_cl ** 2 + eps_cl ** 2)
     cos_lambda = np.cos(strip_sweep_halfchord)
@@ -96,12 +132,19 @@ def process_wave_drag_strips(
     local_chord_drag=None,
     dy_strip=None,
     strip_area=None,
-    mach_cruise=MACH_CRUISE_DEFAULT,
-    q_cruise=Q_CRUISE_DEFAULT,
+    mach_cruise=None,
+    q_cruise=None,
+    altitude_m=None,
     sref_val=10.0,
     b_tip=None,
 ):
     """Process strip wave drag telemetry into sectional densities and smooth spline curves."""
+    if mach_cruise is None:
+        mach_cruise = MACH_CRUISE_DEFAULT
+    if q_cruise is None:
+        q_cruise = Q_CRUISE_DEFAULT
+    if altitude_m is None:
+        altitude_m = ALTITUDE_M_DEFAULT
     num_strips = len(y_strip_pts)
     y_strip = np.asarray(y_strip_pts, dtype=float).flatten()
 
@@ -212,14 +255,34 @@ def process_wave_drag_strips(
         'tot_d_wave_total': tot_d_wave_total,
         'integrated_cd_wave': integrated_cd_wave,
         'integrated_cd_wave_counts': integrated_cd_wave * 1.0e4,
+        'mach_cruise': mach_cruise,
+        'q_cruise': q_cruise,
+        'altitude_m': altitude_m,
     }
 
 
-def plot_wave_drag_distribution(results, output_folder, run_label, sref_val, ar_val, mach_cruise=0.70, q_cruise=Q_CRUISE_DEFAULT, artifact_dir=None):
+def plot_wave_drag_distribution(
+    results,
+    output_folder,
+    run_label,
+    sref_val,
+    ar_val,
+    mach_cruise=None,
+    q_cruise=None,
+    altitude_m=None,
+    artifact_dir=None,
+):
     """Generate high-resolution diagnostic plot matching the aesthetic of lift_distribution.png."""
     y_strip = results['y_strip']
     y_fine = results['y_fine']
     b_tip = results['b_tip']
+    if mach_cruise is None:
+        mach_cruise = results.get('mach_cruise', MACH_CRUISE_DEFAULT)
+    if q_cruise is None:
+        q_cruise = results.get('q_cruise', Q_CRUISE_DEFAULT)
+    if altitude_m is None:
+        altitude_m = results.get('altitude_m', ALTITUDE_M_DEFAULT)
+    altitude_ft = altitude_m / 0.3048
 
     # Two-panel layout matching lift_and_moment_combined_analysis.png styling
     fig, (ax_drag, ax_mach) = plt.subplots(1, 2, figsize=(14, 5.8), dpi=200)
@@ -236,7 +299,7 @@ def plot_wave_drag_distribution(results, output_folder, run_label, sref_val, ar_
     fig.suptitle(
         f"Spanwise Transonic Wave Drag & Mach Divergence Analysis (Korn–Lock Model)\n"
         f"Right Half-Span: b/2 = {b_tip:.3f} m (Full b = {2*b_tip:.3f} m) | AR = {ar_val:.2f} | S_ref = {sref_val:.2f} m² | "
-        f"Flight Condition: 30,000 ft ISA (M_∞ = {mach_cruise:.2f}, q_∞ = {q_cruise:,.0f} Pa)",
+        f"Flight Condition: {altitude_ft:,.0f} ft ISA (M_∞ = {mach_cruise:.2f}, q_∞ = {q_cruise:,.0f} Pa)",
         fontsize=12, fontweight='bold', y=0.98
     )
 
@@ -347,6 +410,7 @@ def plot_wave_drag_distribution(results, output_folder, run_label, sref_val, ar_
         f"Korn–Lock Divergence Diagnostics:\n"
         f"• Technology Factor: $\\kappa_A = {KAPPA_A:.2f}$ (Conventional Supercritical)\n"
         f"• Drag Divergence Offset: $\\Delta M_{{\\text{{dd}}\\to\\text{{crit}}}} = {DELTA_M_DD_TO_CRIT:.3f}$\n"
+        f"• Flight Condition: $M_\\infty = {mach_cruise:.2f}$ ({altitude_ft:,.0f} ft ISA)\n"
         f"• Min Mach Margin $(M_{{\\text{{crit}}}} - M_\\infty)$: {min_mach_margin:+.4f}\n"
         f"• Active Drag-Rise Span Fraction: {shock_exposure_pct:.1f}% of wingspan"
     )
@@ -380,6 +444,9 @@ def extract_and_plot_wave_drag_distribution(
     main_script=None,
     artifact_dir=None,
     force_rerun=False,
+    mach_cruise=None,
+    q_cruise=None,
+    altitude_m=None,
 ):
     """Core analysis routine: extracts wave drag telemetry, processes strips, plots, and saves cache."""
     output_folder = os.path.abspath(output_folder)
@@ -389,6 +456,7 @@ def extract_and_plot_wave_drag_distribution(
 
     if artifact_dir is None:
         candidate_ids = [
+            'ae98c491-cb6a-4455-8a09-a0df739801c2',
             '0c0a47e5-2e16-41bb-9139-10357c23c5ee',
             '3256dd7c-d4c8-4c73-887d-131361f9d0c3',
             '680209fd-293d-4fa0-9f6c-ae59a72a6987',
@@ -401,8 +469,27 @@ def extract_and_plot_wave_drag_distribution(
                     artifact_dir = cand_path
                     break
 
-    mach_cruise = MACH_CRUISE_DEFAULT
-    q_cruise = Q_CRUISE_DEFAULT
+    # Check environment variable overrides if not explicitly passed
+    if mach_cruise is None:
+        env_mach = os.environ.get('CRUISE_MACH') or os.environ.get('MACH_CRUISE')
+        if env_mach:
+            try:
+                mach_cruise = float(env_mach)
+            except Exception:
+                pass
+
+    if altitude_m is None:
+        env_alt = os.environ.get('CRUISE_ALTITUDE_M')
+        if env_alt:
+            try:
+                altitude_m = float(env_alt)
+            except Exception:
+                pass
+        elif os.environ.get('CRUISE_ALTITUDE_FT'):
+            try:
+                altitude_m = float(os.environ.get('CRUISE_ALTITUDE_FT')) * 0.3048
+            except Exception:
+                pass
 
     # 1. Obtain Telemetry
     if jax_sim is not None and main_script is not None:
@@ -435,6 +522,33 @@ def extract_and_plot_wave_drag_distribution(
         except Exception:
             strip_area = None
 
+        # Dynamically extract flight conditions from main_script / jax_sim
+        if hasattr(main_script, 'cruise_cond') and isinstance(main_script.cruise_cond, dict):
+            if mach_cruise is None:
+                mach_cruise = float(main_script.cruise_cond.get('mach', MACH_CRUISE_DEFAULT))
+            if q_cruise is None:
+                q_cruise = float(main_script.cruise_cond.get('dynamic_pressure_Pa', Q_CRUISE_DEFAULT))
+            if altitude_m is None:
+                altitude_m = float(main_script.cruise_cond.get('altitude_m', ALTITUDE_M_DEFAULT))
+
+        if mach_cruise is None and hasattr(main_script, 'atm_mach_numbers'):
+            try:
+                mach_cruise = float(np.asarray(jax_sim[main_script.atm_mach_numbers]).flatten()[0])
+            except Exception:
+                pass
+
+        if q_cruise is None and hasattr(main_script, 'atm_dynamic_pressures'):
+            try:
+                q_cruise = float(np.asarray(jax_sim[main_script.atm_dynamic_pressures]).flatten()[0])
+            except Exception:
+                pass
+
+        if altitude_m is None and hasattr(main_script, 'atm_altitudes'):
+            try:
+                altitude_m = float(np.asarray(jax_sim[main_script.atm_altitudes]).flatten()[0])
+            except Exception:
+                pass
+
     elif os.path.exists(cache_file) and not force_rerun:
         print(f"Loading cached wave drag telemetry from: {cache_file}")
         data = np.load(cache_file)
@@ -452,6 +566,28 @@ def extract_and_plot_wave_drag_distribution(
         ar_val = float(data['ar_val'])
         cd_wave_val = float(data['cd_wave_val'])
         d_wave_val = float(data['d_wave_val'])
+
+        detected_m = detect_cruise_mach(strip_wave_cd, strip_M_crit, default_mach=MACH_CRUISE_DEFAULT)
+        cached_mach = float(data['mach_cruise']) if 'mach_cruise' in data else (float(data['mach']) if 'mach' in data else None)
+        if mach_cruise is None:
+            if cached_mach is not None:
+                # If cached Mach is 0.70 but detected Mach from actual data is 0.75, repair the stale label
+                if abs(cached_mach - 0.70) < 1e-4 and abs(detected_m - 0.75) < 1e-4:
+                    mach_cruise = detected_m
+                    print(f"Corrected stale cached mach_cruise ({cached_mach:.2f} -> {mach_cruise:.2f}) from strip wave drag analysis.")
+                else:
+                    mach_cruise = cached_mach
+            else:
+                mach_cruise = detected_m
+
+        if q_cruise is None:
+            if 'q_cruise' in data:
+                q_cruise = float(data['q_cruise'])
+            elif 'q_inf' in data:
+                q_cruise = float(data['q_inf'])
+
+        if altitude_m is None and 'altitude_m' in data:
+            altitude_m = float(data['altitude_m'])
 
     elif os.path.exists(shared_cache_file) and not force_rerun:
         print(f"Loading aerodynamic telemetry from: {shared_cache_file}")
@@ -501,8 +637,33 @@ def extract_and_plot_wave_drag_distribution(
                 local_chord_drag = None
                 dy_strip = None
                 strip_area = None
+
+                if hasattr(main_script, 'cruise_cond') and isinstance(main_script.cruise_cond, dict):
+                    if mach_cruise is None:
+                        mach_cruise = float(main_script.cruise_cond.get('mach', MACH_CRUISE_DEFAULT))
+                    if q_cruise is None:
+                        q_cruise = float(main_script.cruise_cond.get('dynamic_pressure_Pa', Q_CRUISE_DEFAULT))
+                    if altitude_m is None:
+                        altitude_m = float(main_script.cruise_cond.get('altitude_m', ALTITUDE_M_DEFAULT))
             else:
                 raise FileNotFoundError(f"Cannot reconstruct strip wave drag without x.out or complete cache in {output_folder}")
+
+        if mach_cruise is None:
+            if 'mach_cruise' in data:
+                mach_cruise = float(data['mach_cruise'])
+            elif 'mach' in data:
+                mach_cruise = float(data['mach'])
+            elif 'strip_wave_cd' in data and 'strip_M_crit' in data:
+                mach_cruise = detect_cruise_mach(data['strip_wave_cd'], data['strip_M_crit'], default_mach=MACH_CRUISE_DEFAULT)
+
+        if q_cruise is None:
+            if 'q_cruise' in data:
+                q_cruise = float(data['q_cruise'])
+            elif 'q_inf' in data:
+                q_cruise = float(data['q_inf'])
+
+        if altitude_m is None and 'altitude_m' in data:
+            altitude_m = float(data['altitude_m'])
 
     else:
         # Re-run from x.out
@@ -540,6 +701,22 @@ def extract_and_plot_wave_drag_distribution(
         dy_strip = None
         strip_area = None
 
+        if hasattr(main_script, 'cruise_cond') and isinstance(main_script.cruise_cond, dict):
+            if mach_cruise is None:
+                mach_cruise = float(main_script.cruise_cond.get('mach', MACH_CRUISE_DEFAULT))
+            if q_cruise is None:
+                q_cruise = float(main_script.cruise_cond.get('dynamic_pressure_Pa', Q_CRUISE_DEFAULT))
+            if altitude_m is None:
+                altitude_m = float(main_script.cruise_cond.get('altitude_m', ALTITUDE_M_DEFAULT))
+
+    # Resolve fallback defaults
+    if mach_cruise is None:
+        mach_cruise = MACH_CRUISE_DEFAULT
+    if q_cruise is None:
+        q_cruise = Q_CRUISE_DEFAULT
+    if altitude_m is None:
+        altitude_m = ALTITUDE_M_DEFAULT
+
     # 2. Process Strips & Build Splines
     results = process_wave_drag_strips(
         y_strip_pts=y_strip,
@@ -554,6 +731,7 @@ def extract_and_plot_wave_drag_distribution(
         strip_area=strip_area,
         mach_cruise=mach_cruise,
         q_cruise=q_cruise,
+        altitude_m=altitude_m,
         sref_val=sref_val,
     )
 
@@ -577,6 +755,7 @@ def extract_and_plot_wave_drag_distribution(
             d_wave_val=results['tot_d_wave_total'],
             mach_cruise=mach_cruise,
             q_cruise=q_cruise,
+            altitude_m=altitude_m,
         )
         print(f"Saved wave drag telemetry cache to: {cache_file}")
     except Exception as e:
@@ -591,6 +770,7 @@ def extract_and_plot_wave_drag_distribution(
         ar_val=ar_val,
         mach_cruise=mach_cruise,
         q_cruise=q_cruise,
+        altitude_m=altitude_m,
         artifact_dir=artifact_dir,
     )
 
@@ -601,6 +781,7 @@ def extract_and_plot_wave_drag_distribution(
     peak_cd_counts = float(np.max(results['cd_wave_counts']))
     idx_peak_cd = int(np.argmax(results['cd_wave_counts']))
     y_peak_cd = float(y_strip[idx_peak_cd])
+    alt_ft = altitude_m / 0.3048
 
     print("\n" + "=" * 65)
     print(f"TRANSONIC WAVE DRAG TELEMETRY SUMMARY (Run: {run_label})")
@@ -608,8 +789,9 @@ def extract_and_plot_wave_drag_distribution(
     print(f"Wing Half-Span (b/2):            {b_tip:.3f} m (Full Wingspan: {2*b_tip:.3f} m)")
     print(f"Calculated Aspect Ratio (AR):    {ar_val:.2f}")
     print(f"Planform Area (S_ref):           {sref_val:.3f} m²")
+    print(f"Cruise Flight Condition:         {alt_ft:,.0f} ft ISA")
     print(f"Cruise Mach Number (M_inf):      {mach_cruise:.4f}")
-    print(f"Cruise Dynamic Pressure (q_inf): {q_cruise:,.2f} Pa (30,000 ft ISA)")
+    print(f"Cruise Dynamic Pressure (q_inf): {q_cruise:,.2f} Pa")
     print(f"Number of Drag Strips:           {len(y_strip)}")
     print(f"Integrated Wave Drag (CD_wave):  {results['integrated_cd_wave']:.6f} ({results['integrated_cd_wave_counts']:.2f} drag counts)")
     print(f"Integrated Wave Drag Force:      {results['tot_d_wave_total']:.1f} N (Half-Wing: {results['tot_d_wave_half']:.1f} N)")

@@ -275,8 +275,9 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
             detected_num_stations = saved_num_stations
         elif dv_metadata is not None and 'chord_stretch_dvs' in dv_metadata:
             detected_num_stations = int(dv_metadata['chord_stretch_dvs']['shape'][0])
-        elif dv_metadata is not None and 'taper_dvs' in dv_metadata:
-            detected_num_stations = int(dv_metadata['taper_dvs']['shape'][0]) + 1
+        elif dv_metadata is not None and ('taper_dvs' in dv_metadata or 'taper_control_points' in dv_metadata):
+            key = 'taper_dvs' if 'taper_dvs' in dv_metadata else 'taper_control_points'
+            detected_num_stations = int(dv_metadata[key]['shape'][0]) + 1
         else:
             # Probe candidate stations between 3 and 16
             for n_stn in range(3, 16):
@@ -327,6 +328,10 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 scaler = np.asarray(meta['scaler'])
                 unscaled = raw_slc / scaler
                 dv_dict[name] = unscaled.reshape(shape) if len(shape) > 0 else float(unscaled.flatten()[0])
+                if name == 'taper_control_points':
+                    dv_dict['taper_dvs'] = dv_dict[name]
+                elif name == 'sweep_angle_control_points':
+                    dv_dict['sweep_angle_dvs'] = dv_dict[name]
                 curr += var_size
         else:
             # Fallback legacy parsing with robust dynamic scaler detection
@@ -489,9 +494,9 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 'include_te_thickness': include_te_thickness,
                 'num_stations': num_stations,
                 'scale_factor': scale_factor,
-                'taper_dvs': dv_dict.get('taper_dvs', np.ones(num_chord_stations - 1)),
+                'taper_dvs': dv_dict.get('taper_dvs', dv_dict.get('taper_control_points', np.ones(num_chord_stations - 1))),
                 'aspect_ratio': dv_dict.get('aspect_ratio', np.array([10.0])),
-                'sweep_angle_dvs': dv_dict.get('sweep_angle_dvs', np.zeros(num_chord_stations - 1)),
+                'sweep_angle_dvs': dv_dict.get('sweep_angle_dvs', dv_dict.get('sweep_angle_control_points', np.zeros(num_chord_stations - 1))),
                 'tc_target_control_points': dv_dict.get('tc_target_control_points', None),
                 'planform_area_target': dv_dict.get('planform_area_target', None),
                 'twist_dvs': dv_dict.get('twist_dvs', np.zeros(num_chord_stations)),
