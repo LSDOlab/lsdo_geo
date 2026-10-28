@@ -39,7 +39,7 @@ def test_constant_cd0_legacy_compatibility():
     res = subprocess.run(cmd, cwd=REPO_ROOT, env=env, capture_output=True, text=True)
     assert res.returncode == 0, f"Script failed with stderr:\n{res.stderr}"
     assert "Selected Mode: CONSTANT_CD0" in res.stdout
-    assert "CD_viscous:    80.00 counts (0.008000)" in res.stdout
+    assert "CD_viscous:    85.00 counts (0.008500)" in res.stdout
 
 
 def test_ibl_station_constraints_smoke():

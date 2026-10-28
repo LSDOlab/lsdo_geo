@@ -21,13 +21,14 @@ import os
 import sys
 import shutil
 from typing import Dict, Any, Optional, Tuple, List
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from scipy.interpolate import interp1d, CubicSpline
 
 # Ensure working directory and relevant repos are in path
-REPO_ROOT = '/home/andrew/optimization/lsdo_geo'
+REPO_ROOT = str(Path(__file__).resolve().parents[4])
 if os.path.exists(REPO_ROOT) and REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 

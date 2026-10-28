@@ -137,8 +137,8 @@ geonic_method = os.environ.get('GEONIC_METHOD', os.environ.get('GEONIC_MESH', ge
 
 
 # 4. Viscous drag mode:
-#   'ibl'          -> Integral boundary layer drag model & attachment constraint H_max <= 2.4
-#   'constant_cd0' -> Legacy fixed baseline profile drag (CD0_base = 0.0080)
+#   'ibl'          -> Integral boundary layer drag model (+ miscellaneous parasite CD0_misc)
+#   'constant_cd0' -> Fixed baseline profile drag (CD0_base + CD0_misc = 0.0085)
 viscous_drag_mode: Literal['ibl', 'constant_cd0'] = 'ibl'  # Options: 'ibl' or 'constant_cd0'
 # viscous_drag_mode: Literal['ibl', 'constant_cd0'] = 'constant_cd0'  # Options: 'ibl' or 'constant_cd0'
 viscous_drag_mode = os.environ.get('VISCOUS_DRAG_MODE', viscous_drag_mode)
@@ -152,7 +152,7 @@ include_neg1g_sizing: bool = False  # Options: True or False
 #   Effective structural height factor relative to OML (accounts for spar cap flange
 #   centroid recession beneath OML skins/stringers, shear lag, and internal cutouts)
 # box_height_factor: float = 1.0     # Options: 0.50 - 0.70 (standard preliminary design factor)
-box_height_factor: float = 0.7     # Options: 0.50 - 0.70 (standard preliminary design factor)
+box_height_factor: float = 0.8     # Options: 0.50 - 0.70 (standard preliminary design factor)
 box_height_factor = float(os.environ.get('BOX_HEIGHT_FACTOR', box_height_factor))
 
 # 6. Airfoil shape & control surface options:
@@ -190,7 +190,7 @@ wake_load_penalty_threshold: float = float(os.environ.get('WAKE_LOAD_PENALTY_THR
 
 # 8. Scale factor & warm start:
 scale_factor: float = 7.5             # Scale factor (7.5 for 50 m full-scale BWB; 1.0 for wind-tunnel scale)
-warm_start: bool = True               # Warm start DVs from prior run
+warm_start: bool = os.environ.get('WARM_START', '1').strip().lower() not in ('0', 'false', 'no')
 warm_start_folder: str = os.environ.get(
     'BWB_WARM_START_FOLDER',
     'rectangular_wing_to_bwb_aerostructural_optimization_outputs/2026-10-23_18.38.34.200350'
@@ -978,20 +978,24 @@ if formulation == 'ar_area':
         warm_start_npz = os.path.join(warm_start_folder, 'lift_and_moment_data.npz')
         if os.path.exists(warm_start_npz):
             prior_data = np.load(warm_start_npz, allow_pickle=True)
-            print(f"Warm starting design variables from {warm_start_npz}...")
-            chord_stretch_dvs.value = np.asarray(prior_data['dv_opt_chord_stretch_dvs'])
-            sweep_dvs.value = np.asarray(prior_data['dv_opt_sweep_dvs'])
-            thickness_stretch_dvs.value = np.asarray(prior_data['dv_opt_thickness_stretch_dvs'])
-            twist_dvs.value = np.asarray(prior_data['dv_opt_twist_dvs'])
+            prior_chord_dvs = np.asarray(prior_data['dv_opt_chord_stretch_dvs'])
+            if prior_chord_dvs.shape == chord_stretch_dvs.shape:
+                print(f"Warm starting design variables from {warm_start_npz}...")
+                chord_stretch_dvs.value = prior_chord_dvs
+                sweep_dvs.value = np.asarray(prior_data['dv_opt_sweep_dvs'])
+                thickness_stretch_dvs.value = np.asarray(prior_data['dv_opt_thickness_stretch_dvs'])
+                twist_dvs.value = np.asarray(prior_data['dv_opt_twist_dvs'])
+                ttop_dvs.value = np.asarray(prior_data['dv_opt_ttop_dvs'])
+                tweb_dvs.value = np.asarray(prior_data['dv_opt_tweb_dvs'])
+                if include_camber and 'dv_opt_camber_dvs' in prior_data:
+                    camber_dvs.value = np.asarray(prior_data['dv_opt_camber_dvs'])
+                if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
+                    thickness_shape_dvs.value = np.asarray(prior_data['dv_opt_thickness_shape_dvs'])
+            else:
+                print(f"Warm start resolution mismatch (prior: {prior_chord_dvs.shape}, current: {chord_stretch_dvs.shape}), skipping station DVs...")
             span_stretch_dv.value = np.asarray(prior_data['dv_opt_span_stretch_dv']).reshape((1,))
             pitch.value = float(np.asarray(prior_data['dv_opt_pitch']).flatten()[0])
             pitch_ss.value = float(np.asarray(prior_data['dv_opt_pitch_ss']).flatten()[0])
-            ttop_dvs.value = np.asarray(prior_data['dv_opt_ttop_dvs'])
-            tweb_dvs.value = np.asarray(prior_data['dv_opt_tweb_dvs'])
-            if include_camber and 'dv_opt_camber_dvs' in prior_data:
-                camber_dvs.value = np.asarray(prior_data['dv_opt_camber_dvs'])
-            if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
-                thickness_shape_dvs.value = np.asarray(prior_data['dv_opt_thickness_shape_dvs'])
             if 'dv_opt_misc_cg' in prior_data:
                 misc_cg.value = float(np.asarray(prior_data['dv_opt_misc_cg']).flatten()[0])
             if use_geonic and geonic_payload_mode in {'oversized', 'both'} and 'dv_opt_payload_center_x' in prior_data:
@@ -1119,20 +1123,24 @@ elif formulation == 'chord_span':
         warm_start_npz = os.path.join(warm_start_folder, 'lift_and_moment_data.npz')
         if os.path.exists(warm_start_npz):
             prior_data = np.load(warm_start_npz, allow_pickle=True)
-            print(f"Warm starting design variables from {warm_start_npz}...")
-            chord_stretch_dvs.value = np.asarray(prior_data['dv_opt_chord_stretch_dvs'])
-            sweep_dvs.value = np.asarray(prior_data['dv_opt_sweep_dvs'])
-            thickness_stretch_dvs.value = np.asarray(prior_data['dv_opt_thickness_stretch_dvs'])
-            twist_dvs.value = np.asarray(prior_data['dv_opt_twist_dvs'])
+            prior_chord_dvs = np.asarray(prior_data['dv_opt_chord_stretch_dvs'])
+            if prior_chord_dvs.shape == chord_stretch_dvs.shape:
+                print(f"Warm starting design variables from {warm_start_npz}...")
+                chord_stretch_dvs.value = prior_chord_dvs
+                sweep_dvs.value = np.asarray(prior_data['dv_opt_sweep_dvs'])
+                thickness_stretch_dvs.value = np.asarray(prior_data['dv_opt_thickness_stretch_dvs'])
+                twist_dvs.value = np.asarray(prior_data['dv_opt_twist_dvs'])
+                ttop_dvs.value = np.asarray(prior_data['dv_opt_ttop_dvs'])
+                tweb_dvs.value = np.asarray(prior_data['dv_opt_tweb_dvs'])
+                if include_camber and 'dv_opt_camber_dvs' in prior_data:
+                    camber_dvs.value = np.asarray(prior_data['dv_opt_camber_dvs'])
+                if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
+                    thickness_shape_dvs.value = np.asarray(prior_data['dv_opt_thickness_shape_dvs'])
+            else:
+                print(f"Warm start resolution mismatch (prior: {prior_chord_dvs.shape}, current: {chord_stretch_dvs.shape}), skipping station DVs...")
             span_stretch_dv.value = np.asarray(prior_data['dv_opt_span_stretch_dv']).reshape((1,))
             pitch.value = float(np.asarray(prior_data['dv_opt_pitch']).flatten()[0])
             pitch_ss.value = float(np.asarray(prior_data['dv_opt_pitch_ss']).flatten()[0])
-            ttop_dvs.value = np.asarray(prior_data['dv_opt_ttop_dvs'])
-            tweb_dvs.value = np.asarray(prior_data['dv_opt_tweb_dvs'])
-            if include_camber and 'dv_opt_camber_dvs' in prior_data:
-                camber_dvs.value = np.asarray(prior_data['dv_opt_camber_dvs'])
-            if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
-                thickness_shape_dvs.value = np.asarray(prior_data['dv_opt_thickness_shape_dvs'])
             if 'dv_opt_misc_cg' in prior_data:
                 misc_cg.value = float(np.asarray(prior_data['dv_opt_misc_cg']).flatten()[0])
             if use_geonic and geonic_payload_mode in {'oversized', 'both'} and 'dv_opt_payload_center_x' in prior_data:
@@ -2127,10 +2135,12 @@ strip_delta_M_cruise = wave_drag_results[0]['delta_M']
 strip_delta_M_eff_cruise = wave_drag_results[0]['delta_M_eff']
 min_strip_mach_margin_cruise = -csdl.maximum(strip_delta_M_cruise, axes=(0,), rho=50.0)  # min(Mcrit - M)
 
-# Base parasite drag coefficient (NACA 0012 base skin friction + form drag: CD0 = 0.0050)
-# Viscous drag mode evaluation: 'ibl' (direct integral boundary layer) vs 'constant_cd0' (legacy CD0_base = 0.0050)
-# CD0_base = 0.0080
+# Base parasite drag coefficient (NACA 0012 base skin friction + form drag: CD0_base = 0.0050)
+# Miscellaneous parasite drag increment (nacelles, pylons, vertical fins/winglets, gaps, excrescences: CD0_misc = 0.0035)
+# Viscous drag mode evaluation: 'ibl' (direct integral boundary layer + CD0_misc) vs 'constant_cd0' (CD0_total = 0.0085)
 CD0_base = 0.0050
+CD0_misc = float(os.environ.get('CD0_MISC', 0.0035))  # 35 drag counts for misc parasite drag
+CD0_total = CD0_base + CD0_misc
 
 ibl_results = evaluate_bwb_viscous_ibl(
     cp_node0=Cp[0],
@@ -2160,9 +2170,13 @@ H_section_both = ibl_results['H_section_both']
 H_upper_matrix = ibl_results['H_upper_matrix']
 
 if viscous_drag_mode == 'ibl':
-    cd_viscous_elem = ibl_results['cd_viscous_elem']
-    CD_viscous = CD_viscous_ibl
-    D_viscous = D_viscous_ibl
+    cd_viscous_elem = ibl_results['cd_viscous_elem'] + CD0_misc
+    CD_viscous = CD_viscous_ibl + CD0_misc
+    CD_viscous.name = 'CD_viscous'
+    D_viscous = D_viscous_ibl + CD0_misc * q_inf * total_strip_area
+    D_viscous.name = 'D_viscous'
+    CD_ibl_section = CD_ibl_section + CD0_misc
+    CD_ibl_section.name = 'CD_ibl_section'
 
     # Fit 101-CP cubic B-spline with root symmetry S'(0)=0 to the 100 drag strip section max H values
     # Reuses the exact precomputed matrix inverse M_cl_ss_inv and B-spline space cl_ss_fit_space
@@ -2210,10 +2224,14 @@ if viscous_drag_mode == 'ibl':
     if enforce_stratford_constraint:
         dv_stratford_constraints.set_as_constraint(upper=0.39, scaler=1.0 / 0.39)
 else:
-    cd_viscous_elem = CD0_base
-    CD_viscous = csdl.Variable(value=CD0_base, name='CD_viscous')
-    D_viscous = CD0_base * q_inf * total_strip_area
+    cd_viscous_elem = CD0_total
+    CD_viscous = csdl.Variable(value=CD0_total, name='CD_viscous')
+    D_viscous = CD0_total * q_inf * total_strip_area
     D_viscous.name = 'D_viscous'
+    CD_ibl_section = csdl.Variable(
+        value=np.full((ibl_topology['num_stations'],), CD0_total),
+        name='CD_ibl_section',
+    )
     dv_H_stations = csdl.Variable(value=np.full((num_stations,), 1.4), name='dv_H_stations')
     dv_stratford_constraints = csdl.Variable(
         value=np.full((stratford_topology['num_constraints'],), 0.20),
@@ -2285,12 +2303,9 @@ if stall_model == 'stratford_closure':
     lift_effective_cruise = L_corr_cruise
 
     CD_separation_cruise = D_separation_cruise / (q_inf * planform_area)
-    if include_wake_load_penalty:
-        Di_trefftz_active = Di_Trefftz_stall
-        CDi_trefftz_active = CDi_Trefftz_stall
-    else:
-        Di_trefftz_active = Di_Trefftz_reconciled
-        CDi_trefftz_active = CDi_Trefftz_reconciled
+    # Always use reconciled Trefftz induced drag to enforce momentum conservation and prevent wake deflation exploitation
+    Di_trefftz_active = Di_Trefftz_reconciled
+    CDi_trefftz_active = CDi_Trefftz_reconciled
 
     if induced_drag_objective == 'mixed':
         CDi_active = csdl.maximum(CDi_Fourier, CDi_trefftz_active, rho=2.*1.e3)
@@ -3089,6 +3104,22 @@ if __name__ == '__main__':
     num_iterations = x_history.shape[0]
     if num_iterations == 0:
         print(f"No optimization history found in {latest_folder}. Skipping post-processing plot rendering.")
+        # Print final viscous summary for diagnostic and testing purposes
+        cd_visc_final = float(np.asarray(jax_sim[CD_viscous]).flatten()[0])
+        d_visc_final = float(np.asarray(jax_sim[D_viscous]).flatten()[0])
+        hmax_final = float(np.asarray(jax_sim[H_max_ibl]).flatten()[0])
+        att_margin_final = float(np.asarray(jax_sim[ibl_attachment_margin]).flatten()[0])
+        min_cp_final = float(np.asarray(jax_sim[ibl_min_cp]).flatten()[0])
+        cp_cut_margin_final = float(np.asarray(jax_sim[ibl_cp_cutoff_margin]).flatten()[0])
+        att_st_final = "ATTACHED (FEASIBLE)" if att_margin_final >= 0.0 else "SEPARATED (VIOLATED)"
+        print(f"\n================ VISCOUS DRAG FINAL SUMMARY ================")
+        print(f"Selected Mode: {viscous_drag_mode.upper()}")
+        print(f"CD_viscous:    {cd_visc_final*1e4:.2f} counts ({cd_visc_final:.6f})")
+        print(f"D_viscous:     {d_visc_final:.1f} N")
+        print(f"H_max_ibl:     {hmax_final:.4f} (Limit: 2.40)")
+        print(f"Attach Margin: {att_margin_final:+.4f} ({att_st_final})")
+        print(f"Min Cp:        {min_cp_final:.4f} (Cutoff Margin: {cp_cut_margin_final:+.4f})")
+        print(f"============================================================\n")
         exit()
     
     # Set up pyvista offscreen rendering and video frames directory
