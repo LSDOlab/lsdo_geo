@@ -69,12 +69,9 @@ class Geometry(lfs.FunctionSet):
         Parameters
         ----------
         locations : Union[npt.NDArray[np.float64], tuple[int, npt.NDArray[np.float64]], list[tuple[int, npt.NDArray[np.float64]]]]
-            The marker locations, specified in either of two ways:
-            1. Physical 3D Cartesian coordinates (numpy array of shape (3,) or (N, 3)).
-               The points are projected onto the geometry to determine parametric coordinates.
-            2. Parametric coordinates on the geometry patches:
-               - A tuple: (function_index, uv_array) for a single point.
-               - A list of tuples: [(function_index, uv_array), ...] for one or more points.
+            The marker locations. Can be specified as physical 3D Cartesian coordinates
+            (array of shape (3,) or (N, 3) projected onto the geometry), or as patch
+            parametric coordinates (a tuple (function_index, uv_array) or list of such tuples).
         name : Optional[str]
             The name of the marker. If None, an auto-generated unique name is assigned.
         projection_tolerance : float

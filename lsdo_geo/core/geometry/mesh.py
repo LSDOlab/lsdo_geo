@@ -263,7 +263,7 @@ class UnstructuredMesh(Mesh):
         Parametric coordinate(s) of the mesh nodes.
     markers : Optional[Union[Dict[str, Marker], Sequence[Marker]]], optional
         Constituent marker(s) backing the mesh nodes.
-    cells : Optional[Dict[str, npt.NDArray[np.int_]]], optional
+    cells : Optional[Dict[str, npt.NDArray[np.int64]]], optional
         Dictionary mapping cell element type (e.g., 'quad', 'triangle', 'line') to
         integer connectivity arrays of shape (num_elements, nodes_per_element).
     subroutine : Optional[Callable], optional
@@ -283,7 +283,7 @@ class UnstructuredMesh(Mesh):
         entity: Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]] = None,
         parametric_coordinates: Optional[Any] = None,
         markers: Optional[Union[Dict[str, Marker], Sequence[Marker]]] = None,
-        cells: Optional[Dict[str, npt.NDArray[np.int_]]] = None,
+        cells: Optional[Dict[str, npt.NDArray[np.int64]]] = None,
         subroutine: Optional[Callable] = None,
         shape: Optional[Tuple[int, ...]] = None,
         name: Optional[str] = None,
