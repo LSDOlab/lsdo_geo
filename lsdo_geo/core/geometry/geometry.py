@@ -49,7 +49,7 @@ class Geometry(lfs.FunctionSet):
         )
         if self.markers:
             for mname, m in self.markers.items():
-                m_copy = m.copy(entity=geometry_copy)
+                m_copy = m.copy(geometry=geometry_copy)
                 geometry_copy.markers[mname] = m_copy
         return geometry_copy
 
@@ -92,13 +92,13 @@ class Geometry(lfs.FunctionSet):
         if isinstance(locations, lfs.Function):
             first_idx = list(self.functions.keys())[0] if len(self.functions) == 1 else 0
             marker = lg.Marker.from_function(
-                entity=self,
+                geometry=self,
                 function_map=(first_idx, locations),
                 name=name,
             )
         elif isinstance(locations, tuple) and len(locations) == 2 and isinstance(locations[0], (int, np.integer)) and isinstance(locations[1], lfs.Function):
             marker = lg.Marker.from_function(
-                entity=self,
+                geometry=self,
                 function_map=locations,
                 name=name,
             )

@@ -22,8 +22,8 @@ class Marker(lfs.Marker):
 
     Parameters
     ----------
-    entity : Geometry
-        The geometry entity (e.g. lsdo_geo.Geometry) to which the marker is attached.
+    geometry : Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]], optional
+        The geometry entity to which the marker is attached.
     parametric_coordinates : Optional[Union[tuple[int, npt.NDArray[np.float64]], list[tuple[int, npt.NDArray[np.float64]]]]]
         The parametric coordinate(s) on the geometry patches, specified as
         a tuple (function_index, uv_array) or list of such tuples.
@@ -33,6 +33,77 @@ class Marker(lfs.Marker):
         The initial physical 3D Cartesian coordinates of the marker.
     """
     initial_point: Optional[npt.NDArray[np.float64]] = None
+
+    def __init__(
+        self,
+        geometry: Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]] = None,
+        parametric_coordinates: Optional[Any] = None,
+        name: Optional[str] = None,
+        initial_point: Optional[npt.NDArray[np.float64]] = None,
+        domain: Optional[lfs.InterfaceDomain] = None,
+    ):
+        super().__init__(
+            entity=geometry,
+            parametric_coordinates=parametric_coordinates,
+            name=name,
+            initial_point=initial_point,
+            domain=domain,
+        )
+
+    @property
+    def geometry(self) -> Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]]:
+        """Returns the geometry associated with this marker."""
+        return self.entity
+
+    @geometry.setter
+    def geometry(self, val: Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]]):
+        """Sets the geometry associated with this marker."""
+        self.entity = val
+
+    def copy(
+        self,
+        geometry: Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]] = None,
+        name: Optional[str] = None,
+    ) -> Marker:
+        """
+        Creates a copy of the marker, optionally rebinding to a new geometry.
+        """
+        target = geometry if geometry is not None else self.geometry
+        return self.__class__(
+            geometry=target,
+            parametric_coordinates=self.parametric_coordinates,
+            name=name if name is not None else self.name,
+            initial_point=self.initial_point.copy() if self.initial_point is not None else None,
+            domain=self.domain,
+        )
+
+    @classmethod
+    def from_function(
+        cls,
+        geometry: Union[Geometry, lfs.Function, lfs.FunctionSet],
+        function_map: Union[lfs.Function, Tuple[int, lfs.Function]],
+        domain: Optional[lfs.InterfaceDomain] = None,
+        name: Optional[str] = None,
+    ) -> Marker:
+        """
+        Creates a continuous marker where alpha(gamma) is an lsdo_function_spaces.Function
+        mapping gamma in Gamma to parametric coordinates in the geometry's domain.
+        """
+        if domain is None:
+            fn = function_map[1] if isinstance(function_map, tuple) else function_map
+            bounds = getattr(fn, "parametric_bounds", None)
+            if bounds is not None:
+                domain = lfs.InterfaceDomain(bounds=np.asarray(bounds, dtype=np.float64), num_copies=1)
+            else:
+                m_dim = getattr(fn.space, "num_parametric_dimensions", 1)
+                domain = lfs.InterfaceDomain(bounds=np.array([[0.0, 1.0]] * m_dim, dtype=np.float64), num_copies=1)
+
+        return cls(
+            geometry=geometry,
+            parametric_coordinates=function_map,
+            domain=domain,
+            name=name,
+        )
 
     def __hash__(self):
         return id(self)
@@ -76,7 +147,7 @@ class Marker(lfs.Marker):
             )
 
         marker = cls(
-            entity=geometry,
+            geometry=geometry,
             parametric_coordinates=coords,
             name=name,
         )
@@ -133,7 +204,7 @@ class Marker(lfs.Marker):
             pt_project = pt
         proj_coords = geometry.project(pt_project, projection_tolerance=projection_tolerance)
         marker = cls(
-            entity=geometry,
+            geometry=geometry,
             parametric_coordinates=proj_coords,
             name=name,
             initial_point=pt,

@@ -190,7 +190,7 @@ class Connection(lfs.CollocationCondition):
         elif hasattr(new_c1, "markers") and m1.name in new_c1.markers:
             new_m1 = new_c1.markers[m1.name]
         elif hasattr(m1, "copy") and new_c1 is not c1:
-            new_m1 = m1.copy(entity=new_c1)
+            new_m1 = m1.copy(geometry=new_c1)
         else:
             new_m1 = m1
 
@@ -202,7 +202,7 @@ class Connection(lfs.CollocationCondition):
             elif new_c2 is not None and hasattr(new_c2, "markers") and m2.name in new_c2.markers:
                 new_m2 = new_c2.markers[m2.name]
             elif hasattr(m2, "copy") and new_c2 is not None and new_c2 is not c2:
-                new_m2 = m2.copy(entity=new_c2)
+                new_m2 = m2.copy(geometry=new_c2)
             else:
                 new_m2 = m2
         else:
@@ -216,7 +216,7 @@ class Connection(lfs.CollocationCondition):
             elif hasattr(new_c1, "markers") and hasattr(axis_1, "name") and axis_1.name in new_c1.markers:
                 new_axis_1 = new_c1.markers[axis_1.name]
             elif hasattr(axis_1, "copy") and new_c1 is not c1:
-                new_axis_1 = axis_1.copy(entity=new_c1)
+                new_axis_1 = axis_1.copy(geometry=new_c1)
             else:
                 new_axis_1 = axis_1
         else:
@@ -229,7 +229,7 @@ class Connection(lfs.CollocationCondition):
             elif new_c2 is not None and hasattr(new_c2, "markers") and hasattr(axis_2, "name") and axis_2.name in new_c2.markers:
                 new_axis_2 = new_c2.markers[axis_2.name]
             elif hasattr(axis_2, "copy") and new_c2 is not None and new_c2 is not c2:
-                new_axis_2 = axis_2.copy(entity=new_c2)
+                new_axis_2 = axis_2.copy(geometry=new_c2)
             else:
                 new_axis_2 = axis_2
         else:
@@ -434,7 +434,7 @@ class Assembly(lfs.FunctionNetwork):
 
     def discover_internal_seams(
         self,
-        entity: Optional[Union[Geometry, FunctionSet, str]] = None,
+        geometry: Optional[Union[Geometry, FunctionSet, str]] = None,
         tolerance: float = 1e-5,
         search_n: int = 7,
         create_conditions: bool = True,
@@ -444,7 +444,7 @@ class Assembly(lfs.FunctionNetwork):
 
         Parameters
         ----------
-        entity : Optional[Union[Geometry, FunctionSet, str]], optional
+        geometry : Optional[Union[Geometry, FunctionSet, str]], optional
             The component or geometry to search for internal seams. If a string is provided,
             it resolves from registered components. If None, discovers seams across all registered
             multi-patch components in the assembly.
@@ -462,13 +462,14 @@ class Assembly(lfs.FunctionNetwork):
         List[Interface]
             List of discovered Interface objects.
         """
-        if isinstance(entity, str):
-            entity = self.components.get(entity)
-            if entity is None:
-                raise KeyError(f"Component '{entity}' not found in assembly.")
+        if isinstance(geometry, str):
+            comp = self.components.get(geometry)
+            if comp is None:
+                raise KeyError(f"Component '{geometry}' not found in assembly.")
+            geometry = comp
 
-        if entity is not None:
-            target_entity = getattr(entity, "geometry", entity)
+        if geometry is not None:
+            target_entity = getattr(geometry, "geometry", geometry)
             return super().discover_internal_seams(
                 entity=target_entity,
                 tolerance=tolerance,

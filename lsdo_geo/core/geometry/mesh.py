@@ -28,8 +28,6 @@ class Mesh(Marker):
     ----------
     geometry : Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]], optional
         The geometry entity to which the mesh is attached.
-    entity : Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]], optional
-        Alias for geometry (inherited from Marker).
     parametric_coordinates : Optional[Any], optional
         The parametric coordinate(s) on the geometry patches. Can be discrete coordinates
         or a continuous Function/patch map for IGA.
@@ -51,7 +49,6 @@ class Mesh(Marker):
     def __init__(
         self,
         geometry: Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]] = None,
-        entity: Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]] = None,
         parametric_coordinates: Optional[Any] = None,
         markers: Optional[Union[Dict[str, Marker], Sequence[Marker]]] = None,
         subroutine: Optional[Callable] = None,
@@ -60,19 +57,18 @@ class Mesh(Marker):
         initial_point: Optional[npt.NDArray[np.float64]] = None,
         domain: Optional[lfs.InterfaceDomain] = None,
     ):
-        resolved_entity = entity if entity is not None else geometry
-        if resolved_entity is None and markers is not None:
+        if geometry is None and markers is not None:
             if isinstance(markers, dict) and len(markers) > 0:
-                resolved_entity = next(iter(markers.values())).entity
+                geometry = next(iter(markers.values())).geometry
             elif isinstance(markers, (list, tuple)) and len(markers) > 0:
-                resolved_entity = markers[0].entity
+                geometry = markers[0].geometry
 
         if name is None:
             name = f"mesh_{Mesh.mesh_counter}"
             Mesh.mesh_counter += 1
 
         super().__init__(
-            entity=resolved_entity,
+            geometry=geometry,
             parametric_coordinates=parametric_coordinates,
             name=name,
             initial_point=initial_point,
@@ -257,8 +253,6 @@ class UnstructuredMesh(Mesh):
     ----------
     geometry : Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]], optional
         The geometry entity to which the mesh is attached.
-    entity : Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]], optional
-        Alias for geometry.
     parametric_coordinates : Optional[Any], optional
         Parametric coordinate(s) of the mesh nodes.
     markers : Optional[Union[Dict[str, Marker], Sequence[Marker]]], optional
@@ -280,7 +274,6 @@ class UnstructuredMesh(Mesh):
     def __init__(
         self,
         geometry: Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]] = None,
-        entity: Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]] = None,
         parametric_coordinates: Optional[Any] = None,
         markers: Optional[Union[Dict[str, Marker], Sequence[Marker]]] = None,
         cells: Optional[Dict[str, npt.NDArray[np.int64]]] = None,
@@ -292,7 +285,6 @@ class UnstructuredMesh(Mesh):
     ):
         super().__init__(
             geometry=geometry,
-            entity=entity,
             parametric_coordinates=parametric_coordinates,
             markers=markers,
             subroutine=subroutine,
