@@ -12,31 +12,133 @@ import csdl_alpha as csdl
 import lsdo_function_spaces as lfs
 import lsdo_geo as lg
 import pyvista as pv
-from typing import Optional, Union, Sequence
+from typing import TYPE_CHECKING, Optional, Union, Sequence, Tuple, List, Dict
 
-@dataclass
+if TYPE_CHECKING:
+    from lsdo_geo.core.geometry.mesh import Mesh
+    from lsdo_geo.core.geometry.marker import Marker
+
+@dataclass(eq=False)
 class Geometry(lfs.FunctionSet):
-    representations:dict[str,lg.Mesh] = None
+    representations: Optional[dict[str, Mesh]] = None
+    markers: Optional[dict[str, Marker]] = None
+
+    def __hash__(self):
+        return id(self)
 
     def __post_init__(self):
         super().__post_init__()
         if self.representations is None:
             self.representations = {}
+        if self.markers is None:
+            self.markers = {}
 
 
     def copy(self):
         '''
-        Creates a copy of the geometry
+        Creates a copy of the geometry, cloning functions and rebinding attached markers.
         '''
         function_set = super().copy()
-        geometry_copy = Geometry(functions=function_set.functions, function_names=function_set.function_names, name=self.name,
-                                    space=function_set.space, representations=self.representations)
+        geometry_copy = Geometry(
+            functions=function_set.functions,
+            function_names=function_set.function_names,
+            name=self.name,
+            space=function_set.space,
+            representations=dict(self.representations) if self.representations else {},
+            markers={},
+        )
+        if self.markers:
+            for mname, m in self.markers.items():
+                m_copy = m.copy(entity=geometry_copy)
+                geometry_copy.markers[mname] = m_copy
         return geometry_copy
 
     
     def get_function_space(self):
         return self.space
     
+    def add_marker(
+        self,
+        locations: Union[npt.NDArray[np.float64], tuple[int, npt.NDArray[np.float64]], list[tuple[int, npt.NDArray[np.float64]]]],
+        name: Optional[str] = None,
+        projection_tolerance: float = 1e-6,
+    ) -> Marker:
+        '''
+        Adds a semantic marker to the geometry.
+
+        Parameters
+        ----------
+        locations : Union[npt.NDArray[np.float64], tuple[int, npt.NDArray[np.float64]], list[tuple[int, npt.NDArray[np.float64]]]]
+            The marker locations, specified in either of two ways:
+            1. Physical 3D Cartesian coordinates (numpy array of shape (3,) or (N, 3)).
+               The points are projected onto the geometry to determine parametric coordinates.
+            2. Parametric coordinates on the geometry patches:
+               - A tuple: (function_index, uv_array) for a single point.
+               - A list of tuples: [(function_index, uv_array), ...] for one or more points.
+        name : Optional[str]
+            The name of the marker. If None, an auto-generated unique name is assigned.
+        projection_tolerance : float
+            Tolerance for physical point projection. Default is 1e-6.
+
+        Returns
+        -------
+        Marker
+            The newly created and attached marker.
+        '''
+        if isinstance(locations, str) and not isinstance(name, str):
+            name, locations = locations, name
+
+        if locations is None:
+            raise ValueError("Must provide 'locations' to add_marker.")
+
+        # Option 0: Continuous function map (Function or (patch_idx, Function))
+        if isinstance(locations, lfs.Function):
+            first_idx = list(self.functions.keys())[0] if len(self.functions) == 1 else 0
+            marker = lg.Marker.from_function(
+                entity=self,
+                function_map=(first_idx, locations),
+                name=name,
+            )
+        elif isinstance(locations, tuple) and len(locations) == 2 and isinstance(locations[0], (int, np.integer)) and isinstance(locations[1], lfs.Function):
+            marker = lg.Marker.from_function(
+                entity=self,
+                function_map=locations,
+                name=name,
+            )
+        # Option A: list of (function_index, uv) tuples
+        elif isinstance(locations, list) and len(locations) > 0 and isinstance(locations[0], tuple):
+            marker = lg.Marker.from_parametric(
+                geometry=self,
+                parametric_coordinates=locations,
+                name=name,
+            )
+        # Option B: tuple of (function_index, uv)
+        elif isinstance(locations, tuple) and len(locations) == 2 and isinstance(locations[0], (int, np.integer)):
+            marker = lg.Marker.from_parametric(
+                geometry=self,
+                parametric_coordinates=locations,
+                name=name,
+            )
+        # Option C: 2D parametric coordinate [u, v] for single-function geometry
+        elif len(self.functions) == 1 and hasattr(locations, '__len__') and len(locations) == 2 and not (isinstance(locations, np.ndarray) and locations.shape == (3,)):
+            marker = lg.Marker.from_parametric(
+                geometry=self,
+                parametric_coordinates=locations,
+                name=name,
+            )
+        # Option D: 3D physical Cartesian point(s) (shape (3,) or (N, 3))
+        else:
+            marker = lg.Marker.from_locations(
+                geometry=self,
+                locations=np.asarray(locations, dtype=np.float64),
+                name=name,
+                projection_tolerance=projection_tolerance,
+            )
+
+        if not hasattr(self, 'markers') or self.markers is None:
+            self.markers = {}
+        self.markers[marker.name] = marker
+        return marker
 
     def add_representation(self, representation:lg.Mesh):
         '''
@@ -81,14 +183,61 @@ class Geometry(lfs.FunctionSet):
         self,
         points: csdl.Variable,
         sign_mode: str = "winding_number",
-        **kwargs,
+        winding_grid_n: int = 25,
+        winding_chord_tolerance: float = 1e-3,
+        winding_threshold: float = 0.5,
+        eps_reg: float = 1e-14,
+        bound_tol: float = 1e-7,
+        eps_hess: float = 1e-8,
+        eps_lm: float = 1e-8,
+        projection_options: Optional[dict] = None,
     ) -> csdl.Variable:
         """
         Evaluate signed distance field from query points to this geometry.
         Negative inside, positive outside.
+
+        Parameters
+        ----------
+        points : csdl.Variable
+            Query points tensor of shape (num_points, 3).
+        sign_mode : str, optional
+            Method used to determine interior vs exterior sign: 'winding_number' or 'unsigned'.
+            Default is 'winding_number'.
+        winding_grid_n : int, optional
+            Resolution of the winding number boundary discretization grid. Default is 25.
+        winding_chord_tolerance : float, optional
+            Chord error tolerance for adaptive boundary curve sampling. Default is 1e-3.
+        winding_threshold : float, optional
+            Threshold for winding number interior test. Default is 0.5.
+        eps_reg : float, optional
+            Smooth regularization epsilon for distance norm. Default is 1e-14.
+        bound_tol : float, optional
+            Boundary tolerance for projection active set identification. Default is 1e-7.
+        eps_hess : float, optional
+            Finite difference step size for Hessian evaluation. Default is 1e-8.
+        eps_lm : float, optional
+            Levenberg-Marquardt damping factor. Default is 1e-8.
+        projection_options : Optional[dict], optional
+            Options dictionary passed to the patch projection solver. Default is None.
+
+        Returns
+        -------
+        csdl.Variable
+            Signed distance scalar for each query point of shape (num_points, 1).
         """
         from lsdo_geo.core.geometry.signed_distance import FunctionSetSignedDistanceOperation
-        op = FunctionSetSignedDistanceOperation(self, sign_mode=sign_mode, **kwargs)
+        op = FunctionSetSignedDistanceOperation(
+            self,
+            sign_mode=sign_mode,
+            winding_grid_n=winding_grid_n,
+            winding_chord_tolerance=winding_chord_tolerance,
+            winding_threshold=winding_threshold,
+            eps_reg=eps_reg,
+            bound_tol=bound_tol,
+            eps_hess=eps_hess,
+            eps_lm=eps_lm,
+            projection_options=projection_options,
+        )
         return op.evaluate(self.stack_coefficients(), points)
     
 
@@ -114,7 +263,7 @@ class Geometry(lfs.FunctionSet):
                                 space=function_set.space)
         return component
     
-    def create_component_copy(self, function_indices:list[int]=None, function_search_names:list[str]=None, name:str=None) -> lg.Geometry:
+    def create_component_copy(self, function_indices:Optional[list[int]]=None, function_search_names:Optional[list[str]]=None, name:Optional[str]=None) -> lg.Geometry:
         '''
         Declares a component. This component will point to a sub-set of the entire geometry.
 
@@ -173,7 +322,7 @@ class Geometry(lfs.FunctionSet):
         quaternion: Optional[Union[csdl.Variable, npt.NDArray[np.float64]]] = None,
         function_indices: Optional[list[int]] = None,
         units: Optional[str] = 'radians',
-        **kwargs,
+        method: Optional[str] = None,
     ) -> None:
         if function_indices is None:
             function_indices = list(self.functions.keys())
@@ -185,7 +334,10 @@ class Geometry(lfs.FunctionSet):
         if isinstance(rotation_origin, np.ndarray):
             rotation_origin = csdl.Variable(shape=rotation_origin.shape, value=rotation_origin)
 
-        call_kwargs = dict(rotation_origin=rotation_origin, **kwargs)
+        call_kwargs = dict(rotation_origin=rotation_origin)
+        if method is not None:
+            call_kwargs['method'] = method
+
         if quaternion is not None:
             if isinstance(quaternion, np.ndarray):
                 quaternion = csdl.Variable(shape=quaternion.shape, value=quaternion)

@@ -1,5 +1,46 @@
 # Release Notes
 
+## lsdo_geo 1.2.0 (November 2026)
+
+`lsdo_geo` 1.2.0 introduces geometric assembly modeling, kinematic joints, semantic markers, and automated multi-component constraint enforcement, upgrading the underlying foundation to `lsdo_function_spaces >= 1.2.0`. This release enables complex aircraft and vehicle assemblies with multi-body kinematic connections, surface-to-surface alignment, and seamless integration into `ParameterizationSolver`.
+
+---
+
+### Highlights
+
+* **Geometric Assemblies & Multi-Body Networks (`Assembly`)**: Assembly container subclassing `FunctionNetwork` for managing multi-component CAD configurations, automated internal seam discovery (`discover_internal_seams`), and topological freedom analysis.
+* **Semantic Geometric Markers (`lsdo_geo.Marker`)**: Geometry-aware marker subclassing `lfs.Marker` supporting physical 3D coordinate projection (`Marker.from_locations`), parametric patch definitions (`Marker.from_parametric`), surface normal evaluation (`compute_surface_normal`), and orthonormal tangent null spaces (`compute_null_space`).
+* **Kinematic Connections (`Connection`)**: High-level semantic interface connections including `spherical` (coincident points), `revolute` (hinge alignment), `prismatic` (sliding line), `fixed` (full 6-DOF weld), and `offset` constraints with skew-symmetric operator utilities (`S_of`).
+* **ParameterizationSolver Integration**: Direct support for adding kinematic `Connection`, `InterfaceCondition`, or complete `Assembly` constraints via `solver.add_connection()` and `solver.add_assembly()`.
+* **Unified Disciplinary Meshes (`Mesh`, `CamberSurfaceMesh`, `UnstructuredMesh`)**: `lsdo_geo.Mesh` now subclasses `Marker`, inheriting full discrete and continuous function space support (e.g. for Isogeometric Analysis, IGA). Meshes can be composed of constituent markers and custom subroutines (e.g. VLM mean camber averaging upper and lower surface wireframes). Added `UnstructuredMesh` with cell connectivity (`quad`, `triangle`), differentiable centroid and normal/area computation in CSDL, and `meshio` export.
+* **Explicit API Signatures**: Eliminated unstructured `**kwargs` from marker evaluation and `Geometry.evaluate_signed_distance()`, providing explicit typing and comprehensive docstrings.
+* **Upgraded Core Dependency**: Declares official dependency requirement on `lsdo_function_spaces >= 1.2.0`.
+
+---
+
+### Core Architecture & Geometry
+
+* **Assembly & Kinematics (`lsdo_geo.core.geometry.assembly`)**:
+  * `Connection`: Represents semantic kinematic joints between geometric markers, supporting spherical, revolute, prismatic, cylindrical, and fixed coupling.
+  * `S_of(v)`: Computes the $3 \times 3$ skew-symmetric cross-product matrix $[v]_\times$ in both NumPy and CSDL graph modes for rotational alignment residuals $[v_1]_\times v_2 = 0$.
+  * `Assembly`: Multi-body geometric network tracking components, kinematic connections, and automated patch seam discovery.
+  * `rebind()` and `copy()`: Full support for cloning assemblies and rebinding marker references during FFD or parameterization solves.
+* **Geometric Markers (`lsdo_geo.core.geometry.marker`)**:
+  * `Marker.from_locations`: Projects physical 3D points onto geometry patches to define evaluation sites.
+  * `compute_surface_normal`: Evaluates normalized surface normal vectors $n = (t_u \times t_v) / \|t_u \times t_v\|_2$.
+  * `compute_tangents`: Evaluates surface tangent vectors $t_u, t_v$.
+  * `compute_null_space`: Generates a $3 \times 2$ orthonormal basis spanning the surface tangent plane.
+* **Disciplinary Meshes & Topologies (`lsdo_geo.core.geometry.mesh`)**:
+  * `Mesh`: Subclasses `Marker`, supporting both discrete coordinate evaluations and exact continuous function spaces for Isogeometric Analysis (IGA). Supports constituent `markers` and custom `subroutine` post-processing functions.
+  * `CamberSurfaceMesh`: Built-in composite mesh averaging upper and lower surface wireframe markers for vortex lattice and aerodynamic panel solvers.
+  * `UnstructuredMesh`: Disciplinary mesh with element connectivity (`quad`, `triangle`, `line`). Includes CSDL-differentiable `compute_element_centroids()` and `compute_element_normals_and_areas()`, plus `to_meshio()` export for standard CAE formats.
+* **ParameterizationSolver (`lsdo_geo.core.parameterization.parameterization_solver`)**:
+  * `add_equality_constraint`: Extended to accept `Connection` or `InterfaceCondition` instances directly, automatically extracting residuals and assigning descriptive constraint names.
+  * `add_connection`: Convenience method adding kinematic connection residuals as equality constraints.
+  * `add_assembly`: Adds all condition residuals from a multi-body assembly or function network to the optimization problem.
+
+---
+
 ## lsdo_geo 1.1.0 (October 2026)
 
 `lsdo_geo` 1.1.0 introduces Rodrigues rotation formulations for differentiable CAD and mesh transformations, improves geometric translation handling, enhances Free-Form Deformation (FFD) block fitting robustness, and broadens mathematical and analytic derivative test verification.
