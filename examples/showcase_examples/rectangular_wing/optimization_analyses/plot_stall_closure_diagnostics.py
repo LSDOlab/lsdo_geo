@@ -142,6 +142,12 @@ def load_stall_closure_telemetry(
                 f_min_cr = float(np.asarray(jax_sim[main_script.f_attached_min_cruise]).flatten()[0])
                 f_att_ss = np.asarray(jax_sim[main_script.f_attached_ss]).flatten()
                 f_min_ss = float(np.asarray(jax_sim[main_script.f_attached_min_ss]).flatten()[0])
+                if hasattr(main_script, 'f_attached_ss_near_tip') and main_script.f_attached_ss_near_tip is not None:
+                    data['f_attached_ss_near_tip'] = np.asarray(jax_sim[main_script.f_attached_ss_near_tip]).flatten()
+                    data['f_attached_min_ss_near_tip'] = float(np.min(data['f_attached_ss_near_tip']))
+                    data['f_attached_ss_min_allowable'] = float(getattr(main_script, 'f_attached_ss_min', 0.85))
+                    data['maneuver_attachment_eta_min'] = float(getattr(main_script, 'maneuver_attachment_eta_min', 0.50))
+                data['structural_stall_relief'] = bool(getattr(main_script, 'structural_stall_relief', False))
                 d_sep = float(np.asarray(jax_sim[main_script.D_separation_cruise]).flatten()[0])
                 di_rec = float(np.asarray(jax_sim[main_script.Di_Trefftz_reconciled]).flatten()[0])
                 cdi_rec = float(np.asarray(jax_sim[main_script.CDi_Trefftz_reconciled]).flatten()[0])
@@ -347,6 +353,9 @@ def process_stall_closure_fields(data: Dict[str, Any]) -> Dict[str, Any]:
     proc['f_min_cruise'] = float(data.get('f_attached_min_cruise', np.min(f_cr)))
     proc['f_ss'] = f_ss
     proc['f_min_ss'] = float(data.get('f_attached_min_ss', np.min(f_ss)))
+    proc['f_attached_ss_min_allowable'] = data.get('f_attached_ss_min_allowable', None)
+    proc['maneuver_attachment_eta_min'] = data.get('maneuver_attachment_eta_min', None)
+    proc['structural_stall_relief'] = bool(data.get('structural_stall_relief', False))
 
     # Sectional lift distributions and 2.5g pull-up loads from panel forces
     pf_inv_cr = data.get('panel_forces_right_cruise', None)
@@ -663,6 +672,23 @@ def generate_stall_closure_figure(
     # Reference thresholds
     ax1.axhline(1.0, color='gray', linestyle=':', alpha=0.7, label='Fully Attached Boundary ($f = 1.0$)')
     ax1.axhline(0.85, color=c_corr, linestyle='-.', alpha=0.8, label=r'Separation Critical Bound ($f = 0.85$)')
+    f_ss_allow = proc.get('f_attached_ss_min_allowable', None)
+    if f_ss_allow is not None:
+        try:
+            f_ss_allow_val = float(f_ss_allow)
+            eta_cut = float(proc.get('maneuver_attachment_eta_min', 0.50) or 0.50)
+            ax1.hlines(
+                f_ss_allow_val,
+                xmin=eta_cut,
+                xmax=1.0,
+                colors='purple',
+                linestyles='--',
+                linewidths=1.8,
+                label=rf'Maneuver Outboard Limit ($f \geq {f_ss_allow_val:.2f}$)',
+                zorder=5,
+            )
+        except (ValueError, TypeError):
+            pass
 
     # Shaded separation bands
     ax1.axhspan(0.85, 1.02, color=c_att, alpha=0.08, label='Attached Flow Regime')
@@ -671,7 +697,9 @@ def generate_stall_closure_figure(
     ax1.set_xlabel(r'Normalized Spanwise Coordinate $\eta = y / (b/2)$')
     ax1.set_ylabel(r'Sectional Attached Fraction $f = 1 - (s_{\mathrm{sep}} / s_{\mathrm{tot}})$')
     ax1.set_xlim(0.0, 1.0)
-    ax1.set_ylim(0.50, 1.03)
+    min_f_all = min(float(np.min(f_cr)), float(np.min(f_ss)))
+    y_min_bound = max(-0.05, min(0.48, min_f_all - 0.05))
+    ax1.set_ylim(y_min_bound, 1.03)
     ax1.set_title(r'(A) Boundary Layer Attached Fraction $f(\eta)$ Across Half-Span', fontweight='bold', pad=8)
     ax1.legend(loc='lower left', framealpha=0.92)
 
@@ -837,7 +865,8 @@ def generate_stall_closure_figure(
     ax6.set_ylabel(r'2.5g Pull-Up Vertical Load Distribution $F_z(y)$ [kN/m]')
     ax6.set_xlim(0.0, proc['b_half'])
     ax6.set_ylim(0.0, max(float(np.max(fz_inv)), float(np.max(fz_corr)), 1.0) * 1.30)
-    ax6.set_title(r'(F) 2.5g Structural Sizing Maneuver Load Relief', fontweight='bold', pad=8)
+    sizing_relief_note = "Stall Relief Enabled" if proc.get('structural_stall_relief', False) else "Sized with Clean Potential Forces (No Relief)"
+    ax6.set_title(r'(F) 2.5g Structural Sizing Maneuver Load Relief' + f'\n[{sizing_relief_note}]', fontweight='bold', pad=8)
     ax6.legend(loc='upper right', framealpha=0.92)
 
     # Overall Supertitle

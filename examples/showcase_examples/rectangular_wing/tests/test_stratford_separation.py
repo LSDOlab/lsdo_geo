@@ -28,8 +28,8 @@ def full_mesh():
 
 
 def test_stratford_topology_shapes(fast_mesh, full_mesh):
-    """Verify static topology, B-spline matrices, and slice counts for fast (20) and full (32)."""
-    # Fast resolution: 5 FFD stations -> 4x5 = 20 constraints
+    """Verify static topology, B-spline matrices, and slice counts for fast and full."""
+    # Fast resolution (chordwise aggregated): 5 FFD stations -> 5 constraints
     topo_fast = build_stratford_topology(
         points=fast_mesh.points * 7.5,
         cells_dict=fast_mesh.cells_dict,
@@ -38,14 +38,24 @@ def test_stratford_topology_shapes(fast_mesh, full_mesh):
     )
     assert topo_fast['num_ffd_stations'] == 5
     assert topo_fast['num_mesh_stations'] == 14
-    assert topo_fast['num_constraints'] == 20
+    assert topo_fast['num_constraints'] == 5
     assert len(topo_fast['u_slices']) == 4
     assert len(topo_fast['v_slices']) == 5
     assert topo_fast['Mu_inv'].shape == (6, 20)
     assert topo_fast['Mv_inv_T'].shape == (15, 8)
     assert topo_fast['B_dense'].shape == (31 * 41, 48)
 
-    # Full resolution: 8 FFD stations -> 4x8 = 32 constraints
+    # Fast resolution (unaggregated regional): 4 chordwise x 5 spanwise = 20 constraints
+    topo_fast_reg = build_stratford_topology(
+        points=fast_mesh.points * 7.5,
+        cells_dict=fast_mesh.cells_dict,
+        num_ffd_stations=5,
+        scale_factor=1.0,
+        aggregate_chordwise=False,
+    )
+    assert topo_fast_reg['num_constraints'] == 20
+
+    # Full resolution (chordwise aggregated): 8 FFD stations -> 8 constraints
     topo_full = build_stratford_topology(
         points=full_mesh.points * 7.5,
         cells_dict=full_mesh.cells_dict,
@@ -54,7 +64,7 @@ def test_stratford_topology_shapes(fast_mesh, full_mesh):
     )
     assert topo_full['num_ffd_stations'] == 8
     assert topo_full['num_mesh_stations'] == 34
-    assert topo_full['num_constraints'] == 32
+    assert topo_full['num_constraints'] == 8
     assert len(topo_full['u_slices']) == 4
     assert len(topo_full['v_slices']) == 8
     assert topo_full['Mu_inv'].shape == (6, 20)
@@ -119,7 +129,7 @@ def test_stratford_evaluation_and_derivatives(fast_mesh):
     margin_val = float(np.asarray(sim[margin]).flatten()[0])
     max_s_val = float(np.asarray(sim[max_s]).flatten()[0])
 
-    assert constrs_val.shape == (20,)
+    assert constrs_val.shape == (5,)
     assert np.all(np.isfinite(constrs_val))
     assert np.isfinite(margin_val)
     assert np.isfinite(max_s_val)
