@@ -3,10 +3,12 @@ lsdo_geo: Geometry representation, deformational parameterization,
 and sensitivity analysis for Multidisciplinary Design Optimization (MDO).
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 from .core.geometry.geometry import Geometry
-from .core.geometry.mesh import Mesh
+from .core.geometry.mesh import Mesh, UnstructuredMesh, CamberSurfaceMesh
+from .core.geometry.marker import Marker
+from .core.geometry.assembly import Connection, Assembly
 from .core.geometry.geometry_functions import (
     import_geometry,
     rotate,
@@ -15,6 +17,7 @@ from .core.geometry.geometry_functions import (
     compute_rodrigues_rotation_matrix,
     apply_quaternion_rotation,
     hamilton_product,
+    S_of,
 )
 from .core.geometry.signed_distance import FunctionSetSignedDistanceOperation
 from .core.parameterization.ffd_block import FFDBlock
@@ -46,6 +49,11 @@ __all__ = [
     # Geometry
     "Geometry",
     "Mesh",
+    "UnstructuredMesh",
+    "CamberSurfaceMesh",
+    "Marker",
+    "Connection",
+    "Assembly",
     "FunctionSetSignedDistanceOperation",
     "import_geometry",
     "rotate",
@@ -54,6 +62,7 @@ __all__ = [
     "compute_rodrigues_rotation_matrix",
     "apply_quaternion_rotation",
     "hamilton_product",
+    "S_of",
     # Parameterization
     "FFDBlock",
     "construct_ffd_block_around_entities",

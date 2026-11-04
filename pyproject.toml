@@ -7,7 +7,7 @@ name = "lsdo_geo"
 description = "A package for geometry and state modeling/representation, parameterization, and mesh creation for MDO."
 readme = "README.md"
 requires-python = ">=3.9"
-license = "LGPL-3.0-or-later"
+license = "Apache-2.0"
 license-files = ["LICENSE.txt"]
 authors = [{name = "Andrew Fletcher", email = "afletcher168@gmail.com"}]
 classifiers = [
@@ -27,10 +27,10 @@ dependencies = [
     'joblib',
     'pandas',
     'scipy',
+    'lsdo_function_spaces>=1.2.0',
     #'csdl_alpha @ git+https://github.com/LSDOlab/CSDL_alpha.git',
-    #'lsdo_function_spaces @ git+https://github.com/LSDOlab/lsdo_function_spaces.git'
 ]
-version = "1.1.0"
+version = "1.2.0"
 
 [project.urls]
 Documentation = "https://lsdo-geo.readthedocs.io/en/latest/"

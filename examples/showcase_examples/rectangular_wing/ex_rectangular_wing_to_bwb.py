@@ -86,8 +86,8 @@ elif 'BWB_NUM_SECTIONS' in os.environ:
 
 # b) Chordwise panel count around airfoil ring (e.g., 20, 40, 50, 60)
 #    Controls chordwise discretization around upper/lower airfoil OML.
-num_chordwise_panels: int = 60
-# num_chordwise_panels: int = 50
+# num_chordwise_panels: int = 60
+num_chordwise_panels: int = 50
 # num_chordwise_panels: int = 30
 if 'BWB_NUM_CHORDWISE_PANELS' in os.environ:
     num_chordwise_panels = int(os.environ['BWB_NUM_CHORDWISE_PANELS'])

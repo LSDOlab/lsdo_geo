@@ -1,9 +1,12 @@
+from __future__ import annotations
 from lsdo_geo.optimization.optimization import Optimization, NewtonOptimizer
 import csdl_alpha as csdl
 import numpy as np
 import numpy.typing as npt
 from dataclasses import dataclass
 from typing import Union, Optional
+import lsdo_function_spaces as lfs
+from lsdo_geo.core.geometry.assembly import Connection, Assembly
 
 
 @dataclass
@@ -108,33 +111,60 @@ class ParameterizationSolver:
         self.add_equality_constraint(computed_value, desired_value, penalty)
 
     
-    def add_equality_constraint(self, constraint:csdl.Variable, desired_value:Union[csdl.Variable, npt.NDArray[np.float64]],
-                                penalty:Optional[Union[float,npt.NDArray[np.float64],csdl.Variable]]=None):
+    def add_equality_constraint(
+        self,
+        constraint: Union[csdl.Variable, Connection, lfs.InterfaceCondition],
+        desired_value: Optional[Union[csdl.Variable, npt.NDArray[np.float64], float]] = None,
+        penalty: Optional[Union[float, npt.NDArray[np.float64], csdl.Variable]] = None,
+    ):
         '''
         Add a constraint to the parameterization problem.
 
         Parameters
         ----------
-        constraint : csdl.Variable
-            The constraint to be satisfied. This is the quantity that will be driven to the desired value.
-        desired_value : csdl.Variable
-            The desired value of the constraint. This is usually the csdl variable that is the design variable from the optimizer, or can
-            be a constant input (like any other csdl variable).
+        constraint : Union[csdl.Variable, Connection, lfs.InterfaceCondition]
+            The constraint to be satisfied (CSDL Variable or Connection/Condition with evaluate_residual()).
+        desired_value : Optional[Union[csdl.Variable, npt.NDArray[np.float64], float]]
+            The desired value of the constraint. If None and constraint is a Connection/InterfaceCondition,
+            defaults to 0.0.
         penalty : Union[float,np.ndarray,csdl.Variable], optional
             The penalty to be applied to the constraint, by default None. If None, lagrange multipliers are used.
             If not None, the penalty is the scaling factor for a quadratic constraint penalty term.
         '''
-        # InversionTransform = csdl.transforms.EqualityInversion()
-        # inverted_variable, inverted_constant, ops = InversionTransform.apply(lhs=constraint, rhs=desired_value, debug = False, aux_info=True)
-        # print(f'Inverted {constraint.name} = {desired_value.name} : {(ops)}')
+        if hasattr(constraint, "evaluate_residual"):
+            res = constraint.evaluate_residual()
+            if desired_value is None:
+                desired_value = 0.0
+            constraint = res
+        elif desired_value is None:
+            desired_value = 0.0
 
         equality_constraint = constraint - desired_value
         if isinstance(desired_value, csdl.Variable):
             equality_constraint.add_name(f'{desired_value.name}_enforcement_constraint')
-        else:
+        elif hasattr(constraint, "name") and constraint.name is not None:
             equality_constraint.add_name(f'{constraint.name}_enforcement_constraint')
+        else:
+            equality_constraint.add_name('enforcement_constraint')
         self.optimization.add_equality_constraint(equality_constraint, penalty=penalty)
-        # self.optimization.add_equality_constraint(inverted_variable - inverted_constant, penalty=penalty)
+
+    def add_connection(
+        self,
+        connection: Union[Connection, lfs.InterfaceCondition],
+        desired_value: Optional[Union[csdl.Variable, npt.NDArray[np.float64], float]] = 0.0,
+        penalty: Optional[Union[float, npt.NDArray[np.float64], csdl.Variable]] = None,
+    ):
+        """Adds a kinematic Connection or InterfaceCondition residual as an equality constraint."""
+        self.add_equality_constraint(connection, desired_value=desired_value, penalty=penalty)
+
+    def add_assembly(
+        self,
+        assembly: Union[Assembly, lfs.FunctionNetwork],
+        penalty: Optional[Union[float, npt.NDArray[np.float64], csdl.Variable]] = None,
+    ):
+        """Adds all condition residuals from an assembly / function network as equality constraints."""
+        residuals = assembly.evaluate_residuals()
+        self.add_equality_constraint(residuals, desired_value=0.0, penalty=penalty)
 
     
     def add_inequality_constraint(self, constraint:csdl.Variable,
