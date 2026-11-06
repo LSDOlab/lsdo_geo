@@ -152,20 +152,27 @@ def process_separation_fields(data_dict: Dict[str, Any]) -> Dict[str, Any]:
     num_ffd_stations = int(data_dict.get('num_stations', 5))
     scale_factor = float(data_dict.get('scale_factor', 7.5))
 
-    # Regional constraint values (4 x num_ffd_stations)
+    # Regional constraint values (4 x num_ffd_stations or 1 x num_ffd_stations)
     if 'dv_stratford_constraints' in data_dict:
         sc_raw = np.asarray(data_dict['dv_stratford_constraints']).flatten()
         if len(sc_raw) == 4 * num_ffd_stations:
             sc_matrix = sc_raw.reshape(4, num_ffd_stations)
-        else:
+        elif len(sc_raw) == num_ffd_stations:
+            sc_matrix = sc_raw.reshape(1, num_ffd_stations)
+        elif len(sc_raw) % 4 == 0:
             num_ffd_stations = len(sc_raw) // 4
             sc_matrix = sc_raw.reshape(4, num_ffd_stations)
+        else:
+            num_ffd_stations = len(sc_raw)
+            sc_matrix = sc_raw.reshape(1, num_ffd_stations)
     elif 'sc_matrix' in data_dict:
         sc_matrix = np.asarray(data_dict['sc_matrix'])
+        if sc_matrix.ndim == 1:
+            sc_matrix = sc_matrix.reshape(1, -1)
         num_ffd_stations = sc_matrix.shape[1]
     else:
         # Default placeholder if not found
-        sc_matrix = np.full((4, num_ffd_stations), 0.30)
+        sc_matrix = np.full((1, num_ffd_stations), 0.30)
 
     # Head shape factor station values
     if 'H_section_upper' in data_dict:
@@ -243,11 +250,15 @@ def process_separation_fields(data_dict: Dict[str, Any]) -> Dict[str, Any]:
         S_dense = None
 
     if S_dense is None:
-        # Reconstruct Stratford 2D surface from 4 x N_stations regional constraints
+        # Reconstruct Stratford 2D surface from regional constraints
         # Anchor S=0 at LE (u=0)
-        u_pts = np.array([0.0, 1.0 / 6.0, 0.5, 5.0 / 6.0, 1.0])
         v_pts = np.linspace(0.0, 1.0, num_ffd_stations)
-        S_pts = np.vstack([np.zeros((1, num_ffd_stations)), sc_matrix])  # (5, num_ffd_stations)
+        if sc_matrix.shape[0] == 4:
+            u_pts = np.array([0.0, 1.0 / 6.0, 0.5, 5.0 / 6.0, 1.0])
+            S_pts = np.vstack([np.zeros((1, num_ffd_stations)), sc_matrix])  # (5, num_ffd_stations)
+        else:
+            u_pts = np.array([0.0, 0.5, 1.0])
+            S_pts = np.vstack([np.zeros((1, num_ffd_stations)), 0.3 * sc_matrix, sc_matrix])
         spl_s = RectBivariateSpline(u_pts, v_pts, S_pts, kx=2, ky=min(3, num_ffd_stations - 1))
         S_dense = spl_s(u_dense, v_dense)
         S_dense = np.clip(S_dense, 0.0, None)
@@ -411,7 +422,10 @@ def generate_separation_figure(proc: Dict[str, Any], output_path: str) -> None:
         ax1.clabel(cnt1, fmt={S_CRIT: r'$S_{\rm crit} = 0.39$'}, fontsize=8.5, inline=True)
 
     # Overlay regional constraint centers
-    u_centers = [1.0 / 6.0, 0.5, 5.0 / 6.0, 1.0]
+    if sc_mat.shape[0] == 4:
+        u_centers = [1.0 / 6.0, 0.5, 5.0 / 6.0, 1.0]
+    else:
+        u_centers = [1.0]  # Trailing edge peak constraint
     v_centers = np.linspace(0.0, 1.0, num_ffd)
     TOL_ACTIVE = 1e-4
     has_active = False

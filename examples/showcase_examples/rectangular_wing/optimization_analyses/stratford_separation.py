@@ -30,6 +30,7 @@ def build_stratford_topology(
     num_ffd_stations: int,
     scale_factor: float = 1.0,
     b_tip_ref: float | None = None,
+    aggregate_chordwise: bool = True,
 ) -> Dict[str, Any]:
     """Construct static topology, B-spline spaces, and 2D evaluation/aggregation structures.
 
@@ -160,12 +161,13 @@ def build_stratford_topology(
         idx = np.where((v_dense >= low - 1e-5) & (v_dense <= high + 1e-5))[0]
         v_slices.append(slice(int(idx[0]), int(idx[-1]) + 1))
 
-    num_constraints = len(u_slices) * len(v_slices)
+    num_constraints = len(v_slices) if aggregate_chordwise else len(u_slices) * len(v_slices)
 
     return {
         'ibl_topology': ibl_topo,
         'num_mesh_stations': num_mesh_stations,
         'num_ffd_stations': num_ffd_stations,
+        'aggregate_chordwise': aggregate_chordwise,
         'num_constraints': num_constraints,
         'Mu_inv': Mu_inv,
         'Mv_inv_T': Mv_inv_T,
@@ -292,13 +294,22 @@ def evaluate_stratford_separation(
     S_dense_2d = csdl.reshape(S_dense_flat, (NU_DENSE, NV_DENSE))
     S_dense_2d.name = 'S_dense_2d'
 
-    # Regional smooth-max aggregation: 4 chordwise x num_ffd_stations spanwise
+    # Regional smooth-max aggregation:
+    # aggregate_chordwise=True yields 1 constraint per spanwise station (aggregated over chord).
+    # aggregate_chordwise=False yields 4 chordwise x num_ffd_stations spanwise constraints.
+    aggregate_chordwise = stratford_topology.get('aggregate_chordwise', True)
     constrs = []
-    for us in u_slices:
+    if aggregate_chordwise:
         for vs in v_slices:
-            cell_sub = S_dense_2d[us, vs]
+            cell_sub = S_dense_2d[:, vs]
             cell_max = csdl.maximum(cell_sub, axes=(0, 1), rho=rho_smooth_max)
             constrs.append(csdl.reshape(cell_max, (1,)))
+    else:
+        for us in u_slices:
+            for vs in v_slices:
+                cell_sub = S_dense_2d[us, vs]
+                cell_max = csdl.maximum(cell_sub, axes=(0, 1), rho=rho_smooth_max)
+                constrs.append(csdl.reshape(cell_max, (1,)))
 
     dv_stratford_constraints = csdl.concatenate(constrs)
     dv_stratford_constraints.name = 'dv_stratford_constraints'

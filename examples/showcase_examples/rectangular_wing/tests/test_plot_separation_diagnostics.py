@@ -48,6 +48,30 @@ def test_process_separation_fields_synthetic():
     assert proc['num_satisfied_S'] == 20
 
 
+def test_process_separation_fields_chordwise_aggregated():
+    """Verify 1 constraint per spanwise station (chordwise aggregated)."""
+    num_ffd = 5
+    num_mesh = 14
+
+    synthetic_dict = {
+        'num_stations': num_ffd,
+        'scale_factor': 7.5,
+        'dv_stratford_constraints': np.full((num_ffd,), 0.35),
+        'H_section_upper': np.full((num_mesh,), 1.95),
+        'dv_H_stations': np.full((num_ffd,), 1.90),
+    }
+
+    proc = process_separation_fields(synthetic_dict)
+
+    assert proc['num_ffd_stations'] == num_ffd
+    assert proc['num_mesh_stations'] == num_mesh
+    assert proc['sc_matrix'].shape == (1, num_ffd)
+    assert proc['S_dense'].shape == (60, 80)
+    assert proc['H_dense'].shape == (60, 80)
+    assert proc['global_margin_S'] > 0.0
+    assert proc['num_satisfied_S'] == num_ffd
+
+
 def test_plot_separation_diagnostics_on_cached_run():
     """Verify end-to-end execution on real optimization run directory."""
     latest_run_dir = '/home/andrew/optimization/lsdo_geo/rectangular_wing_to_bwb_aerostructural_optimization_outputs/2026-10-07_16.10.14.701860'

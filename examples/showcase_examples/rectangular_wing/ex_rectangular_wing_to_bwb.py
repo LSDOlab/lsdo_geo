@@ -153,7 +153,7 @@ include_neg1g_sizing: bool = False  # Options: True or False
 #   Effective structural height factor relative to OML (accounts for spar cap flange
 #   centroid recession beneath OML skins/stringers, shear lag, and internal cutouts)
 # box_height_factor: float = 1.0     # Options: 0.50 - 0.70 (standard preliminary design factor)
-box_height_factor: float = 0.8     # Options: 0.50 - 0.70 (standard preliminary design factor)
+box_height_factor: float = 0.7     # Options: 0.50 - 0.70 (standard preliminary design factor)
 box_height_factor = float(os.environ.get('BOX_HEIGHT_FACTOR', box_height_factor))
 
 # 6. Airfoil shape & control surface options:
@@ -179,6 +179,19 @@ enforce_stratford_constraint: bool = True
 if 'ENFORCE_STRATFORD_CONSTRAINT' in os.environ:
     enforce_stratford_constraint = os.environ.get('ENFORCE_STRATFORD_CONSTRAINT', '1').strip() == '1'
 
+enforce_maneuver_attachment_constraint: bool = True
+if 'ENFORCE_MANEUVER_ATTACHMENT_CONSTRAINT' in os.environ:
+    enforce_maneuver_attachment_constraint = os.environ.get('ENFORCE_MANEUVER_ATTACHMENT_CONSTRAINT', '1').strip() == '1'
+
+f_attached_ss_min: float = float(os.environ.get('F_ATTACHED_SS_MIN', '0.85'))
+maneuver_attachment_eta_min: float = float(os.environ.get('MANEUVER_ATTACHMENT_ETA_MIN', '0.50'))
+
+# 7b. Structural stall load relief toggle:
+#   False (default) -> Conservatively size the structural beam using clean (un-stalled) potential-flow panel forces.
+#                      Flow separation at 2.5g maneuver does not grant structural load relief. Trim still enforces stall loss.
+#   True            -> Size the structural beam using stall-corrected panel forces (stall relieves beam bending).
+structural_stall_relief: bool = os.environ.get('STRUCTURAL_STALL_RELIEF', '0').strip().lower() in ('1', 'true', 'yes')
+
 # 7c. Wake-load consistency penalty:
 #   Penalizes mismatch between near-field surface pressure loading and scaled far-field wake loading.
 #   Uses a deadband one-sided quadratic penalty so discretization noise (< threshold) is 100% unpenalized.
@@ -194,11 +207,11 @@ scale_factor: float = 7.5             # Scale factor (7.5 for 50 m full-scale BW
 warm_start: bool = os.environ.get('WARM_START', '1').strip().lower() not in ('0', 'false', 'no')
 warm_start_folder: str = os.environ.get(
     'BWB_WARM_START_FOLDER',
-    'rectangular_wing_to_bwb_aerostructural_optimization_outputs/2026-10-23_18.38.34.200350'
+    'rectangular_wing_to_bwb_aerostructural_optimization_outputs/2026-10-28_13.30.10.728375'
 )
 
 # 9. Diagnostics & pre-flight verification:
-run_pre_diagnostics: bool = False      # Run initial JAX evaluation and print comprehensive diagnostic report before optimization
+run_pre_diagnostics: bool = os.environ.get('RUN_PRE_DIAGNOSTICS', '0').strip().lower() in ('1', 'true', 'yes')
 # =============================================================================
 
 # Validate viscous drag mode
@@ -827,6 +840,33 @@ for i in range(num_stations):
     right_ol = min(total_eval_cl_pts - 1, right + 1) if i < num_stations - 1 else right
     station_cl_group_indices.append(list(range(left_ol, right_ol + 1)))
 
+# Compute B-spline space and matrix for stall closure attached flow percentage fitting
+# Exact (num_mesh_stations + 1)-CP cubic B-spline fit with root symmetry S'(0)=0 across mesh stations
+if stall_model == 'stratford_closure':
+    station_span_y_stall = stall_closure_topology['station_span_y']
+    b_tip_stall = float(np.max(station_span_y_stall))
+    tau_mesh_stall = np.clip(station_span_y_stall / b_tip_stall, 0.0, 1.0)
+    num_mesh_stall = len(tau_mesh_stall)
+
+    tau_colloc_stall = np.concatenate([[0.0], tau_mesh_stall])
+    int_knots_stall = [np.mean(tau_colloc_stall[j:j+3]) for j in range(1, num_mesh_stall - 2)]
+    knots_f_stall = np.concatenate([[0.0, 0.0, 0.0, 0.0], int_knots_stall, [1.0, 1.0, 1.0, 1.0]])
+
+    f_stall_fit_space = lfs.BSplineSpace(
+        num_parametric_dimensions=1,
+        degree=3,
+        coefficients_shape=(num_mesh_stall + 1,),
+        knots=(knots_f_stall,),
+    )
+
+    B_stall_matrix = f_stall_fit_space.compute_basis_matrix(tau_mesh_stall.reshape((-1, 1))).toarray()
+    d_root_stall_row = np.zeros((1, num_mesh_stall + 1))
+    d_root_stall_row[0, 0] = -1.0
+    d_root_stall_row[0, 1] = 1.0
+
+    M_f_stall_sys = np.vstack([B_stall_matrix, d_root_stall_row])
+    M_f_stall_inv = np.linalg.inv(M_f_stall_sys)
+
 # endregion
 
 
@@ -909,6 +949,26 @@ t_max_gauge = t_max_base * scale_factor
 t_nominal = t_nom_base * scale_factor
 thick_scaler = 1.0 / t_nominal
 
+def _interp_spanwise(prior_arr, target_n):
+    """Interpolate a 1D or 2D array along the spanwise direction (eta in [0, 1])."""
+    prior_arr = np.asarray(prior_arr)
+    if prior_arr.ndim == 1:
+        if len(prior_arr) == target_n:
+            return prior_arr
+        eta_p = np.linspace(0.0, 1.0, len(prior_arr))
+        eta_t = np.linspace(0.0, 1.0, target_n)
+        return np.interp(eta_t, eta_p, prior_arr)
+    elif prior_arr.ndim == 2:
+        if prior_arr.shape[1] == target_n:
+            return prior_arr
+        eta_p = np.linspace(0.0, 1.0, prior_arr.shape[1])
+        eta_t = np.linspace(0.0, 1.0, target_n)
+        out = np.zeros((prior_arr.shape[0], target_n))
+        for row in range(prior_arr.shape[0]):
+            out[row, :] = np.interp(eta_t, eta_p, prior_arr[row, :])
+        return out
+    return prior_arr
+
 if formulation == 'ar_area':
     # Formulation 1: Cubic B-spline Target Regularization
     # Taper ratio control points (stations 1 to num_stations-1) + Aspect Ratio (AR) + Sweep Angle Control Points + Elevator + Pitch + Pitch 2.5g + Linear Twist
@@ -982,30 +1042,56 @@ if formulation == 'ar_area':
             if 'dv_opt_taper_control_points' in prior_data:
                 prior_taper = np.asarray(prior_data['dv_opt_taper_control_points'])
                 if prior_taper.shape == taper_control_points.shape:
-                    print(f"Warm starting design variables from {warm_start_npz}...")
-                    taper_control_points.value = prior_taper
-                    if 'dv_opt_aspect_ratio' in prior_data:
-                        aspect_ratio.value = np.asarray(prior_data['dv_opt_aspect_ratio'])
-                    if 'dv_opt_sweep_angle_control_points' in prior_data:
-                        sweep_angle_control_points.value = np.asarray(prior_data['dv_opt_sweep_angle_control_points'])
-                    if 'dv_opt_tc_target_control_points' in prior_data:
-                        tc_target_control_points.value = np.asarray(prior_data['dv_opt_tc_target_control_points'])
-                    if 'dv_opt_twist_dvs' in prior_data:
-                        twist_dvs.value = np.asarray(prior_data['dv_opt_twist_dvs'])
-                    if 'dv_opt_ttop_dvs' in prior_data:
-                        ttop_dvs.value = np.asarray(prior_data['dv_opt_ttop_dvs'])
-                    if 'dv_opt_tweb_dvs' in prior_data:
-                        tweb_dvs.value = np.asarray(prior_data['dv_opt_tweb_dvs'])
-                    if include_camber and 'dv_opt_camber_dvs' in prior_data:
-                        camber_dvs.value = np.asarray(prior_data['dv_opt_camber_dvs'])
-                    if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
-                        thickness_shape_dvs.value = np.asarray(prior_data['dv_opt_thickness_shape_dvs'])
+                    print(f"Warm starting design variables from {warm_start_npz} (direct shape match)...")
                 else:
-                    print(f"Warm start resolution mismatch (prior: {prior_taper.shape}, current: {taper_control_points.shape}), skipping station DVs...")
+                    print(f"Warm starting design variables from {warm_start_npz} (interpolating from {len(prior_taper)} to {num_chord_stations - 1} taper stations)...")
+                taper_control_points.value = np.clip(
+                    _interp_spanwise(prior_taper, num_chord_stations - 1),
+                    0.05, 1.25,
+                )
+                if 'dv_opt_aspect_ratio' in prior_data:
+                    aspect_ratio.value = np.asarray(prior_data['dv_opt_aspect_ratio'])
+                if 'dv_opt_sweep_angle_control_points' in prior_data:
+                    sweep_angle_control_points.value = np.clip(
+                        _interp_spanwise(prior_data['dv_opt_sweep_angle_control_points'], num_chord_stations - 1),
+                        0.0, 60.0 * np.pi / 180.0,
+                    )
+                if 'dv_opt_tc_target_control_points' in prior_data:
+                    tc_target_control_points.value = np.clip(
+                        _interp_spanwise(prior_data['dv_opt_tc_target_control_points'], num_chord_stations),
+                        tc_lower, tc_upper,
+                    )
+                if 'dv_opt_twist_dvs' in prior_data:
+                    twist_dvs.value = np.clip(
+                        _interp_spanwise(prior_data['dv_opt_twist_dvs'], num_chord_stations),
+                        twist_lower, twist_upper,
+                    )
+                if 'dv_opt_ttop_dvs' in prior_data:
+                    ttop_dvs.value = np.clip(
+                        _interp_spanwise(prior_data['dv_opt_ttop_dvs'], num_chord_stations),
+                        t_min_gauge, t_max_gauge,
+                    )
+                if 'dv_opt_tweb_dvs' in prior_data:
+                    tweb_dvs.value = np.clip(
+                        _interp_spanwise(prior_data['dv_opt_tweb_dvs'], num_chord_stations),
+                        t_min_gauge, t_max_gauge,
+                    )
+                if include_camber and 'dv_opt_camber_dvs' in prior_data:
+                    camber_dvs.value = np.clip(
+                        _interp_spanwise(prior_data['dv_opt_camber_dvs'], num_chord_stations),
+                        camber_lower, camber_upper,
+                    )
+                if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
+                    thickness_shape_dvs.value = np.clip(
+                        _interp_spanwise(prior_data['dv_opt_thickness_shape_dvs'], num_chord_stations),
+                        thick_shape_lower, thick_shape_upper,
+                    )
             if 'dv_opt_pitch' in prior_data:
                 pitch.value = float(np.asarray(prior_data['dv_opt_pitch']).flatten()[0])
             if 'dv_opt_pitch_ss' in prior_data:
                 pitch_ss.value = float(np.asarray(prior_data['dv_opt_pitch_ss']).flatten()[0])
+            if 'dv_opt_payload_cg' in prior_data and geonic_payload_mode == 'none':
+                payload_cg.value = float(np.asarray(prior_data['dv_opt_payload_cg']).flatten()[0])
             if 'dv_opt_misc_cg' in prior_data and use_geonic:
                 misc_cg.value = float(np.asarray(prior_data['dv_opt_misc_cg']).flatten()[0])
             if use_geonic and geonic_payload_mode in {'oversized', 'both'} and 'dv_opt_payload_center_x' in prior_data:
@@ -1136,25 +1222,56 @@ elif formulation == 'chord_span':
             if 'dv_opt_chord_stretch_dvs' in prior_data:
                 prior_chord_dvs = np.asarray(prior_data['dv_opt_chord_stretch_dvs'])
                 if prior_chord_dvs.shape == chord_stretch_dvs.shape:
-                    print(f"Warm starting design variables from {warm_start_npz}...")
-                    chord_stretch_dvs.value = prior_chord_dvs
-                    sweep_dvs.value = np.asarray(prior_data['dv_opt_sweep_dvs'])
-                    thickness_stretch_dvs.value = np.asarray(prior_data['dv_opt_thickness_stretch_dvs'])
-                    twist_dvs.value = np.asarray(prior_data['dv_opt_twist_dvs'])
-                    ttop_dvs.value = np.asarray(prior_data['dv_opt_ttop_dvs'])
-                    tweb_dvs.value = np.asarray(prior_data['dv_opt_tweb_dvs'])
-                    if include_camber and 'dv_opt_camber_dvs' in prior_data:
-                        camber_dvs.value = np.asarray(prior_data['dv_opt_camber_dvs'])
-                    if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
-                        thickness_shape_dvs.value = np.asarray(prior_data['dv_opt_thickness_shape_dvs'])
+                    print(f"Warm starting design variables from {warm_start_npz} (direct shape match)...")
                 else:
-                    print(f"Warm start resolution mismatch (prior: {prior_chord_dvs.shape}, current: {chord_stretch_dvs.shape}), skipping station DVs...")
+                    print(f"Warm starting design variables from {warm_start_npz} (interpolating from {len(prior_chord_dvs)} to {num_chord_stations} stations)...")
+
+                chord_stretch_dvs.value = np.clip(
+                    _interp_spanwise(prior_chord_dvs, num_chord_stations),
+                    chord_stretch_lower, chord_stretch_upper,
+                )
+                if 'dv_opt_sweep_dvs' in prior_data:
+                    sweep_interp = _interp_spanwise(prior_data['dv_opt_sweep_dvs'], num_chord_stations)
+                    sweep_interp[0] = 0.0  # strictly enforce root sweep = 0
+                    sweep_dvs.value = np.clip(sweep_interp, sweep_lower, sweep_upper)
+                if 'dv_opt_thickness_stretch_dvs' in prior_data:
+                    thickness_stretch_dvs.value = np.clip(
+                        _interp_spanwise(prior_data['dv_opt_thickness_stretch_dvs'], num_chord_stations),
+                        thickness_stretch_lower, thickness_stretch_upper,
+                    )
+                if 'dv_opt_twist_dvs' in prior_data:
+                    twist_dvs.value = np.clip(
+                        _interp_spanwise(prior_data['dv_opt_twist_dvs'], num_chord_stations),
+                        twist_lower, twist_upper,
+                    )
+                if 'dv_opt_ttop_dvs' in prior_data:
+                    ttop_dvs.value = np.clip(
+                        _interp_spanwise(prior_data['dv_opt_ttop_dvs'], num_chord_stations),
+                        t_min_gauge, t_max_gauge,
+                    )
+                if 'dv_opt_tweb_dvs' in prior_data:
+                    tweb_dvs.value = np.clip(
+                        _interp_spanwise(prior_data['dv_opt_tweb_dvs'], num_chord_stations),
+                        t_min_gauge, t_max_gauge,
+                    )
+                if include_camber and 'dv_opt_camber_dvs' in prior_data:
+                    camber_dvs.value = np.clip(
+                        _interp_spanwise(prior_data['dv_opt_camber_dvs'], num_chord_stations),
+                        camber_lower, camber_upper,
+                    )
+                if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
+                    thickness_shape_dvs.value = np.clip(
+                        _interp_spanwise(prior_data['dv_opt_thickness_shape_dvs'], num_chord_stations),
+                        thick_shape_lower, thick_shape_upper,
+                    )
             if 'dv_opt_span_stretch_dv' in prior_data:
                 span_stretch_dv.value = np.asarray(prior_data['dv_opt_span_stretch_dv']).reshape((1,))
             if 'dv_opt_pitch' in prior_data:
                 pitch.value = float(np.asarray(prior_data['dv_opt_pitch']).flatten()[0])
             if 'dv_opt_pitch_ss' in prior_data:
                 pitch_ss.value = float(np.asarray(prior_data['dv_opt_pitch_ss']).flatten()[0])
+            if 'dv_opt_payload_cg' in prior_data and geonic_payload_mode == 'none':
+                payload_cg.value = float(np.asarray(prior_data['dv_opt_payload_cg']).flatten()[0])
             if 'dv_opt_misc_cg' in prior_data and use_geonic:
                 misc_cg.value = float(np.asarray(prior_data['dv_opt_misc_cg']).flatten()[0])
             if use_geonic and geonic_payload_mode in {'oversized', 'both'} and 'dv_opt_payload_center_x' in prior_data:
@@ -1903,6 +2020,8 @@ if stall_model == 'stratford_closure':
     panel_forces_corr_ss = stall_ss['panel_forces_corrected_right']
 else:
     panel_forces_ss_active = panel_forces_right_ss
+    f_attached_ss = None
+    f_attached_min_ss = None
 
 # Lifting-line Fourier induced drag calculation from cruise vertical panel forces
 F_z_cruise = panel_forces_right_cruise[:, 2]
@@ -1920,11 +2039,15 @@ Di_Fourier = CDi_Fourier * 0.5 * rho_array[0] * (cruise_speed ** 2) * planform_a
 W_var = csdl.Variable(value=W_matrix)
 
 # 1. Force & Moment Mapping for Structural Sizing Case
-F_node = csdl.matmat(W_var, panel_forces_ss_active)
+# If structural_stall_relief is False (default), conservatively size the structural beam
+# using clean (un-stalled) potential-flow panel forces to prevent optimizer exploitation.
+panel_forces_struct_ss = panel_forces_ss_active if structural_stall_relief else panel_forces_right_ss
+
+F_node = csdl.matmat(W_var, panel_forces_struct_ss)
 
 B_expand = csdl.expand(beam_mesh, (num_beam_nodes, num_right_panels, 3), 'nj->nij')
 C_expand = csdl.expand(dynamic_panel_centers_right, (num_beam_nodes, num_right_panels, 3), 'ij->nij')
-F_expand = csdl.expand(panel_forces_ss_active, (num_beam_nodes, num_right_panels, 3), 'ij->nij')
+F_expand = csdl.expand(panel_forces_struct_ss, (num_beam_nodes, num_right_panels, 3), 'ij->nij')
 W_expand = csdl.expand(W_var, (num_beam_nodes, num_right_panels, 3), 'ni->nij')
 
 r = C_expand - B_expand
@@ -2558,6 +2681,58 @@ static_margin.set_as_constraint(lower=0.02, scaler=2.e1)
 # =========================================================================
 # 4B: Stall Progression & Maneuver Tip Margin Constraint via B-Spline Fit
 # =========================================================================
+# 1. Principled Stratford Stall Closure Model:
+# Fit cubic B-spline with root symmetry S'(0)=0 to the mesh station attached flow
+# percentage values (f_attached_ss), evaluate at dense spanwise evaluation points
+# across the half-span, and locally aggregate using smooth minimum such that there is
+# exactly one constraint per spanwise DV (5 in fast, 8 in full).
+# Only enforce the constraints corresponding to >65% along the span.
+if stall_model == 'stratford_closure':
+    f_ss_rhs = csdl.concatenate([f_attached_ss, csdl.Variable(value=np.array([0.0]))])
+    f_ss_coeffs_flat = csdl.matvec(csdl.Variable(value=M_f_stall_inv), f_ss_rhs)
+    f_ss_coeffs = csdl.reshape(f_ss_coeffs_flat, (num_mesh_stall + 1, 1))
+    f_ss_func = lfs.Function(space=f_stall_fit_space, coefficients=f_ss_coeffs)
+
+    # Evaluate at the dense spanwise evaluation points across the half-span (matching cl_ss / stress)
+    all_eval_f_ss = f_ss_func.evaluate(eval_cl_points_arr)
+
+    # Aggregate each station's span sector using smooth minimum (worst-case attachment in sector)
+    aggregated_f_ss_list = []
+    for i in range(num_stations):
+        grp = station_cl_group_indices[i]
+        sub_f_ss = csdl.concatenate([all_eval_f_ss[idx] for idx in grp])
+        grp_f_min = -csdl.maximum(-sub_f_ss, axes=(0,), rho=40.0)
+        aggregated_f_ss_list.append(csdl.reshape(grp_f_min, (1,)))
+
+    # dv_f_attached_ss has shape (num_stations,) -> exactly 1 constraint value per spanwise DV (5 in fast, 8 in full)
+    dv_f_attached_ss = csdl.concatenate(aggregated_f_ss_list)
+    dv_f_attached_ss.name = 'dv_f_attached_ss'
+
+    # Determine spanwise DV stations corresponding to >= 50% along the span (station_cl_peaks >= maneuver_attachment_eta_min)
+    outboard_dv_mask = station_cl_peaks >= (maneuver_attachment_eta_min - 1e-6)
+    if np.any(outboard_dv_mask):
+        near_tip_dv_start_idx = int(np.where(outboard_dv_mask)[0][0])
+    else:
+        near_tip_dv_start_idx = max(0, num_stations - 2)
+
+    # f_attached_ss_near_tip has only the outboard DV constraints (>= 50% span)
+    f_attached_ss_near_tip = dv_f_attached_ss[near_tip_dv_start_idx:]
+    f_attached_ss_near_tip.name = 'f_attached_ss_near_tip'
+    f_attached_min_ss_near_tip = -csdl.maximum(-f_attached_ss_near_tip, axes=(0,), rho=40.0)
+    f_attached_min_ss_near_tip.name = 'f_attached_min_ss_near_tip'
+
+    if enforce_maneuver_attachment_constraint:
+        f_attached_ss_near_tip.set_as_constraint(
+            lower=f_attached_ss_min,
+            scaler=1.0 / f_attached_ss_min,
+        )
+else:
+    dv_f_attached_ss = None
+    f_attached_ss_near_tip = None
+    f_attached_min_ss_near_tip = None
+    near_tip_dv_start_idx = 0
+
+# 2. Empirical Sectional Cl Model (Legacy Fallback):
 # Fit 101-CP cubic B-spline to the 100 drag strip maneuver lift coefficients (Cl_ss)
 # with root symmetry S'(0)=0, matching the stress fitting/evaluation/aggregation architecture.
 cl_ss_rhs = csdl.concatenate([cl_local_elem_ss, csdl.Variable(value=np.array([0.0]))])
@@ -2746,6 +2921,9 @@ if stall_model == 'stratford_closure':
         mu_w_stall_cruise,
         f_attached_ss,
         f_attached_min_ss,
+        dv_f_attached_ss,
+        f_attached_ss_near_tip,
+        f_attached_min_ss_near_tip,
         panel_forces_corr_cruise,
         panel_forces_corr_ss,
         static_margin_inviscid,
@@ -2970,6 +3148,19 @@ if run_pre_diagnostics:
         print(f"Cruise Attached Fraction f_min: {f_min_cr_val:.4f} | Separation Drag D_sep: {d_sep_cr_val:.1f} N")
         print(f"Reconciled Di_Trefftz: {di_rec_val:.1f} N | Reconciliation Factor k_rec: {k_rec_val:.4f} | Pre-Recon Lift Residual: {res_lift_val:+.1f} N")
         print(f"Pull-Up (Node 2) Attached Fraction f_min: {f_min_ss_val:.4f}")
+        print(f"Structural Sizing Stall Relief: {'ENABLED (stall relieves beam bending)' if structural_stall_relief else 'DISABLED (conservatively sized with clean potential forces)'}")
+        if dv_f_attached_ss is not None and f_attached_ss_near_tip is not None:
+            dv_f_arr = np.asarray(jax_sim[dv_f_attached_ss]).flatten()
+            f_ss_near_tip_arr = np.asarray(jax_sim[f_attached_ss_near_tip]).flatten()
+            enforced_peaks = station_cl_peaks[near_tip_dv_start_idx:]
+            f_min_near_tip_val = float(np.min(f_ss_near_tip_arr))
+            near_tip_status = "ATTACHED (FEASIBLE)" if f_min_near_tip_val >= f_attached_ss_min else "SEPARATED (VIOLATED)"
+            print(f"Maneuver Attached Fraction per Spanwise DV (n={num_stations}): {np.round(dv_f_arr, 4)}")
+            print(f"Maneuver Outboard DV Constraints (eta >= {maneuver_attachment_eta_min:.2f}, n={len(f_ss_near_tip_arr)}, Min: {f_min_near_tip_val:.4f}, {near_tip_status}):")
+            for dv_i, (eta_p, f_val) in enumerate(zip(enforced_peaks, f_ss_near_tip_arr)):
+                st_idx = near_tip_dv_start_idx + dv_i
+                st_stat = "FEASIBLE" if f_val >= f_attached_ss_min else "VIOLATED"
+                print(f"  DV Station {st_idx} (eta = {eta_p:.3f}): f = {f_val:.4f} (Limit: {f_attached_ss_min:.4f}, {st_stat})")
     else:
         print(f"Stall Model: CL EMPIRICAL (Critical Cl = {cl_crit:.2f})\n")
 
@@ -3000,7 +3191,16 @@ if __name__ == '__main__':
         optimizer = modopt.PySLSQP(
             optimization_problem,
             # solver_options={'maxiter': max_iter, 'acc': 1.e-5},
-            solver_options={'maxiter': max_iter, 'acc': slsqp_acc},
+            solver_options={
+                'maxiter': max_iter,
+                'acc': slsqp_acc,
+                'save_itr': 'major',
+                'save_vars': [
+                    'x', 'objective', 'optimality', 'feasibility',
+                    'step', 'iter', 'majiter', 'ismajor', 'mode',
+                    'constraints', 'gradient', 'multipliers', 'jacobian',
+                ],
+            },
             readable_outputs=['x'],
         )
         optimizer.solve()
@@ -3017,11 +3217,11 @@ if __name__ == '__main__':
     # Find the latest output folder (or TARGET_OUTPUT_FOLDER if provided)
     output_base_dir = 'rectangular_wing_to_bwb_aerostructural_optimization_outputs'
     output_folders = glob.glob(os.path.join(output_base_dir, '*'))
+    valid_folders = [f for f in output_folders if os.path.isfile(os.path.join(f, 'x.out')) and os.path.getsize(os.path.join(f, 'x.out')) > 0]
     target_folder = os.environ.get('TARGET_OUTPUT_FOLDER', None)
     if target_folder and os.path.exists(target_folder):
         latest_folder = target_folder
     else:
-        valid_folders = [f for f in output_folders if os.path.isfile(os.path.join(f, 'x.out')) and os.path.getsize(os.path.join(f, 'x.out')) > 0]
         latest_folder = max(valid_folders, key=os.path.getmtime) if valid_folders else max(output_folders, key=os.path.getmtime)
     print(f"Reading optimization history from: {latest_folder}")
     
@@ -3173,8 +3373,25 @@ if __name__ == '__main__':
         WakeCirculationClosureHistory,
         WakeLoadConsistencyHistory,
     )
+    from optimization_analyses.plot_feasibility_and_optimality import (
+        OptimizationConvergenceHistory,
+        plot_feasibility_and_optimality,
+    )
     wake_load_diagnostic = WakeLoadConsistencyHistory()
     wake_closure_diagnostic = WakeCirculationClosureHistory()
+    convergence_diagnostic = OptimizationConvergenceHistory(
+        design_variables=design_variables,
+        formulation=formulation,
+        scale_factor=scale_factor,
+        use_geonic=use_geonic,
+        geonic_payload_mode=geonic_payload_mode,
+        allowable_stress=allowable_stress,
+        stall_model=stall_model,
+        w_ref=W_ref,
+        c_ref=c_ref,
+        load_factor_val=load_factor_val,
+        include_neg1g_sizing=include_neg1g_sizing,
+    )
     wing_img_path = os.path.join(latest_folder, 'final_wing.png')
     
     for iteration in range(num_iterations):
@@ -3194,6 +3411,13 @@ if __name__ == '__main__':
     
         # Run the simulator to update geometry coefficients
         jax_sim.run()
+
+        convergence_diagnostic.record(
+            iteration=iteration,
+            jax_sim=jax_sim,
+            x_scaled=x_scaled,
+            main_script=sys.modules[__name__],
+        )
 
         wake_load_diagnostic.record(
             iteration=iteration,
@@ -3256,6 +3480,12 @@ if __name__ == '__main__':
                 margin_record = float(np.asarray(jax_sim[geonic_margin]).flatten()[0])
             geonic_margin_history.append(margin_record)
     
+        skip_frames = os.environ.get('SKIP_FRAMES', '0') == '1'
+        if skip_frames and iteration < num_iterations - 1:
+            if iteration % 20 == 0 or iteration == num_iterations - 2:
+                print(f"  Iteration {iteration}/{num_iterations - 1} evaluated (SKIP_FRAMES=1 active)")
+            continue
+
         # Get plotting elements from geometry.plot (returns list of pyvista objects)
         plotting_elements = geometry.plot(show=False)
     
@@ -3647,6 +3877,15 @@ if __name__ == '__main__':
                     cache_dict['f_attached_min_cruise'] = float(np.asarray(jax_sim[f_attached_min_cruise]).flatten()[0])
                     cache_dict['f_attached_ss'] = np.asarray(jax_sim[f_attached_ss]).flatten()
                     cache_dict['f_attached_min_ss'] = float(np.asarray(jax_sim[f_attached_min_ss]).flatten()[0])
+                    if dv_f_attached_ss is not None:
+                        cache_dict['dv_f_attached_ss'] = np.asarray(jax_sim[dv_f_attached_ss]).flatten()
+                    if f_attached_ss_near_tip is not None:
+                        cache_dict['f_attached_ss_near_tip'] = np.asarray(jax_sim[f_attached_ss_near_tip]).flatten()
+                        cache_dict['f_attached_min_ss_near_tip'] = float(np.min(cache_dict['f_attached_ss_near_tip']))
+                        cache_dict['f_attached_ss_min_allowable'] = float(f_attached_ss_min)
+                        cache_dict['maneuver_attachment_eta_min'] = float(maneuver_attachment_eta_min)
+                        cache_dict['enforce_maneuver_attachment_constraint'] = bool(enforce_maneuver_attachment_constraint)
+                    cache_dict['structural_stall_relief'] = bool(structural_stall_relief)
                     cache_dict['d_separation_cruise'] = float(np.asarray(jax_sim[D_separation_cruise]).flatten()[0])
                     cache_dict['di_trefftz_reconciled'] = float(np.asarray(jax_sim[Di_Trefftz_reconciled]).flatten()[0])
                     cache_dict['cdi_trefftz_reconciled'] = float(np.asarray(jax_sim[CDi_Trefftz_reconciled]).flatten()[0])
@@ -3719,6 +3958,13 @@ if __name__ == '__main__':
                         'f_attached_min_cruise': cache_dict['f_attached_min_cruise'],
                         'f_attached_ss': cache_dict['f_attached_ss'],
                         'f_attached_min_ss': cache_dict['f_attached_min_ss'],
+                        'dv_f_attached_ss': cache_dict.get('dv_f_attached_ss', None),
+                        'f_attached_ss_near_tip': cache_dict.get('f_attached_ss_near_tip', None),
+                        'f_attached_min_ss_near_tip': cache_dict.get('f_attached_min_ss_near_tip', None),
+                        'f_attached_ss_min_allowable': cache_dict.get('f_attached_ss_min_allowable', None),
+                        'maneuver_attachment_eta_min': cache_dict.get('maneuver_attachment_eta_min', None),
+                        'enforce_maneuver_attachment_constraint': cache_dict.get('enforce_maneuver_attachment_constraint', None),
+                        'structural_stall_relief': cache_dict.get('structural_stall_relief', False),
                         'd_separation_cruise': cache_dict['d_separation_cruise'],
                         'di_trefftz_reconciled': cache_dict['di_trefftz_reconciled'],
                         'cdi_trefftz_reconciled': cache_dict['cdi_trefftz_reconciled'],
@@ -3837,25 +4083,26 @@ if __name__ == '__main__':
     plotter.close()
     
     # Compile rendered frames into MP4 video using bundled imageio_ffmpeg binary
-    try:
-        import imageio_ffmpeg, subprocess, shutil
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-        cmd = [
-            ffmpeg_exe, '-y',
-            '-framerate', '4',
-            '-i', os.path.join(frames_dir, 'frame_%04d.png'),
-            '-c:v', 'libx264',
-            '-pix_fmt', 'yuv420p',
-            video_path
-        ]
-        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        if res.returncode == 0:
-            print(f"Video successfully saved to: {video_path}")
-            shutil.rmtree(frames_dir, ignore_errors=True)
-        else:
-            print(f"Warning: ffmpeg video encoding failed: {res.stderr.decode('utf-8', errors='ignore')}")
-    except Exception as e:
-        print(f"Warning: video compilation encountered an error: {e}")
+    if not (os.environ.get('SKIP_FRAMES', '0') == '1'):
+        try:
+            import imageio_ffmpeg, subprocess, shutil
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            cmd = [
+                ffmpeg_exe, '-y',
+                '-framerate', '4',
+                '-i', os.path.join(frames_dir, 'frame_%04d.png'),
+                '-c:v', 'libx264',
+                '-pix_fmt', 'yuv420p',
+                video_path
+            ]
+            res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            if res.returncode == 0:
+                print(f"Video successfully saved to: {video_path}")
+                shutil.rmtree(frames_dir, ignore_errors=True)
+            else:
+                print(f"Warning: ffmpeg video encoding failed: {res.stderr.decode('utf-8', errors='ignore')}")
+        except Exception as e:
+            print(f"Warning: video compilation encountered an error: {e}")
     
     # region Plot Summary Figure (Wing geometry vs Theory)
     import matplotlib.pyplot as plt
@@ -3951,40 +4198,11 @@ if __name__ == '__main__':
     plt.close()
     print(f"Summary figure saved to: {summary_fig_path}")
 
-    try:
-        diagnostic_data_path, diagnostic_figure_path = wake_load_diagnostic.save_and_plot(latest_folder)
-        print(f"Wake-load consistency diagnostic saved to: {diagnostic_data_path}")
-        print(f"Wake-load consistency figure saved to: {diagnostic_figure_path}")
-    except Exception as exc:
-        print(f"Warning: unable to save wake-load consistency diagnostic: {exc}")
-    try:
-        closure_data_path, closure_figure_path = wake_closure_diagnostic.save_and_plot(latest_folder)
-        print(f"Wake-circulation closure diagnostic saved to: {closure_data_path}")
-        print(f"Wake-circulation closure figure saved to: {closure_figure_path}")
-    except Exception as exc:
-        print(f"Warning: unable to save wake-circulation closure diagnostic: {exc}")
-
-    # Viscous Drag Mode and Attachment Final Summary
-    cd_visc_final = float(np.asarray(jax_sim[CD_viscous]).flatten()[0])
-    d_visc_final = float(np.asarray(jax_sim[D_viscous]).flatten()[0])
-    hmax_final = float(np.asarray(jax_sim[H_max_ibl]).flatten()[0])
-    att_margin_final = float(np.asarray(jax_sim[ibl_attachment_margin]).flatten()[0])
-    min_cp_final = float(np.asarray(jax_sim[ibl_min_cp]).flatten()[0])
-    cp_cut_margin_final = float(np.asarray(jax_sim[ibl_cp_cutoff_margin]).flatten()[0])
-    att_st_final = "ATTACHED (FEASIBLE)" if att_margin_final >= 0.0 else "SEPARATED (VIOLATED)"
-    print(f"\n================ VISCOUS DRAG FINAL SUMMARY ================")
-    print(f"Selected Mode: {viscous_drag_mode.upper()}")
-    print(f"CD_viscous:    {cd_visc_final*1e4:.2f} counts ({cd_visc_final:.6f})")
-    print(f"D_viscous:     {d_visc_final:.1f} N")
-    print(f"H_max_ibl:     {hmax_final:.4f} (Limit: 2.40)")
-    print(f"Attach Margin: {att_margin_final:+.4f} ({att_st_final})")
-    print(f"Min Cp:        {min_cp_final:.4f} (Cutoff Margin: {cp_cut_margin_final:+.4f})")
-    print(f"============================================================\n")
-    
     import shutil
-    current_conv_id = 'ae98c491-cb6a-4455-8a09-a0df739801c2'
+    current_conv_id = '09524c37-f7d1-40a1-85ac-170d91a90d0c'
     candidate_ids = [
         current_conv_id,
+        'ae98c491-cb6a-4455-8a09-a0df739801c2',
         '0ac41e2d-0335-41d9-9f48-d6791df931f1',
         'ce0e9874-a39a-41db-b481-5008cc744a13',
         '0c0a47e5-2e16-41bb-9139-10357c23c5ee',
@@ -4005,6 +4223,42 @@ if __name__ == '__main__':
             if artifact_dir and os.path.exists(artifact_dir):
                 break
 
+    try:
+        diagnostic_data_path, diagnostic_figure_path = wake_load_diagnostic.save_and_plot(latest_folder)
+        print(f"Wake-load consistency diagnostic saved to: {diagnostic_data_path}")
+        print(f"Wake-load consistency figure saved to: {diagnostic_figure_path}")
+    except Exception as exc:
+        print(f"Warning: unable to save wake-load consistency diagnostic: {exc}")
+    try:
+        closure_data_path, closure_figure_path = wake_closure_diagnostic.save_and_plot(latest_folder)
+        print(f"Wake-circulation closure diagnostic saved to: {closure_data_path}")
+        print(f"Wake-circulation closure figure saved to: {closure_figure_path}")
+    except Exception as exc:
+        print(f"Warning: unable to save wake-circulation closure diagnostic: {exc}")
+    try:
+        conv_data_path, conv_fig_path = convergence_diagnostic.save_and_plot(latest_folder, artifact_dir=artifact_dir, metric='both')
+        print(f"Convergence diagnostic saved to: {conv_data_path}")
+        print(f"Convergence figure saved to: {conv_fig_path}")
+    except Exception as exc:
+        print(f"Warning: unable to save convergence diagnostic: {exc}")
+
+    # Viscous Drag Mode and Attachment Final Summary
+    cd_visc_final = float(np.asarray(jax_sim[CD_viscous]).flatten()[0])
+    d_visc_final = float(np.asarray(jax_sim[D_viscous]).flatten()[0])
+    hmax_final = float(np.asarray(jax_sim[H_max_ibl]).flatten()[0])
+    att_margin_final = float(np.asarray(jax_sim[ibl_attachment_margin]).flatten()[0])
+    min_cp_final = float(np.asarray(jax_sim[ibl_min_cp]).flatten()[0])
+    cp_cut_margin_final = float(np.asarray(jax_sim[ibl_cp_cutoff_margin]).flatten()[0])
+    att_st_final = "ATTACHED (FEASIBLE)" if att_margin_final >= 0.0 else "SEPARATED (VIOLATED)"
+    print(f"\n================ VISCOUS DRAG FINAL SUMMARY ================")
+    print(f"Selected Mode: {viscous_drag_mode.upper()}")
+    print(f"CD_viscous:    {cd_visc_final*1e4:.2f} counts ({cd_visc_final:.6f})")
+    print(f"D_viscous:     {d_visc_final:.1f} N")
+    print(f"H_max_ibl:     {hmax_final:.4f} (Limit: 2.40)")
+    print(f"Attach Margin: {att_margin_final:+.4f} ({att_st_final})")
+    print(f"Min Cp:        {min_cp_final:.4f} (Cutoff Margin: {cp_cut_margin_final:+.4f})")
+    print(f"============================================================\n")
+    
     if artifact_dir and os.path.exists(artifact_dir):
         if os.path.exists(video_path):
             shutil.copy2(video_path, os.path.join(artifact_dir, 'optimization_history.mp4'))
@@ -4016,6 +4270,8 @@ if __name__ == '__main__':
             shutil.copy2(diagnostic_figure_path, os.path.join(artifact_dir, 'wake_load_consistency.png'))
         if 'closure_figure_path' in locals() and os.path.exists(closure_figure_path):
             shutil.copy2(closure_figure_path, os.path.join(artifact_dir, 'wake_circulation_closure.png'))
+        if 'conv_fig_path' in locals() and os.path.exists(conv_fig_path):
+            shutil.copy2(conv_fig_path, os.path.join(artifact_dir, 'optimization_feasibility_optimality.png'))
         print("Base artifacts successfully copied to brain artifact directory!")
 
     import sys
@@ -4165,6 +4421,19 @@ if __name__ == '__main__':
         print("Automatic viscous drag diagnostics analysis completed successfully.")
     except Exception as exc:
         print(f"Warning: automatic viscous drag diagnostics failed: {exc}")
+    # endregion
+
+    # region Automatic Feasibility and Optimality Convergence Analysis
+    try:
+        from optimization_analyses.plot_feasibility_and_optimality import plot_feasibility_and_optimality
+        plot_feasibility_and_optimality(
+            output_folder=latest_folder,
+            artifact_dir=artifact_dir,
+            metric='both',
+        )
+        print("Automatic feasibility and optimality analysis completed successfully.")
+    except Exception as exc:
+        print(f"Warning: automatic feasibility and optimality analysis failed: {exc}")
     # endregion
     
     # endregion Plot Summary Figure
