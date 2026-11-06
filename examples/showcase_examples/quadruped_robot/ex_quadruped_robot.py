@@ -26,7 +26,6 @@ t0 = time.time()
 geometry = lg.import_geometry(cad_file, parallelize=False)
 print(f"Successfully imported {len(geometry.functions)} surfaces in {time.time() - t0:.2f}s.\n")
 
-
 # Save initial CAD geometry plot meshes for reference ghost overlay in perturbation video
 initial_meshes = [
     elem["mesh"] if isinstance(elem, dict) and "mesh" in elem else elem

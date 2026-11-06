@@ -4,7 +4,7 @@ import csdl_alpha as csdl
 import numpy as np
 import numpy.typing as npt
 from dataclasses import dataclass
-from typing import Union, Optional
+from typing import Union, Optional, Callable, Dict, List, Sequence
 import lsdo_function_spaces as lfs
 from lsdo_geo.core.geometry.assembly import Connection, Assembly
 
@@ -83,11 +83,68 @@ class ParameterizationSolver:
     '''
     The ParameterizationSolver class is used to solve geometric parameterization problems.
     '''
-    def __init__(self, optimizer=None) -> None:
+    def __init__(
+        self,
+        optimizer=None,
+        inner_parameterization_map: Optional[Callable] = None,
+        linear: bool = False,
+        assembly: Optional[Union[Assembly, lfs.FunctionNetwork]] = None,
+        geometry: Optional[Geometry] = None,
+    ) -> None:
         self.optimization = Optimization()
         self.optimizer = optimizer if optimizer is not None else NewtonOptimizer()
         self.states : list[State] = []
-        # self.state_costs : list[Union[float,npt.NDArray[np.float64],csdl.Variable]] = []
+        self.inner_parameterization_map = inner_parameterization_map
+        self.linear = linear
+        self.has_been_setup = False
+        self.has_linear_setup = False
+        self.kkt_matrix = None
+        self.kkt_matrix_inverse = None
+        self.negative_kkt_matrix_inverse = None
+        self.solved_states: Dict[str, csdl.Variable] = {}
+        self.geometry = geometry
+        self.assembly = None
+
+        if assembly is not None:
+            self.add_assembly(assembly)
+
+    @property
+    def K(self):
+        """KKT matrix of the linear parameterization problem."""
+        return self.kkt_matrix
+
+    @property
+    def K_inv(self):
+        """Inverse of the KKT matrix."""
+        return self.kkt_matrix_inverse
+
+    @property
+    def M(self):
+        """Negative inverse of the KKT matrix (- K^{-1})."""
+        return self.negative_kkt_matrix_inverse
+
+    def _update_all_representations(self, res_geom: Optional[Any] = None) -> None:
+        """Updates markers and representations across returned geometry, stored geometry, and assembly."""
+        targets = []
+        if res_geom is not None and res_geom not in targets:
+            targets.append(res_geom)
+        if self.geometry is not None and self.geometry not in targets:
+            targets.append(self.geometry)
+        if self.assembly is not None and self.assembly not in targets:
+            targets.append(self.assembly)
+
+        for target in targets:
+            if hasattr(target, "update_representations"):
+                target.update_representations()
+            elif hasattr(target, "markers") and isinstance(target.markers, dict):
+                for m in target.markers.values():
+                    m.evaluate(target)
+
+    def set_inner_parameterization_map(self, inner_map: Callable) -> None:
+        '''
+        Sets the callable for the inner parameterization map: P_i(alpha_s) -> geometry.
+        '''
+        self.inner_parameterization_map = inner_map
 
 
     def add_variable(self, computed_value:csdl.Variable, desired_value:Union[csdl.Variable, npt.NDArray[np.float64]], penalty:Optional[Union[float,npt.NDArray[np.float64],csdl.Variable]]=None):
@@ -165,6 +222,7 @@ class ParameterizationSolver:
         """Adds all condition residuals from an assembly / function network as equality constraints."""
         residuals = assembly.evaluate_residuals()
         self.add_equality_constraint(residuals, desired_value=0.0, penalty=penalty)
+        self.assembly = assembly
 
     
     def add_inequality_constraint(self, constraint:csdl.Variable,
@@ -241,38 +299,208 @@ class ParameterizationSolver:
         self.optimizer.add_optimization(self.optimization)
 
 
-    def evaluate(self, geometric_variables:GeometricVariables) -> list[csdl.Variable]:
+    def setup_linear(self, geometric_variables: Optional[GeometricVariables] = None) -> None:
+        '''
+        Sets up the linear KKT system, computes the exact constant KKT matrix,
+        and pre-factors / inverts it for instantaneous single-step back-substitution.
+        
+        Exploits block structure and symmetry:
+        - Top-left block: weighting matrix W = 2 * diag(costs)
+        - Bottom-left block: constraint Jacobian A = d c / d alpha_s
+        - Top-right block: A.T (exact transpose of bottom-left, no extra derivative calls)
+        - Bottom-right block: 0
+        '''
+        if geometric_variables is not None:
+            for i in range(len(geometric_variables.computed_value)):
+                self.add_variable(
+                    geometric_variables.computed_value[i],
+                    geometric_variables.desired_value[i],
+                    geometric_variables.penalty_value[i]
+                )
+
+        self.setup()
+        self.optimization.setup()
+
+        num_dvs = sum(s.state.size for s in self.states)
+        num_constraints = sum(c.constraint.size for c in self.optimization.equality_constraints)
+        total_size = num_dvs + num_constraints
+
+        kkt_matrix = np.zeros(shape=(total_size, total_size))
+
+        # Top-left block: W = 2 * diag(cost) (from quadratic cost on states)
+        counter = 0
+        for state_object in self.states:
+            state = state_object.state
+            sz = state.size
+            cost = state_object.cost
+            if isinstance(cost, (float, int)) or (getattr(cost, "size", 0) == 1):
+                c_val = float(cost.value if hasattr(cost, "value") else cost)
+                kkt_matrix[counter : counter + sz, counter : counter + sz] = 2.0 * np.eye(sz) * c_val
+            elif getattr(cost, "ndim", 0) == 1 or len(getattr(cost, "shape", ())) == 1:
+                c_val = np.asarray(cost.value if hasattr(cost, "value") else cost, dtype=np.float64)
+                kkt_matrix[counter : counter + sz, counter : counter + sz] = 2.0 * np.diag(c_val)
+            elif getattr(cost, "ndim", 0) == 2 or len(getattr(cost, "shape", ())) == 2:
+                c_val = np.asarray(cost.value if hasattr(cost, "value") else cost, dtype=np.float64)
+                kkt_matrix[counter : counter + sz, counter : counter + sz] = 2.0 * c_val
+            counter += sz
+
+        # Bottom-left block (A) and Top-right block (A.T)
+        constraint_counter = 0
+        for constraint in self.optimization.equality_constraints:
+            c_var = constraint.constraint
+            c_size = c_var.size
+            dv_counter = 0
+            for state_object in self.states:
+                dv = state_object.state
+                dv_size = dv.size
+                jac = csdl.derivative(c_var, dv).value
+                jac = np.asarray(jac, dtype=np.float64).reshape((c_size, dv_size))
+                # Bottom-left: A
+                kkt_matrix[num_dvs + constraint_counter : num_dvs + constraint_counter + c_size,
+                           dv_counter : dv_counter + dv_size] = jac
+                # Top-right: A.T (exploit symmetry, no additional derivative calls!)
+                kkt_matrix[dv_counter : dv_counter + dv_size,
+                           num_dvs + constraint_counter : num_dvs + constraint_counter + c_size] = jac.T
+                dv_counter += dv_size
+            constraint_counter += c_size
+
+        # Lagrangian gradient RHS: [grad_x f; c(x)]
+        rhs_parts = []
+        for state_object in self.states:
+            obj_grad = self.optimization.compute_objective_gradient(design_variables=state_object.state)
+            rhs_parts.append(csdl.reshape(obj_grad, (state_object.state.size,)))
+        for constraint in self.optimization.equality_constraints:
+            rhs_parts.append(csdl.reshape(constraint.constraint, (constraint.constraint.size,)))
+        self._R_vec = csdl.concatenate(rhs_parts)
+
+        self.kkt_matrix = kkt_matrix
+        try:
+            self.kkt_matrix_inverse = np.linalg.inv(kkt_matrix)
+        except np.linalg.LinAlgError:
+            self.kkt_matrix_inverse = np.linalg.pinv(kkt_matrix)
+        self.negative_kkt_matrix_inverse = - self.kkt_matrix_inverse
+
+        # Map state slices for solution extraction
+        self._state_slices = {}
+        curr_idx = 0
+        for state_object in self.states:
+            var = state_object.state
+            sz = var.size
+            self._state_slices[var.name] = (curr_idx, curr_idx + sz, var.shape)
+            curr_idx += sz
+
+        self.has_linear_setup = True
+
+    def solve_linear(self, geometric_variables: Optional[GeometricVariables] = None) -> Dict[str, csdl.Variable]:
+        '''
+        Solves the linear KKT system in a single back-substitution (csdl.matvec)
+        and automatically reevaluates the inner parameterization map in CSDL.
+        '''
+        if not self.has_linear_setup:
+            self.setup_linear(geometric_variables)
+
+        # delta_y = negative_kkt_matrix_inverse @ R_vec (where negative_kkt_matrix_inverse = - K^{-1})
+        delta_y = csdl.matvec(self.negative_kkt_matrix_inverse, self._R_vec)
+
+        solved_states = {}
+        for state_obj in self.states:
+            s_var = state_obj.state
+            start_i, end_i, shape = self._state_slices[s_var.name]
+            delta_s = delta_y[start_i:end_i]
+            if len(shape) > 1 or (len(shape) == 1 and shape[0] > 1):
+                delta_s = csdl.reshape(delta_s, shape)
+            elif len(shape) == 0:
+                delta_s = delta_s[0]
+            s_solved = s_var + delta_s
+            s_solved.add_name(f"{s_var.name}_solved")
+            solved_states[s_var.name] = s_solved
+            if hasattr(s_var, "set_value") and s_solved.value is not None:
+                s_var.set_value(s_solved.value)
+
+        self.solved_states = solved_states
+
+        # Reevaluate the inner parameterization map in CSDL
+        res_geom = None
+        if self.inner_parameterization_map is not None:
+            if callable(self.inner_parameterization_map):
+                import inspect
+                sig = inspect.signature(self.inner_parameterization_map)
+                if len(sig.parameters) == 1:
+                    res_geom = self.inner_parameterization_map(solved_states)
+                else:
+                    try:
+                        res_geom = self.inner_parameterization_map(**solved_states)
+                    except TypeError:
+                        res_geom = self.inner_parameterization_map(solved_states)
+
+        # Automatically update representations on the re-evaluated geometry/assembly
+        self._update_all_representations(res_geom)
+
+        return solved_states
+
+    def evaluate(self, geometric_variables: Optional[GeometricVariables] = None, linear: Optional[bool] = None):
         '''
         Evaluate the parameterization solver.
 
         Parameters
         ----------
-        geometric_variables : GeometricVariables
-            The geometric variables. This is a dataclass that contains the computed and desired values of the geometric variables.
-            The computed values are the values as computed from the geometry, and the desired values are the values that the computed values
-            are driven to.
-
-        Returns
-        -------
-        list[csdl.Variable]
-            The computed values of the geometric variables. 
-            NOTE: This will return the exact same parameter variables that were added because CSDL updates the state variables in place.
+        geometric_variables : Optional[GeometricVariables]
+            The geometric variables dataclass.
+        linear : Optional[bool]
+            Whether to use linear pre-factorized solve. If None, uses self.linear.
         '''
-        # for computed_value, desired_value in zip(geometric_variables.computed_values, geometric_variables.desired_values):
-        for i in range(len(geometric_variables.computed_value)):
-            computed_value = geometric_variables.computed_value[i]
-            desired_value = geometric_variables.desired_value[i]
-            penalty_value = geometric_variables.penalty_value[i]
-            self.add_variable(computed_value, desired_value, penalty_value)
-        # for parameter, cost in zip(self.parameters, self.parameter_costs):
-        #     self.add_parameter(parameter, cost)
+        if linear or (linear is None and self.linear):
+            return self.solve_linear(geometric_variables)
+
+        if geometric_variables is not None:
+            for i in range(len(geometric_variables.computed_value)):
+                computed_value = geometric_variables.computed_value[i]
+                desired_value = geometric_variables.desired_value[i]
+                penalty_value = geometric_variables.penalty_value[i]
+                self.add_variable(computed_value, desired_value, penalty_value)
 
         self.setup()
         self.optimizer.run()
-        
-        # NOTE: Because the solver updates the state variables, the user doesn't actually need to use these outputs
+
+        res_geom = None
+        if self.inner_parameterization_map is not None:
+            states_dict = {s.state.name: s.state for s in self.states}
+            import inspect
+            sig = inspect.signature(self.inner_parameterization_map)
+            if len(sig.parameters) == 1:
+                res_geom = self.inner_parameterization_map(states_dict)
+            else:
+                try:
+                    res_geom = self.inner_parameterization_map(**states_dict)
+                except TypeError:
+                    res_geom = self.inner_parameterization_map(states_dict)
+
+        self._update_all_representations(res_geom)
+
         outputs : list[csdl.Variable] = []
-        for computed_value in geometric_variables.computed_value:
-            outputs.append(computed_value)
+        if geometric_variables is not None:
+            for computed_value in geometric_variables.computed_value:
+                outputs.append(computed_value)
         return outputs
+
+
+class LinearParameterizationSolver(ParameterizationSolver):
+    '''
+    Automated Linear Geometry Parameterization Solver with pre-factorized KKT matrix.
+    Performs instantaneous single-step solve and automatically reevaluates the inner parameterization map.
+    '''
+    def __init__(
+        self,
+        inner_parameterization_map: Optional[Callable] = None,
+        assembly: Optional[Union[Assembly, lfs.FunctionNetwork]] = None,
+        geometry: Optional[Geometry] = None,
+    ) -> None:
+        super().__init__(
+            inner_parameterization_map=inner_parameterization_map,
+            linear=True,
+            assembly=assembly,
+            geometry=geometry,
+        )
+
+
     

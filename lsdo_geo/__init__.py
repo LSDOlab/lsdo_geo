@@ -8,7 +8,15 @@ __version__ = "1.2.0"
 from .core.geometry.geometry import Geometry
 from .core.geometry.mesh import Mesh, UnstructuredMesh, CamberSurfaceMesh
 from .core.geometry.marker import Marker
-from .core.geometry.assembly import Connection, Assembly
+from .core.geometry.assembly import (
+    Connection,
+    FixedConnection,
+    SphericalConnection,
+    RevoluteConnection,
+    PinConnection,
+    PrismaticConnection,
+    Assembly,
+)
 from .core.geometry.geometry_functions import (
     import_geometry,
     rotate,
@@ -34,6 +42,7 @@ from .core.parameterization.sectional_parameterization import (
 )
 from .core.parameterization.parameterization_solver import (
     ParameterizationSolver,
+    LinearParameterizationSolver,
     GeometricVariables,
 )
 from .optimization import (
@@ -53,6 +62,11 @@ __all__ = [
     "CamberSurfaceMesh",
     "Marker",
     "Connection",
+    "FixedConnection",
+    "SphericalConnection",
+    "RevoluteConnection",
+    "PinConnection",
+    "PrismaticConnection",
     "Assembly",
     "FunctionSetSignedDistanceOperation",
     "import_geometry",
@@ -73,6 +87,7 @@ __all__ = [
     "VolumeSectionalParameterization",
     "VolumeSectionalParameterizationInputs",
     "ParameterizationSolver",
+    "LinearParameterizationSolver",
     "GeometricVariables",
     # Optimization
     "Optimization",

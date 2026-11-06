@@ -176,6 +176,26 @@ class Geometry(lfs.FunctionSet):
         
         return evaluated_representations
 
+    def update_representations(self, plot: bool = False) -> None:
+        '''
+        Evaluates all registered markers and representations (meshes) on this geometry
+        and updates their .value attributes to reflect the current geometry state.
+
+        Parameters
+        ----------
+        plot : bool, optional
+            Whether to plot the representations during update, by default False.
+        '''
+        if hasattr(self, 'markers') and self.markers:
+            for marker in self.markers.values():
+                marker.evaluate(self, plot=plot)
+        if hasattr(self, 'representations') and self.representations:
+            for rep in self.representations.values():
+                rep.evaluate(self, plot=plot)
+        if hasattr(self, 'declared_components') and self.declared_components:
+            for comp in self.declared_components:
+                comp.update_representations(plot=plot)
+
     def evaluate_signed_distance(
         self,
         points: csdl.Variable,
@@ -258,6 +278,9 @@ class Geometry(lfs.FunctionSet):
 
         component = lg.Geometry(functions=function_set.functions, function_names=function_set.function_names, name=name, 
                                 space=function_set.space)
+        if not hasattr(self, 'declared_components'):
+            self.declared_components = []
+        self.declared_components.append(component)
         return component
     
     def create_component_copy(self, function_indices:Optional[list[int]]=None, function_search_names:Optional[list[str]]=None, name:Optional[str]=None) -> lg.Geometry:

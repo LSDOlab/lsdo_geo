@@ -49,6 +49,7 @@ class Marker(lfs.Marker):
             initial_point=initial_point,
             domain=domain,
         )
+        self.value: Optional[Union[csdl.Variable, npt.NDArray[np.float64]]] = initial_point
 
     @property
     def geometry(self) -> Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]]:
@@ -244,17 +245,23 @@ class Marker(lfs.Marker):
     def evaluate(
         self,
         geometry: Optional[Geometry] = None,
+        entity: Optional[Geometry] = None,
+        parametric_derivative_orders: Optional[Sequence[int]] = None,
         plot: bool = False,
         non_csdl: bool = False,
         sample_parameters: Optional[npt.NDArray[np.float64]] = None,
     ) -> Union[csdl.Variable, npt.NDArray[np.float64]]:
         """
-        Evaluates the physical 3D Cartesian position of the marker.
+        Evaluates the physical 3D Cartesian position or parametric derivative of the marker.
 
         Parameters
         ----------
         geometry : Optional[Geometry], optional
             Geometry instance to evaluate on (overrides self.entity if provided).
+        entity : Optional[Geometry], optional
+            Alias for geometry.
+        parametric_derivative_orders : Optional[Sequence[int]], optional
+            Orders of derivative with respect to each parametric dimension, e.g. (1, 0) for tu.
         plot : bool, optional
             Whether to trigger visual plotting of the evaluation point. Default is False.
         non_csdl : bool, optional
@@ -265,14 +272,18 @@ class Marker(lfs.Marker):
         Returns
         -------
         Union[csdl.Variable, npt.NDArray[np.float64]]
-            The evaluated 3D coordinates (CSDL Variable in graph mode, or NumPy array).
+            The evaluated 3D coordinates or derivative vector (CSDL Variable in graph mode, or NumPy array).
         """
-        return super().evaluate(
-            entity=geometry,
+        target = geometry if geometry is not None else entity
+        val = super().evaluate(
+            entity=target,
+            parametric_derivative_orders=parametric_derivative_orders,
             plot=plot,
             non_csdl=non_csdl,
             sample_parameters=sample_parameters,
         )
+        self.value = val
+        return val
 
     def evaluate_derivatives(
         self,

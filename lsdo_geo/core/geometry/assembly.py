@@ -82,7 +82,7 @@ class Connection(lfs.CollocationCondition):
         geometry_2: Optional[Geometry] = None,
     ) -> csdl.Variable:
         """
-        Computes the translational connection error: r_1 - r_2.
+        Computes the translational connection error: r_1 - r_2 - offset.
         For a physical connection constraint, this error must evaluate to zero.
         """
         p1 = self.marker_1.evaluate(geometry=geometry_1)
@@ -90,6 +90,8 @@ class Connection(lfs.CollocationCondition):
             p2 = self.marker_2.evaluate(geometry=geometry_2)
         elif self.marker_2 is not None:
             p2 = self.marker_2.evaluate()
+        elif self.offset is not None:
+            p2 = csdl.Variable(value=np.zeros(3))
         else:
             # Fixed world point from marker_1's initial coordinate
             p2 = self.marker_1.initial_point
@@ -97,8 +99,28 @@ class Connection(lfs.CollocationCondition):
                 raise ValueError(f"Connection {self.name} has no component_2 or marker_2, and marker_1 has no initial_point.")
             p2 = csdl.Variable(value=p2)
         diff = p1 - p2
+        offset_val = None
         if self.offset is not None:
-            diff = diff + self.offset
+            if isinstance(self.offset, csdl.Variable):
+                offset_val = self.offset
+            else:
+                offset_arr = np.atleast_1d(np.asarray(self.offset, dtype=np.float64))
+                offset_val = csdl.Variable(value=offset_arr)
+
+        if offset_val is not None and offset_val.shape == diff.shape:
+            diff = diff - offset_val
+
+        if self.selectors is not None:
+            if isinstance(self.selectors, (list, tuple)):
+                if len(self.selectors) == 1:
+                    diff = diff[self.selectors[0]]
+                else:
+                    diff = csdl.concatenate([diff[i] for i in self.selectors])
+            elif isinstance(self.selectors, slice):
+                diff = diff[self.selectors]
+
+        if offset_val is not None and self.selectors is not None and offset_val.shape != (3,) and offset_val.size == 1:
+            diff = diff - offset_val
         return diff
 
     def evaluate_alignment_constraint(
@@ -114,7 +136,10 @@ class Connection(lfs.CollocationCondition):
         """
         # Axis 1 evaluation
         if self.alignment_axis_1 is not None:
-            if hasattr(self.alignment_axis_1, "evaluate"):
+            if hasattr(self.alignment_axis_1, "compute_surface_normal") and getattr(self.alignment_axis_1, "compute_surface_normal") is not None and getattr(self.alignment_axis_1, "parametric_coordinates", None) is not None:
+                geom_1 = geometry_1 if geometry_1 is not None else getattr(self.component_1, "geometry", self.component_1)
+                axis_1 = self.alignment_axis_1.compute_surface_normal(geometry=geom_1)
+            elif hasattr(self.alignment_axis_1, "evaluate"):
                 geom_1 = geometry_1 if geometry_1 is not None else getattr(self.component_1, "geometry", self.component_1)
                 axis_1 = self.alignment_axis_1.evaluate(geom_1)
             else:
@@ -124,7 +149,10 @@ class Connection(lfs.CollocationCondition):
 
         # Axis 2 / Null space evaluation
         if self.alignment_axis_2 is not None:
-            if hasattr(self.alignment_axis_2, "evaluate"):
+            if hasattr(self.alignment_axis_2, "compute_null_space") and getattr(self.alignment_axis_2, "compute_null_space") is not None:
+                geom_2 = geometry_2 if geometry_2 is not None else getattr(self.component_2, "geometry", self.component_2)
+                null_space_2 = self.alignment_axis_2.compute_null_space(geometry=geom_2)
+            elif hasattr(self.alignment_axis_2, "evaluate"):
                 geom_2 = geometry_2 if geometry_2 is not None else getattr(self.component_2, "geometry", self.component_2)
                 eval_res = self.alignment_axis_2.evaluate(geom_2)
                 if isinstance(eval_res, tuple) and len(eval_res) == 2:
@@ -140,6 +168,29 @@ class Connection(lfs.CollocationCondition):
                 # Fixed null space in world frame
                 null_space_2 = self.marker_1.compute_null_space()
 
+        # If null_space_2 is a 1D vector (3,), compute its 3x2 orthogonal basis
+        if hasattr(null_space_2, "shape") and len(null_space_2.shape) == 1 and null_space_2.shape[0] == 3:
+            has_val = hasattr(null_space_2, "value") and null_space_2.value is not None
+            if has_val or not isinstance(null_space_2, csdl.Variable):
+                axis_arr = np.asarray(null_space_2.value if has_val else null_space_2, dtype=np.float64)
+                ref = np.array([1., 0., 0.]) if abs(axis_arr[0]) < 0.9 else np.array([0., 0., 1.])
+                t1 = np.cross(axis_arr, ref)
+                norm1 = np.linalg.norm(t1)
+                t1 = t1 / norm1 if norm1 > 1e-12 else np.array([1., 0., 0.])
+                t2 = np.cross(axis_arr, t1)
+                norm2 = np.linalg.norm(t2)
+                t2 = t2 / norm2 if norm2 > 1e-12 else np.array([0., 1., 0.])
+                null_space_2 = csdl.Variable(value=np.column_stack([t1, t2]))
+            else:
+                ref = csdl.Variable(value=np.array([1., 0., 0.]))
+                t1 = csdl.cross(null_space_2, ref)
+                t1 = t1 / (csdl.norm(t1) + 1e-12)
+                t2 = csdl.cross(null_space_2, t1)
+                t2 = t2 / (csdl.norm(t2) + 1e-12)
+                t1_col = csdl.reshape(t1, (3, 1))
+                t2_col = csdl.reshape(t2, (3, 1))
+                null_space_2 = csdl.concatenate([t1_col, t2_col], axis=1)
+
         # Alignment projection (must be [0, 0] for revolute alignment)
         alignment_constraint = csdl.matvec(csdl.transpose(null_space_2), axis_1)
         return alignment_constraint
@@ -148,7 +199,7 @@ class Connection(lfs.CollocationCondition):
         """
         Evaluates the combined kinematic residual vector based on connection_type.
         """
-        if self.connection_type == "spherical":
+        if self.connection_type in ("spherical", "translational", "fixed"):
             return self.evaluate_translational_offset()
         elif self.connection_type == "prismatic":
             return self.evaluate_alignment_constraint()
@@ -254,6 +305,137 @@ class Connection(lfs.CollocationCondition):
         Creates a copy of the connection, optionally rebinding to new components/markers.
         """
         return self.rebind(target_map if target_map is not None else {})
+
+
+class FixedConnection(Connection):
+    """
+    Fixed kinematic connection locking relative translation (and orientation).
+    """
+    def __init__(
+        self,
+        component_1: Union[Geometry, FunctionSet, Function],
+        marker_1: Marker,
+        component_2: Optional[Union[Geometry, FunctionSet, Function]] = None,
+        marker_2: Optional[Marker] = None,
+        offset: Optional[Union[csdl.Variable, npt.NDArray[np.float64]]] = None,
+        selectors: Optional[Tuple[slice, ...]] = None,
+        derivative_orders: Optional[Tuple[int, ...]] = None,
+        name: Optional[str] = None,
+    ):
+        super().__init__(
+            component_1=component_1,
+            marker_1=marker_1,
+            component_2=component_2,
+            marker_2=marker_2,
+            connection_type="fixed",
+            offset=offset,
+            selectors=selectors,
+            derivative_orders=derivative_orders,
+            name=name,
+        )
+
+
+class SphericalConnection(Connection):
+    """
+    Spherical / ball joint connection constraining 3 relative translations while allowing 3D rotation.
+    """
+    def __init__(
+        self,
+        component_1: Union[Geometry, FunctionSet, Function],
+        marker_1: Marker,
+        component_2: Optional[Union[Geometry, FunctionSet, Function]] = None,
+        marker_2: Optional[Marker] = None,
+        offset: Optional[Union[csdl.Variable, npt.NDArray[np.float64]]] = None,
+        selectors: Optional[Tuple[slice, ...]] = None,
+        derivative_orders: Optional[Tuple[int, ...]] = None,
+        name: Optional[str] = None,
+    ):
+        super().__init__(
+            component_1=component_1,
+            marker_1=marker_1,
+            component_2=component_2,
+            marker_2=marker_2,
+            connection_type="spherical",
+            offset=offset,
+            selectors=selectors,
+            derivative_orders=derivative_orders,
+            name=name,
+        )
+
+
+class RevoluteConnection(Connection):
+    """
+    Revolute / pin joint connection constraining 3 relative translations and 2 relative rotations,
+    allowing 1 degree of freedom rotation around a specified joint axis.
+    """
+    def __init__(
+        self,
+        component_1: Union[Geometry, FunctionSet, Function],
+        marker_1: Marker,
+        component_2: Optional[Union[Geometry, FunctionSet, Function]] = None,
+        marker_2: Optional[Marker] = None,
+        axis: Optional[Union[Marker, csdl.Variable, npt.NDArray[np.float64]]] = None,
+        alignment_axis_1: Optional[Union[Marker, csdl.Variable, npt.NDArray[np.float64]]] = None,
+        alignment_axis_2: Optional[Union[Marker, csdl.Variable, npt.NDArray[np.float64]]] = None,
+        offset: Optional[Union[csdl.Variable, npt.NDArray[np.float64]]] = None,
+        selectors: Optional[Tuple[slice, ...]] = None,
+        derivative_orders: Optional[Tuple[int, ...]] = None,
+        name: Optional[str] = None,
+    ):
+        if axis is not None:
+            if alignment_axis_1 is None:
+                alignment_axis_1 = axis
+            if alignment_axis_2 is None:
+                alignment_axis_2 = axis
+
+        super().__init__(
+            component_1=component_1,
+            marker_1=marker_1,
+            component_2=component_2,
+            marker_2=marker_2,
+            connection_type="revolute",
+            alignment_axis_1=alignment_axis_1,
+            alignment_axis_2=alignment_axis_2,
+            offset=offset,
+            selectors=selectors,
+            derivative_orders=derivative_orders,
+            name=name,
+        )
+
+
+PinConnection = RevoluteConnection
+
+
+class PrismaticConnection(Connection):
+    """
+    Prismatic / slider connection allowing 1 relative translation along a guide axis
+    while constraining transverse translations and relative rotations.
+    """
+    def __init__(
+        self,
+        component_1: Union[Geometry, FunctionSet, Function],
+        marker_1: Marker,
+        component_2: Optional[Union[Geometry, FunctionSet, Function]] = None,
+        marker_2: Optional[Marker] = None,
+        guide_axis: Optional[Union[Marker, csdl.Variable, npt.NDArray[np.float64]]] = None,
+        offset: Optional[Union[csdl.Variable, npt.NDArray[np.float64]]] = None,
+        selectors: Optional[Tuple[slice, ...]] = None,
+        derivative_orders: Optional[Tuple[int, ...]] = None,
+        name: Optional[str] = None,
+    ):
+        super().__init__(
+            component_1=component_1,
+            marker_1=marker_1,
+            component_2=component_2,
+            marker_2=marker_2,
+            connection_type="prismatic",
+            alignment_axis_1=guide_axis,
+            alignment_axis_2=guide_axis,
+            offset=offset,
+            selectors=selectors,
+            derivative_orders=derivative_orders,
+            name=name,
+        )
 
 
 class Assembly(lfs.FunctionNetwork):
@@ -489,3 +671,19 @@ class Assembly(lfs.FunctionNetwork):
                 )
                 all_interfaces.extend(discovered)
         return all_interfaces
+
+    def update_representations(self, plot: bool = False) -> None:
+        """
+        Updates markers and representations across all registered components in the assembly.
+
+        Parameters
+        ----------
+        plot : bool, optional
+            Whether to plot the representations during update, by default False.
+        """
+        for comp in self.components.values():
+            if hasattr(comp, "update_representations"):
+                comp.update_representations(plot=plot)
+            elif hasattr(comp, "markers") and isinstance(comp.markers, dict):
+                for m in comp.markers.values():
+                    m.evaluate(comp, plot=plot)

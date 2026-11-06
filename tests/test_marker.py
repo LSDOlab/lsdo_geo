@@ -214,7 +214,7 @@ def test_assembly_multi_patch_function_set_freedom():
         component_2=fuselage,
         marker_2=m_f_attach,
         connection_type='spherical',
-        offset=np.array([0.0, 0.5, 0.0]),
+        offset=np.array([0.0, -0.5, 0.0]),
         name='wing_fuse_connection',
     )
 
