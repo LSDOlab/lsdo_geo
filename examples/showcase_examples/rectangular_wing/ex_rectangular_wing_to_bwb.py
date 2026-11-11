@@ -67,12 +67,23 @@ recorder.start()
 # TOP-LEVEL CONFIGURATION AND TOGGLES
 # =============================================================================
 
-# 1. Parameterization formulation: 'chord_span' or 'ar_area'
-#   'chord_span' -> Direct chord stretch, sweep translation, span stretch, twist, camber/thickness shape DVs
-#   'ar_area'    -> Regularized cubic B-spline taper ratios, aspect ratio, Galerkin sweep weak-form, planform area target
-ParamerizationType = Literal['ar_area', 'chord_span']
-formulation: ParamerizationType = 'ar_area'  # Options: 'chord_span' or 'ar_area'
-formulation = os.environ.get('BWB_FORMULATION', formulation)
+# 1. Parameterization formulation: 'implicit' or 'explicit'
+#   'implicit' -> Regularized cubic B-spline taper ratios, aspect ratio, Galerkin sweep weak-form, planform area target (formerly 'ar_area')
+#   'explicit' -> Direct chord stretch, sweep translation, span stretch, twist, camber/thickness shape DVs (formerly 'chord_span')
+ParameterizationType = Literal['implicit', 'explicit', 'ar_area', 'chord_span']
+ParamerizationType = ParameterizationType  # backward-compatibility alias
+geometry_parameterization_formulation: ParameterizationType = 'implicit'  # Options: 'implicit' or 'explicit'
+geometry_parameterization_formulation = os.environ.get(
+    'BWB_GEOMETRY_PARAMETERIZATION_FORMULATION',
+    os.environ.get('BWB_FORMULATION', geometry_parameterization_formulation)
+)
+if geometry_parameterization_formulation in ('implicit', 'ar_area'):
+    geometry_parameterization_formulation = 'implicit'
+elif geometry_parameterization_formulation in ('explicit', 'chord_span'):
+    geometry_parameterization_formulation = 'explicit'
+if geometry_parameterization_formulation not in ('implicit', 'explicit'):
+    raise ValueError(f"Unknown geometry parameterization formulation '{geometry_parameterization_formulation}'. Must be 'implicit' or 'explicit'.")
+formulation = geometry_parameterization_formulation  # backward-compatibility alias
 
 # 2. Analysis mesh and design variable discretization toggles:
 # -------------------------------------------------------------------------
@@ -125,7 +136,7 @@ else:
 #   'oversized' -> Constrain TCP0 oversized box (8 sample points, payload_center_x DV, 0.2 m buffer)
 #   'pallets'   -> Constrain TCP0 6-pallet stack (32 sample points, pallet_stack_center_x DV, 0.2 m buffer)
 #   'both'      -> Constrain both payload cases (40-point batch, equal CG consistency constraint)
-geonic_payload_mode: str = 'none'  # Options: 'none', 'oversized', 'pallets', 'both'
+geonic_payload_mode: str = 'both'  # Options: 'none', 'oversized', 'pallets', 'both'
 geonic_payload_mode = os.environ.get('GEONIC_PAYLOAD_MODE', geonic_payload_mode)
 if 'GEONIC_PAYLOAD_MODE' not in os.environ and 'USE_GEONIC' in os.environ:
     geonic_payload_mode = 'oversized' if str(os.environ['USE_GEONIC']).strip() == '1' else 'none'
@@ -179,7 +190,7 @@ enforce_stratford_constraint: bool = True
 if 'ENFORCE_STRATFORD_CONSTRAINT' in os.environ:
     enforce_stratford_constraint = os.environ.get('ENFORCE_STRATFORD_CONSTRAINT', '1').strip() == '1'
 
-enforce_maneuver_attachment_constraint: bool = True
+enforce_maneuver_attachment_constraint: bool = False
 if 'ENFORCE_MANEUVER_ATTACHMENT_CONSTRAINT' in os.environ:
     enforce_maneuver_attachment_constraint = os.environ.get('ENFORCE_MANEUVER_ATTACHMENT_CONSTRAINT', '1').strip() == '1'
 
@@ -195,7 +206,7 @@ structural_stall_relief: bool = os.environ.get('STRUCTURAL_STALL_RELIEF', '0').s
 # 7c. Wake-load consistency penalty:
 #   Penalizes mismatch between near-field surface pressure loading and scaled far-field wake loading.
 #   Uses a deadband one-sided quadratic penalty so discretization noise (< threshold) is 100% unpenalized.
-include_wake_load_penalty: bool = True
+include_wake_load_penalty: bool = False
 if 'INCLUDE_WAKE_LOAD_PENALTY' in os.environ:
     include_wake_load_penalty = os.environ.get('INCLUDE_WAKE_LOAD_PENALTY', '1').strip() == '1'
 
@@ -204,7 +215,7 @@ wake_load_penalty_threshold: float = float(os.environ.get('WAKE_LOAD_PENALTY_THR
 
 # 8. Scale factor & warm start:
 scale_factor: float = 7.5             # Scale factor (7.5 for 50 m full-scale BWB; 1.0 for wind-tunnel scale)
-warm_start: bool = os.environ.get('WARM_START', '1').strip().lower() not in ('0', 'false', 'no')
+warm_start: bool = os.environ.get('WARM_START', '0').strip().lower() not in ('0', 'false', 'no')
 warm_start_folder: str = os.environ.get(
     'BWB_WARM_START_FOLDER',
     'rectangular_wing_to_bwb_aerostructural_optimization_outputs/2026-10-28_13.30.10.728375'
@@ -431,12 +442,12 @@ ffd_sectional_parameterization = SectionalParameterization(
 )
 
 # Project chord, thickness, and sweep measurement points across the right half-span (y = 0.0 to 5.0 * scale_factor).
-# In 'ar_area', map stations directly from uniform parametric spanwise coordinates eta in [0, 1] of the cubic B-spline FFD volume.
+# In 'implicit' (formerly 'ar_area'), map stations directly from uniform parametric spanwise coordinates eta in [0, 1] of the cubic B-spline FFD volume.
 # This ensures the physical geometry evaluation stations exactly match the cubic B-spline basis collocation stations
 # for all 3 spanwise distribution variables (taper, thickness, sweep: T = inv(B_actual) @ B_stations = I),
 # preventing coordinate mismatch distortion from producing negative FFD control point stretches and mid-span inversion.
 eta_stations = np.linspace(0.0, 1.0, num_chord_stations)
-if formulation == 'ar_area':
+if geometry_parameterization_formulation == 'implicit':
     v_stations = 0.5 + 0.5 * eta_stations
     station_eval_pts = np.column_stack([
         np.zeros(num_chord_stations),
@@ -877,8 +888,8 @@ if stall_model == 'stratford_closure':
 
 # region Define Design Variables and CSDL Parameterization Map
 # # Formulation flag:
-# 'ar_area'   -> Design variables: chord DVs, Aspect Ratio (AR), and pitch (planform area fixed at 10)
-# 'chord_span' -> Design variables: chord stretch DVs, sweep DVs, span stretch DV, elevator angle, pitch, pitch_3g
+# 'implicit' (formerly 'ar_area')   -> Design variables: chord DVs, Aspect Ratio (AR), and pitch (planform area fixed at 10)
+# 'explicit' (formerly 'chord_span') -> Design variables: chord stretch DVs, sweep DVs, span stretch DV, elevator angle, pitch, pitch_3g
 
 pitch = csdl.Variable(value=5.*np.pi/180) # pitch angle in radians
 elevator_angle = csdl.Variable(value=0.0) # elevator deflection angle in radians
@@ -969,8 +980,8 @@ def _interp_spanwise(prior_arr, target_n):
         return out
     return prior_arr
 
-if formulation == 'ar_area':
-    # Formulation 1: Cubic B-spline Target Regularization
+if geometry_parameterization_formulation == 'implicit':
+    # Formulation 1 (Implicit): Cubic B-spline Target Regularization
     # Taper ratio control points (stations 1 to num_stations-1) + Aspect Ratio (AR) + Sweep Angle Control Points + Elevator + Pitch + Pitch 2.5g + Linear Twist
     taper_control_points = csdl.Variable(shape=(num_chord_stations - 1,), value=np.ones(num_chord_stations - 1))
     taper_dvs = taper_control_points  # backward-compatibility alias
@@ -985,8 +996,8 @@ if formulation == 'ar_area':
     tc_scaler = 10.0
 
     design_variables: dict[str, DVInfo] = {
-        'taper_control_points': DVInfo(variable=taper_control_points, lower=0.05, upper=1.25, scaler=1.0),
-        'aspect_ratio': DVInfo(variable=aspect_ratio, lower=5.0, upper=15.0, scaler=0.5),
+        'taper_control_points': DVInfo(variable=taper_control_points, lower=0.03, upper=1.25, scaler=1.0),
+        'aspect_ratio': DVInfo(variable=aspect_ratio, lower=4.5, upper=15.0, scaler=0.5),
         'sweep_angle_control_points': DVInfo(variable=sweep_angle_control_points, lower=0.0*np.pi/180, upper=60.0*np.pi/180, scaler=1.e1),
         'tc_target_control_points': DVInfo(variable=tc_target_control_points, lower=tc_lower, upper=tc_upper, scaler=tc_scaler),
         'twist_dvs': DVInfo(variable=twist_dvs, lower=twist_lower, upper=twist_upper, scaler=1.e1),
@@ -1010,8 +1021,8 @@ if formulation == 'ar_area':
             variable=misc_cg, lower=0.05, upper=0.95, scaler=1.e1
         )
         planform_area_target = csdl.Variable(value=10.0 * scale_factor**2, name='planform_area_target')
-        area_lower = 1.0 * scale_factor**2   # 56.25 m^2 (vs 562.5 m^2 baseline)
-        area_upper = 30.0 * scale_factor**2  # 1687.5 m^2
+        area_lower = 5.0 * scale_factor**2   # 56.25 m^2 (vs 562.5 m^2 baseline)
+        area_upper = 20.0 * scale_factor**2  # 1687.5 m^2
         area_scaler = 1.0 / (10.0 * scale_factor**2)
         design_variables['planform_area_target'] = DVInfo(
             variable=planform_area_target, lower=area_lower, upper=area_upper, scaler=area_scaler
@@ -1047,10 +1058,10 @@ if formulation == 'ar_area':
                     print(f"Warm starting design variables from {warm_start_npz} (interpolating from {len(prior_taper)} to {num_chord_stations - 1} taper stations)...")
                 taper_control_points.value = np.clip(
                     _interp_spanwise(prior_taper, num_chord_stations - 1),
-                    0.05, 1.25,
+                    0.03, 1.25,
                 )
                 if 'dv_opt_aspect_ratio' in prior_data:
-                    aspect_ratio.value = np.asarray(prior_data['dv_opt_aspect_ratio'])
+                    aspect_ratio.value = np.clip(np.asarray(prior_data['dv_opt_aspect_ratio']), 4.5, 15.0)
                 if 'dv_opt_sweep_angle_control_points' in prior_data:
                     sweep_angle_control_points.value = np.clip(
                         _interp_spanwise(prior_data['dv_opt_sweep_angle_control_points'], num_chord_stations - 1),
@@ -1061,31 +1072,72 @@ if formulation == 'ar_area':
                         _interp_spanwise(prior_data['dv_opt_tc_target_control_points'], num_chord_stations),
                         tc_lower, tc_upper,
                     )
-                if 'dv_opt_twist_dvs' in prior_data:
-                    twist_dvs.value = np.clip(
-                        _interp_spanwise(prior_data['dv_opt_twist_dvs'], num_chord_stations),
-                        twist_lower, twist_upper,
+                if use_geonic and 'dv_opt_planform_area_target' in prior_data:
+                    planform_area_target.value = float(np.asarray(prior_data['dv_opt_planform_area_target']).flatten()[0])
+            elif 'dv_opt_chord_stretch_dvs' in prior_data:
+                print(f"Warm starting implicit parameterization from explicit run in {warm_start_npz}...")
+                prior_cs = np.asarray(prior_data['dv_opt_chord_stretch_dvs'])
+                prior_cs_interp = _interp_spanwise(prior_cs, num_chord_stations)
+                init_chord_val = 1.0 * scale_factor
+                stn_chords = init_chord_val + prior_cs_interp
+                taper_vals = stn_chords[1:] / stn_chords[:-1]
+                taper_control_points.value = np.clip(taper_vals, 0.03, 1.25)
+
+                if 'ar_val' in prior_data:
+                    aspect_ratio.value = np.clip(np.array([float(prior_data['ar_val'])]), 4.5, 15.0)
+                elif 'dv_opt_aspect_ratio' in prior_data:
+                    aspect_ratio.value = np.asarray(prior_data['dv_opt_aspect_ratio'])
+
+                if 'dv_opt_sweep_dvs' in prior_data:
+                    prior_sw = np.asarray(prior_data['dv_opt_sweep_dvs'])
+                    prior_sw_interp = _interp_spanwise(prior_sw, num_chord_stations)
+                    dy_stn = (5.0 * scale_factor) / (num_chord_stations - 1)
+                    dx_stn = prior_sw_interp[1:] - prior_sw_interp[:-1]
+                    sweep_angle_control_points.value = np.clip(
+                        np.arctan2(dx_stn, dy_stn),
+                        0.0, 60.0 * np.pi / 180.0,
                     )
-                if 'dv_opt_ttop_dvs' in prior_data:
-                    ttop_dvs.value = np.clip(
-                        _interp_spanwise(prior_data['dv_opt_ttop_dvs'], num_chord_stations),
-                        t_min_gauge, t_max_gauge,
+
+                if 'dv_opt_thickness_stretch_dvs' in prior_data:
+                    prior_th = np.asarray(prior_data['dv_opt_thickness_stretch_dvs'])
+                    prior_th_interp = _interp_spanwise(prior_th, num_chord_stations)
+                    init_th_val = 0.12 * init_chord_val
+                    stn_th = init_th_val + prior_th_interp
+                    tc_target_control_points.value = np.clip(
+                        stn_th / stn_chords,
+                        tc_lower, tc_upper,
                     )
-                if 'dv_opt_tweb_dvs' in prior_data:
-                    tweb_dvs.value = np.clip(
-                        _interp_spanwise(prior_data['dv_opt_tweb_dvs'], num_chord_stations),
-                        t_min_gauge, t_max_gauge,
+
+                if use_geonic and 'sref_val' in prior_data:
+                    planform_area_target.value = np.clip(
+                        float(prior_data['sref_val']), area_lower, area_upper
                     )
-                if include_camber and 'dv_opt_camber_dvs' in prior_data:
-                    camber_dvs.value = np.clip(
-                        _interp_spanwise(prior_data['dv_opt_camber_dvs'], num_chord_stations),
-                        camber_lower, camber_upper,
-                    )
-                if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
-                    thickness_shape_dvs.value = np.clip(
-                        _interp_spanwise(prior_data['dv_opt_thickness_shape_dvs'], num_chord_stations),
-                        thick_shape_lower, thick_shape_upper,
-                    )
+
+            if 'dv_opt_twist_dvs' in prior_data:
+                twist_dvs.value = np.clip(
+                    _interp_spanwise(prior_data['dv_opt_twist_dvs'], num_chord_stations),
+                    twist_lower, twist_upper,
+                )
+            if 'dv_opt_ttop_dvs' in prior_data:
+                ttop_dvs.value = np.clip(
+                    _interp_spanwise(prior_data['dv_opt_ttop_dvs'], num_chord_stations),
+                    t_min_gauge, t_max_gauge,
+                )
+            if 'dv_opt_tweb_dvs' in prior_data:
+                tweb_dvs.value = np.clip(
+                    _interp_spanwise(prior_data['dv_opt_tweb_dvs'], num_chord_stations),
+                    t_min_gauge, t_max_gauge,
+                )
+            if include_camber and 'dv_opt_camber_dvs' in prior_data:
+                camber_dvs.value = np.clip(
+                    _interp_spanwise(prior_data['dv_opt_camber_dvs'], num_chord_stations),
+                    camber_lower, camber_upper,
+                )
+            if include_thickness_shape and 'dv_opt_thickness_shape_dvs' in prior_data:
+                thickness_shape_dvs.value = np.clip(
+                    _interp_spanwise(prior_data['dv_opt_thickness_shape_dvs'], num_chord_stations),
+                    thick_shape_lower, thick_shape_upper,
+                )
             if 'dv_opt_pitch' in prior_data:
                 pitch.value = float(np.asarray(prior_data['dv_opt_pitch']).flatten()[0])
             if 'dv_opt_pitch_ss' in prior_data:
@@ -1126,8 +1178,8 @@ if formulation == 'ar_area':
     span_weights = np.linspace(-1.0, 1.0, num_ffd_sections)
     span_params = csdl.expand(span_stretch_state, (num_ffd_sections,)) * span_weights
 
-elif formulation == 'chord_span':
-    # Formulation 2: chord stretch DVs, sweep DVs, thickness stretch DVs, linear twist DV, span stretch DV, elevator angle, pitch, pitch_ss
+elif geometry_parameterization_formulation == 'explicit':
+    # Formulation 2 (Explicit): chord stretch DVs, sweep DVs, thickness stretch DVs, linear twist DV, span stretch DV, elevator angle, pitch, pitch_ss
     init_chord = np.zeros(num_chord_stations)
     init_sweep = np.zeros(num_chord_stations)
     init_thick = np.zeros(num_chord_stations)
@@ -1400,7 +1452,7 @@ planform_area = 2.0 * half_planform_area
 
 aspect_ratio_calc = (wingspan**2) / planform_area
 
-if formulation == 'ar_area':
+if geometry_parameterization_formulation == 'implicit':
     # ParameterizationSolver manipulates states to match targets
     geometry_solver = ParameterizationSolver()
     geometry_solver.add_state(chord_stretch_states)
@@ -1460,7 +1512,10 @@ if formulation == 'ar_area':
         )
 
     # 4. Enforce sectional sweep angles via Galerkin weak form (n - 1 equations)
-    qc_pts = [geometry.evaluate(quarter_chord_projections[i]) for i in range(num_chord_stations)]
+    # Strictly define quarter-chord points along the 25% chord line (0.75 * LE + 0.25 * TE)
+    chord_le_pts = [geometry.evaluate(chord_le_projections[i]) for i in range(num_chord_stations)]
+    chord_te_pts = [geometry.evaluate(chord_te_projections[i]) for i in range(num_chord_stations)]
+    qc_pts = [0.75 * chord_le_pts[i] + 0.25 * chord_te_pts[i] for i in range(num_chord_stations)]
     dx_list = []
     dy_list = []
     for i in range(num_chord_stations - 1):
@@ -1480,7 +1535,7 @@ if formulation == 'ar_area':
     geometry_solver.evaluate(geometric_variables)
 
     # Dense diagnostics
-    ar_area_diagnostics = bspline_reg.compute_diagnostics(
+    implicit_diagnostics = bspline_reg.compute_diagnostics(
         local_chords=local_chords_vec,
         local_thicknesses=local_thicknesses_vec,
         dx_qc=dx_qc_vec,
@@ -2163,14 +2218,16 @@ stresses_to_enforce = dv_stresses[:-1] if resolution == 'fast' else dv_stresses[
 # Safety factor of 1.5 applied to obtain the allowable stress:
 safety_factor = 1.5
 yield_stress = 276.0e6
-allowable_stress = yield_stress / safety_factor  # 69.0 MPa
-# dv_stresses.set_as_constraint(upper=allowable_stress, scaler=1.0 / allowable_stress)
-stresses_to_enforce.set_as_constraint(upper=allowable_stress, scaler=1.0 / allowable_stress)
+allowable_stress = yield_stress / safety_factor  # 184.0 MPa
+stress_scaler_factor = float(os.environ.get('STRESS_CONSTRAINT_SCALER_FACTOR', '0.2'))
+stress_constraint_scaler = stress_scaler_factor / allowable_stress
+# dv_stresses.set_as_constraint(upper=allowable_stress, scaler=stress_constraint_scaler)
+stresses_to_enforce.set_as_constraint(upper=allowable_stress, scaler=stress_constraint_scaler)
 
 if include_neg1g_sizing:
     # Root stress constraint for -1.0g sizing condition
     root_stress_neg1g = stress_func_neg1g.evaluate(np.array([[0.0]]))
-    root_stress_neg1g.set_as_constraint(upper=allowable_stress, scaler=1.0 / allowable_stress)
+    root_stress_neg1g.set_as_constraint(upper=allowable_stress, scaler=stress_constraint_scaler)
 # endregion Structural solver (beam loads & stress)
 
 
@@ -2342,6 +2399,7 @@ if viscous_drag_mode == 'ibl':
     # Differentiable 2D B-spline surface Stratford separation constraint
     # Regional centers correspond to camber DV peak influences (Greville abscissae) + TE chordwise,
     # and spanwise FFD variable stations (4 x num_stations constraints: 20 in fast, 32 in full).
+    stratford_rho = float(os.environ.get('RHO_SMOOTH_MAX', '40.0'))
     stratford_results = evaluate_stratford_separation(
         cp_node0=Cp[0],
         dynamic_panel_centers=dynamic_panel_centers,
@@ -2349,6 +2407,7 @@ if viscous_drag_mode == 'ibl':
         rho_cruise=rho_array[0],
         mu_air=csdl.Variable(value=cruise_cond['viscosity_Pa_s']),
         stratford_topology=stratford_topology,
+        rho_smooth_max=stratford_rho,
     )
     dv_stratford_constraints = stratford_results['dv_stratford_constraints']
     max_stratford = stratford_results['max_stratford']
@@ -2799,7 +2858,7 @@ min_strip_mdd_margin_cruise = -global_mdd_excess  # min(M_dd - M_cruise) across 
 # Enforce M_inf <= M_dd (can be switched to dv_mdd_excess in the future)
 # global_mdd_excess.set_as_constraint(upper=0.0, scaler=10.0)
 
-if formulation == 'chord_span':
+if geometry_parameterization_formulation == 'explicit':
     # For chord and span stretch formulation (no ParameterizationSolver),
     # keep planform area constraint (10.0 m^2) unless geonic is active
     if not use_geonic:
@@ -2902,8 +2961,8 @@ if include_elevator:
     additional_outs += [elevator_angle]
 if include_neg1g_sizing:
     additional_outs += [lift_neg1g, root_stress_neg1g, stress_coeffs_neg1g, elem_max_stress_neg1g, pitch_neg1g, panel_forces_right_neg1g]
-if formulation == 'ar_area':
-    additional_outs += list(ar_area_diagnostics.values())
+if geometry_parameterization_formulation == 'implicit':
+    additional_outs += list(implicit_diagnostics.values())
     additional_outs += [res_taper, res_thick, res_sweep, tc_target_control_points]
     if use_geonic:
         additional_outs += [planform_area_target]
@@ -3187,7 +3246,7 @@ if __name__ == '__main__':
         )
         max_iter = int(os.environ.get('MAX_ITER', '500'))
         # slsqp_acc = float(os.environ.get('SLSQP_ACC', '1.e-4'))
-        slsqp_acc = float(os.environ.get('SLSQP_ACC', '1.e-5'))
+        slsqp_acc = float(os.environ.get('SLSQP_ACC', '5.e-5'))
         optimizer = modopt.PySLSQP(
             optimization_problem,
             # solver_options={'maxiter': max_iter, 'acc': 1.e-5},
@@ -3381,11 +3440,13 @@ if __name__ == '__main__':
     wake_closure_diagnostic = WakeCirculationClosureHistory()
     convergence_diagnostic = OptimizationConvergenceHistory(
         design_variables=design_variables,
-        formulation=formulation,
+        geometry_parameterization_formulation=geometry_parameterization_formulation,
+        formulation=geometry_parameterization_formulation,
         scale_factor=scale_factor,
         use_geonic=use_geonic,
         geonic_payload_mode=geonic_payload_mode,
         allowable_stress=allowable_stress,
+        stress_scaler_factor=stress_scaler_factor,
         stall_model=stall_model,
         w_ref=W_ref,
         c_ref=c_ref,
@@ -3537,7 +3598,7 @@ if __name__ == '__main__':
     
         # Build parameter info string depending on active formulation
         dv_str = ""
-        if formulation == 'ar_area':
+        if geometry_parameterization_formulation == 'implicit':
             ar_val = float(np.asarray(unscaled_values['aspect_ratio']).flatten()[0]) if 'aspect_ratio' in unscaled_values else 10.0
             if 'taper_control_points' in unscaled_values:
                 t_vals = unscaled_values['taper_control_points']
@@ -3562,7 +3623,7 @@ if __name__ == '__main__':
                 dv_str = f"AR={ar_val:.2f}  {c_str}\n{sw_str}\n{tw_str}"
             else:
                 dv_str = f"AR={ar_val:.2f}  {c_str}\n{sw_str}"
-        elif formulation == 'chord_span':
+        elif geometry_parameterization_formulation == 'explicit':
             ss_val = float(np.asarray(unscaled_values['span_stretch_dv']).flatten()[0]) if 'span_stretch_dv' in unscaled_values else 0.0
             cs_vals = unscaled_values['chord_stretch_dvs'] if 'chord_stretch_dvs' in unscaled_values else np.zeros(num_chord_stations)
             c_str = " ".join([f"c{i}={initial_chord+cs_vals[i]:.3f}m" for i in range(len(cs_vals))])
@@ -3696,7 +3757,7 @@ if __name__ == '__main__':
         # Add iteration counter label using unscaled physical values
         plotter.add_text(
             f"Iteration {iteration}/{num_iterations - 1}\n"
-            f"Formulation: {formulation} | Res: {resolution} | Obj: {induced_drag_objective}\n"
+            f"Formulation: {geometry_parameterization_formulation} | Res: {resolution} | Obj: {induced_drag_objective}\n"
             f"CD_tot={cd_active_val*1e4:.1f} cts (CDi={(cdi_fourier_val if induced_drag_objective=='fourier' else cd_trefftz_val)*1e4:.1f}, CDprof={cd_profile_val*1e4:.1f}, CDwave={cd_wave_val*1e4:.1f})\n"
             f"D_tot={d_total_val:.1f} N | Λ_qc_max={max_qc_sw_deg:.1f}° | Λ_0.5_max={max_hc_sw_deg:.1f}° | min(Mdd-M)={min_mdd_margin:+.4f}\n"
             f"{viscous_hud_str}"
@@ -3805,7 +3866,8 @@ if __name__ == '__main__':
                     mach_cruise=float(cruise_cond['mach']),
                     q_cruise=float(cruise_cond['dynamic_pressure_Pa']),
                     altitude_m=float(cruise_cond['altitude_m']),
-                    formulation=str(formulation),
+                    geometry_parameterization_formulation=str(geometry_parameterization_formulation),
+                    formulation=str(geometry_parameterization_formulation),
                     resolution=str(resolution),
                     include_camber=bool(include_camber),
                     include_thickness_shape=bool(include_thickness_shape),
@@ -4042,6 +4104,8 @@ if __name__ == '__main__':
                     beam_pts_opt=np.asarray(jax_sim[beam_mesh]),
                     scale_factor=float(scale_factor),
                     allowable_stress=float(allowable_stress),
+                    stress_scaler_factor=float(stress_scaler_factor),
+                    stress_constraint_scaler=float(stress_constraint_scaler),
                     chords_opt=np.asarray(jax_sim[local_chord]).flatten(),
                     heights_opt=np.asarray(jax_sim[local_height]).flatten(),
                     box_heights_opt=np.asarray(jax_sim[box_height]).flatten(),
@@ -4057,7 +4121,8 @@ if __name__ == '__main__':
                     thickness_peaks=np.asarray(thickness_peaks),
                     knots_stress_15=np.asarray(knots_stress_15) if 'knots_stress_15' in globals() else np.array([]),
                     resolution=str(resolution),
-                    formulation=str(formulation),
+                    geometry_parameterization_formulation=str(geometry_parameterization_formulation),
+                    formulation=str(geometry_parameterization_formulation),
                     num_chord_stations=int(num_chord_stations),
                     num_stations=int(num_stations),
                     num_spanwise_sections=int(num_spanwise_sections),

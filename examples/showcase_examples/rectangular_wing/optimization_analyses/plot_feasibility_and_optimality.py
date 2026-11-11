@@ -162,7 +162,8 @@ class OptimizationConvergenceHistory:
     def __init__(
         self,
         design_variables: Optional[Dict[str, Any]] = None,
-        formulation: str = 'chord_span',
+        formulation: str = 'explicit',
+        geometry_parameterization_formulation: Optional[str] = None,
         scale_factor: float = 7.5,
         use_geonic: bool = True,
         geonic_payload_mode: str = 'both',
@@ -172,13 +173,24 @@ class OptimizationConvergenceHistory:
         c_ref: float = 2.5,
         load_factor_val: float = 2.5,
         include_neg1g_sizing: bool = False,
+        stress_scaler_factor: Optional[float] = None,
     ):
         self.design_variables = design_variables or {}
+        if geometry_parameterization_formulation is not None:
+            formulation = geometry_parameterization_formulation
+        if formulation in ('implicit', 'ar_area'):
+            formulation = 'implicit'
+        elif formulation in ('explicit', 'chord_span'):
+            formulation = 'explicit'
         self.formulation = formulation
+        self.geometry_parameterization_formulation = formulation
         self.scale_factor = scale_factor
         self.use_geonic = use_geonic
         self.geonic_payload_mode = geonic_payload_mode
         self.allowable_stress = allowable_stress
+        if stress_scaler_factor is None:
+            stress_scaler_factor = float(os.environ.get('STRESS_CONSTRAINT_SCALER_FACTOR', '0.2'))
+        self.stress_scaler_factor = float(stress_scaler_factor)
         self.stall_model = stall_model
         self.w_ref = w_ref
         self.c_ref = c_ref
@@ -330,10 +342,10 @@ class OptimizationConvergenceHistory:
         if stress_val is None:
             stress_val = get_val('dv_stresses')
         if stress_val is not None:
-            v_stress.append(np.maximum(0.0, stress_val - self.allowable_stress) / self.allowable_stress)
+            v_stress.append(self.stress_scaler_factor * np.maximum(0.0, stress_val - self.allowable_stress) / self.allowable_stress)
         stress_neg1g = get_val('root_stress_neg1g')
         if stress_neg1g is not None:
-            v_stress.append(np.maximum(0.0, stress_neg1g - self.allowable_stress) / self.allowable_stress)
+            v_stress.append(self.stress_scaler_factor * np.maximum(0.0, stress_neg1g - self.allowable_stress) / self.allowable_stress)
         v_stress_arr = np.concatenate(v_stress) if v_stress else np.array([0.0])
         self.con_violations_max['Structural Stress'].append(float(np.max(v_stress_arr)))
         self.con_violations_norm['Structural Stress'].append(float(np.linalg.norm(v_stress_arr)))
@@ -397,7 +409,7 @@ class OptimizationConvergenceHistory:
         # 7. Geometry Limits
         v_geom = []
         s_val = get_val('planform_area')
-        if s_val is not None and self.formulation == 'ar_area':
+        if s_val is not None and self.formulation in ('implicit', 'ar_area'):
             target_s = 10.0 * self.scale_factor**2
             v_geom.append(np.array([abs(s_val[0] - target_s) / target_s]))
         ar_calc = get_val('aspect_ratio_calc')

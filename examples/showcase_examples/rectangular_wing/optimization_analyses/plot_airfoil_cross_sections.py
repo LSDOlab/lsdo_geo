@@ -180,6 +180,10 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
     print(f"\nAnalyzing design variable vector of length {n_dv}...")
 
     formulation = formulation_override
+    if formulation in ('implicit', 'ar_area'):
+        formulation = 'implicit'
+    elif formulation in ('explicit', 'chord_span'):
+        formulation = 'explicit'
     resolution = resolution_override
     include_camber = None
     include_elevator = None
@@ -222,8 +226,15 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                         saved_num_stations = int(data['num_stations'])
                     if 'num_chord_stations' in data:
                         saved_num_chord_stations = int(data['num_chord_stations'])
-                    if formulation is None and 'formulation' in data:
-                        formulation = str(data['formulation'])
+                    if formulation is None:
+                        if 'geometry_parameterization_formulation' in data:
+                            formulation = str(data['geometry_parameterization_formulation'])
+                        elif 'formulation' in data:
+                            formulation = str(data['formulation'])
+                        if formulation in ('implicit', 'ar_area'):
+                            formulation = 'implicit'
+                        elif formulation in ('explicit', 'chord_span'):
+                            formulation = 'explicit'
                     if resolution is None and 'resolution' in data:
                         resolution = str(data['resolution'])
                     if include_camber is None and 'include_camber' in data:
@@ -265,9 +276,9 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
 
         if formulation is None:
             if any(k in dv_names for k in ['chord_stretch_dvs', 'span_stretch_dv', 'thickness_stretch_dvs']):
-                formulation = 'chord_span'
+                formulation = 'explicit'
             else:
-                formulation = 'ar_area'
+                formulation = 'implicit'
 
         # Determine num_stations dynamically:
         detected_num_stations = None
@@ -413,7 +424,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                     dv_dict[name] = x_opt[curr : curr + 1]
                     curr += 1
 
-        if formulation == 'chord_span':
+        if formulation in ('explicit', 'chord_span'):
             include_camber = 'camber_dvs' in dv_dict
             include_elevator = 'elevator_angle' in dv_dict
             include_sweep = 'sweep_dvs' in dv_dict
@@ -427,7 +438,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 payload_constraint_enforced = False
 
             parsed = {
-                'formulation': 'chord_span',
+                'formulation': 'explicit',
                 'resolution': resolution,
                 'include_camber': include_camber,
                 'include_elevator': include_elevator,
@@ -454,7 +465,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 'geonic_payload_mode': saved_geonic_payload_mode if saved_geonic_payload_mode is not None else ('oversized' if payload_constraint_enforced else 'none'),
                 'payload_constraint_enforced': payload_constraint_enforced,
             }
-            print(f"  Detected Formulation : Chord & Span Stretch ('chord_span') [via dv_names metadata]")
+            print(f"  Detected Formulation : Explicit Sectional FFD ('explicit') [via dv_names metadata]")
             print(f"  Resolution           : {resolution} ({num_stations} design stations)")
             print(f"  Active DVs ({len(dv_names)}): {dv_names}")
             print(f"  Camber DVs Active    : {include_camber}")
@@ -486,7 +497,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 payload_constraint_enforced = False
 
             parsed = {
-                'formulation': 'ar_area',
+                'formulation': 'implicit',
                 'resolution': resolution,
                 'include_camber': include_camber,
                 'include_elevator': include_elevator,
@@ -515,7 +526,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
                 'geonic_payload_mode': saved_geonic_payload_mode if saved_geonic_payload_mode is not None else ('oversized' if payload_constraint_enforced else 'none'),
                 'payload_constraint_enforced': payload_constraint_enforced,
             }
-            print(f"  Detected Formulation : Aspect Ratio & Area ('ar_area') [via dv_names metadata]")
+            print(f"  Detected Formulation : Implicit Regularized B-Spline ('implicit') [via dv_names metadata]")
             print(f"  Resolution           : {resolution} ({num_stations} design stations)")
             print(f"  Active DVs ({len(dv_names)}): {dv_names}")
             print(f"  Camber DVs Active    : {include_camber}")
@@ -535,28 +546,28 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
     # 3. Fallback heuristic detection from vector length if dv_names is not available
     if formulation is None:
         if n_dv in [50, 26, 32, 17, 58, 34, 27]:
-            formulation = 'chord_span'
+            formulation = 'explicit'
         elif n_dv in [66, 43, 42, 28]:
-            formulation = 'ar_area'
+            formulation = 'implicit'
         elif n_dv >= 48:
-            formulation = 'chord_span'
+            formulation = 'explicit'
         else:
-            formulation = 'ar_area'
+            formulation = 'implicit'
 
     if resolution is None:
-        if formulation == 'chord_span':
+        if formulation in ('explicit', 'chord_span'):
             resolution = 'fast' if n_dv in [17, 32, 22, 37, 27] else 'full'
         else:
             resolution = 'fast' if n_dv in [27, 28, 42] else 'full'
 
     if include_camber is None:
-        if formulation == 'chord_span':
+        if formulation in ('explicit', 'chord_span'):
             include_camber = (n_dv in [50, 32, 58, 37, 27])
         else:
             include_camber = (n_dv in [66, 42])
 
     if include_elevator is None:
-        if formulation == 'chord_span':
+        if formulation in ('explicit', 'chord_span'):
             include_elevator = False
         else:
             include_elevator = (n_dv in [28, 43])
@@ -575,7 +586,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
     initial_chord = 1.0 * scale_factor
     initial_thickness = 0.12 * initial_chord
 
-    if formulation == 'chord_span':
+    if formulation in ('explicit', 'chord_span'):
         curr = 0
         chord_stretch_dvs_val = x_opt[curr : curr + num_chord_stations] * scale_factor
         curr += num_chord_stations
@@ -631,7 +642,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
             camber_dvs_val = np.zeros((3, num_chord_stations))
 
         parsed = {
-            'formulation': 'chord_span',
+            'formulation': 'explicit',
             'resolution': resolution,
             'include_camber': include_camber,
             'include_elevator': include_elevator,
@@ -648,7 +659,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
             'elevator_angle': elevator_val,
         }
 
-        print(f"  Detected Formulation : Chord & Span Stretch ('chord_span') [fallback heuristic]")
+        print(f"  Detected Formulation : Explicit Sectional FFD ('explicit') [fallback heuristic]")
         print(f"  Resolution           : {resolution} ({num_stations} design stations)")
         print(f"  Camber DVs Active    : {include_camber}")
         print(f"  Elevator Active      : {include_elevator}")
@@ -658,7 +669,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
         print(f"  Span Stretch (m)     : {float(span_stretch_dv_val[0]):.3f}")
         return parsed
 
-    else:  # ar_area formulation
+    else:  # implicit formulation
         curr = 0
         taper_dvs_val = x_opt[curr : curr + num_chord_stations - 1] / 2.0
         curr += num_chord_stations - 1
@@ -708,7 +719,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
             elevator_val = 0.0
 
         parsed = {
-            'formulation': 'ar_area',
+            'formulation': 'implicit',
             'resolution': resolution,
             'include_camber': include_camber,
             'include_elevator': include_elevator,
@@ -727,7 +738,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
             'elevator_angle': elevator_val,
         }
 
-        print(f"  Detected Formulation : Aspect Ratio & Area ('ar_area') [fallback heuristic]")
+        print(f"  Detected Formulation : Implicit Regularized B-Spline ('implicit') [fallback heuristic]")
         print(f"  Resolution           : {resolution} ({num_stations} design stations)")
         print(f"  Camber DVs Active    : {include_camber}")
         print(f"  Elevator Active      : {include_elevator}")
@@ -740,7 +751,7 @@ def parse_design_variables(x_opt: np.ndarray, scale_factor: float = 7.5, target_
 def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     """
     Builds the CSDL parameterization and evaluates deformed CAD geometry.
-    Supports both 'chord_span' (direct FFD) and 'ar_area' (ParameterizationSolver).
+    Supports both 'explicit' (direct FFD) and 'implicit' (ParameterizationSolver).
     Returns geometry, total_wingspan, half_span, local_chords_vals, chord_stretch_vals, cad_chord_profile.
     """
     scale_factor = parsed_dvs['scale_factor']
@@ -750,6 +761,10 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     include_camber = parsed_dvs['include_camber']
     include_elevator = parsed_dvs['include_elevator']
     formulation = parsed_dvs['formulation']
+    if formulation in ('implicit', 'ar_area'):
+        formulation = 'implicit'
+    elif formulation in ('explicit', 'chord_span'):
+        formulation = 'explicit'
     resolution = parsed_dvs['resolution']
 
     recorder = csdl.Recorder(inline=True)
@@ -805,7 +820,7 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     include_te_thickness = parsed_dvs.get('include_te_thickness', False)
     num_ffd_coefficients_chordwise = 5 if (include_camber or include_thickness_shape) else 2
     ffd_degree_chordwise = 2 if (include_camber or include_thickness_shape) else 1
-    ffd_spanwise_degree = 2 if (formulation == 'chord_span' or resolution == 'full') else 3
+    ffd_spanwise_degree = 2 if (formulation in ('explicit', 'chord_span') or resolution == 'full') else 3
     ffd_block = construct_ffd_block_around_entities(
         entities=geometry,
         num_coefficients=(num_ffd_coefficients_chordwise, num_ffd_sections, 2),
@@ -818,7 +833,7 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     )
 
     eta_stations = np.linspace(0.0, 1.0, num_chord_stations)
-    if formulation == 'ar_area':
+    if formulation in ('implicit', 'ar_area'):
         v_stations = 0.5 + 0.5 * eta_stations
         station_eval_pts = np.column_stack([
             np.zeros(num_chord_stations),
@@ -853,8 +868,8 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
     projected_area_le = geometry.project(area_le_physical, plot=False)
     projected_area_te = geometry.project(area_te_physical, plot=False)
 
-    if formulation == 'chord_span':
-        print("Executing Direct Sectional FFD Parameterization ('chord_span')...")
+    if formulation in ('explicit', 'chord_span'):
+        print("Executing Direct Sectional FFD Parameterization ('explicit')...")
         chord_stretch_dvs = parsed_dvs['chord_stretch_dvs']
         sweep_dvs = parsed_dvs['sweep_dvs']
         thickness_stretch_dvs = parsed_dvs['thickness_stretch_dvs']
@@ -1088,7 +1103,10 @@ def build_and_evaluate_geometry(parsed_dvs: dict, repo_root: str):
             geometric_variables.add_variable(wingspan**2 / (10.0 * target_area),
                                              aspect_ratio * 1.0 / 10.0, penalty_value=None)
 
-        qc_pts = [geometry.evaluate(quarter_chord_projections[i]) for i in range(num_chord_stations)]
+        # Strictly define quarter-chord points along the 25% chord line (0.75 * LE + 0.25 * TE)
+        chord_le_pts = [geometry.evaluate(chord_le_projections[i]) for i in range(num_chord_stations)]
+        chord_te_pts = [geometry.evaluate(chord_te_projections[i]) for i in range(num_chord_stations)]
+        qc_pts = [0.75 * chord_le_pts[i] + 0.25 * chord_te_pts[i] for i in range(num_chord_stations)]
         dx_list = [csdl.reshape(qc_pts[i + 1][0] - qc_pts[i][0], (1,)) for i in range(num_chord_stations - 1)]
         dy_list = [csdl.reshape(qc_pts[i + 1][1] - qc_pts[i][1], (1,)) for i in range(num_chord_stations - 1)]
         dx_qc_vec = csdl.concatenate(dx_list)
@@ -1764,7 +1782,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Extract and plot airfoil cross-sections from optimization results.")
     parser.add_argument("run_dir", nargs="?", default=None, help="Path to optimization output folder containing x.out")
-    parser.add_argument("--formulation", choices=["auto", "chord_span", "ar_area"], default="auto", help="Wing parameterization formulation")
+    parser.add_argument("--geometry-parameterization-formulation", "--formulation", dest="formulation", choices=["auto", "explicit", "implicit", "chord_span", "ar_area"], default="auto", help="Wing parameterization formulation")
     parser.add_argument("--resolution", choices=["auto", "fast", "full"], default="auto", help="Spanwise resolution ('fast' = 5 stations, 'full' = 8 stations)")
     args = parser.parse_args()
 

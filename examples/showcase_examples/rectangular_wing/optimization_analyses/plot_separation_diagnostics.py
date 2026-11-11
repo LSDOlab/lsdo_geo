@@ -588,12 +588,16 @@ def generate_separation_figure(proc: Dict[str, Any], output_path: str) -> None:
     # -------------------------------------------------------------------------
     ax6 = fig.add_subplot(gs[2, 1])
 
-    chord_region_labels = [
-        r'LE Suction ($u \approx 0.17$)',
-        r'Mid-Chord ($u = 0.50$)',
-        r'Aft Recovery ($u \approx 0.83$)',
-        r'Trailing Edge ($u = 1.00$)',
-    ]
+    num_rows = sc_mat.shape[0]
+    if num_rows == 4:
+        chord_region_labels = [
+            r'LE Suction ($u \approx 0.17$)',
+            r'Mid-Chord ($u = 0.50$)',
+            r'Aft Recovery ($u \approx 0.83$)',
+            r'Trailing Edge ($u = 1.00$)',
+        ]
+    else:
+        chord_region_labels = [r'Peak Station $S_{\max}$']
     station_col_labels = [f"Stn {j+1}\n(" + r"$\eta=" + f"{proc['v_dense'][int(j*(len(proc['v_dense'])-1)/(num_ffd-1))]:.2f}" + r"$)" for j in range(num_ffd)]
 
     im6 = ax6.imshow(
@@ -601,7 +605,7 @@ def generate_separation_figure(proc: Dict[str, Any], output_path: str) -> None:
         norm=TwoSlopeNorm(vmin=0.0, vcenter=S_CRIT, vmax=max(0.80, float(np.max(sc_mat))))
     )
 
-    for i in range(4):
+    for i in range(num_rows):
         for j in range(num_ffd):
             val = sc_mat[i, j]
             margin = S_CRIT - val
@@ -619,7 +623,7 @@ def generate_separation_figure(proc: Dict[str, Any], output_path: str) -> None:
 
     ax6.set_xticks(range(num_ffd))
     ax6.set_xticklabels(station_col_labels)
-    ax6.set_yticks(range(4))
+    ax6.set_yticks(range(num_rows))
     ax6.set_yticklabels(chord_region_labels)
     ax6.set_title(
         r"(F) Regional Stratford Constraints ($S \leq 0.39$)" + "\n"
