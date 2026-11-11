@@ -42,7 +42,7 @@ from .core.parameterization.sectional_parameterization import (
 )
 from .core.parameterization.parameterization_solver import (
     ParameterizationSolver,
-    LinearParameterizationSolver,
+    ConstantKKTParameterizationSolver,
     GeometricVariables,
 )
 from .optimization import (
@@ -87,7 +87,7 @@ __all__ = [
     "VolumeSectionalParameterization",
     "VolumeSectionalParameterizationInputs",
     "ParameterizationSolver",
-    "LinearParameterizationSolver",
+    "ConstantKKTParameterizationSolver",
     "GeometricVariables",
     # Optimization
     "Optimization",

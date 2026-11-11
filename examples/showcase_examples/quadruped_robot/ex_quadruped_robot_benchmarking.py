@@ -126,7 +126,7 @@ design_variable_bounds = {
     'initial_knee_angle':     [baseline_values[6] * 1.50, baseline_values[6] * 0.50],
 }
 
-n_samples = 100
+n_samples = int(os.environ.get("BENCH_N_SAMPLES", "100"))
 lower_bounds = np.array([design_variable_bounds[name][0] for name in variable_names])
 upper_bounds = np.array([design_variable_bounds[name][1] for name in variable_names])
 

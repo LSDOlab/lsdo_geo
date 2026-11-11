@@ -543,16 +543,40 @@ class Optimization:
 
 class NewtonOptimizer:
     '''
-    A Newton Optimizer class.
+    A Newton Optimizer class with BlockNewton sparsity and KKT symmetry support.
 
-    NOTE: This is a temporary implementation until integration with the CSDL solvers is done
-        (the CSDL solvers need the add_optimization functionality)
+    Integrates with BlockNewton solver to automatically exploit:
+    - KKT constraint transpose symmetry (d(r_primal)/d(lambda) = (d(c)/d(primal))^T)
+    - KKT multiplier-multiplier zero blocks (d(c)/d(lambda) = 0)
+    - Primal-primal Hessian symmetry (d(r_pj)/d(pi) = (d(r_pi)/d(pj))^T) inherently true for any optimization problem
+    - Automatic DAG reachability block-sparsity
     '''
-    def __init__(self) -> None:
-        # self.solver = csdl.nonlinear_solvers.Newton()
-        self.solver = csdl.nonlinear_solvers.Newton(residual_jac_kwargs={"loop": False, "concatenate_ofs": False})
-        # self.solver = csdl.nonlinear_solvers.Newton(residual_jac_kwargs={"loop": True, "concatenate_ofs": False})
-        # self.solver = csdl.nonlinear_solvers.Newton(residual_jac_kwargs={"loop": True, "concatenate_ofs": True})
+    def __init__(
+        self,
+        solver=None,
+        quadratic_objective_linear_constraints: bool = False,
+    ) -> None:
+        import os
+        use_kkt_symmetry = os.environ.get("LSDO_GEO_USE_KKT_SYMMETRY", "1").strip().lower() in ("1", "true", "yes")
+        use_block_newton = os.environ.get("LSDO_GEO_USE_BLOCK_NEWTON", "1").strip().lower() in ("1", "true", "yes")
+
+        self.use_kkt_symmetry = use_kkt_symmetry
+        self.quadratic_objective_linear_constraints = quadratic_objective_linear_constraints
+
+        if solver is None:
+            if use_block_newton and hasattr(csdl.nonlinear_solvers, "BlockNewton"):
+                self.solver = csdl.nonlinear_solvers.BlockNewton(
+                    residual_jac_kwargs={"loop": False, "concatenate_ofs": False},
+                    symmetric_primal=True,
+                )
+            else:
+                self.solver = csdl.nonlinear_solvers.Newton(
+                    residual_jac_kwargs={"loop": False, "concatenate_ofs": False},
+                )
+        else:
+            self.solver = solver
+            if hasattr(self.solver, "symmetric_primal"):
+                self.solver.symmetric_primal = True
         self.has_been_setup = False
 
     def add_optimization(self, optimization:Optimization):
@@ -563,15 +587,38 @@ class NewtonOptimizer:
 
     def setup(self):
         self.optimization.setup()
-        for state_residual_pair in self.optimization.state_residual_pairs:
-            state_object = state_residual_pair.state
-            state = state_object.variable
-            initial_value = state_object.initial_value
-            residual = state_residual_pair.residual
+
+        # 1. Register primal design variables
+        for dv_obj in self.optimization.design_variables:
+            dv = dv_obj.variable
+            initial_value = dv_obj.initial_value
+            residual = self.optimization.dL_dx[dv].reshape((dv.size,))
             if initial_value is not None:
-                self.solver.add_state(state, residual, initial_value=initial_value)
+                self.solver.add_state(dv, residual, initial_value=initial_value)
             else:
-                self.solver.add_state(state, residual)
+                self.solver.add_state(dv, residual)
+
+        # 2. Register KKT equality constraints
+        for constraint_object, mult in zip(
+            self.optimization.equality_constraints,
+            self.optimization.equality_constraint_lagrange_multipliers,
+        ):
+            if mult is not None:
+                constraint = constraint_object.constraint
+                if self.use_kkt_symmetry and hasattr(self.solver, "add_kkt_constraint"):
+                    self.solver.add_kkt_constraint(mult, constraint)
+                else:
+                    self.solver.add_state(mult, constraint)
+
+        # 3. Register inequality constraints (if multipliers are used)
+        for constraint_object, mult in zip(
+            self.optimization.inequality_constraints,
+            self.optimization.inequality_constraint_lagrange_multipliers,
+        ):
+            if mult is not None:
+                residual = csdl.derivative(self.optimization.lagrangian, mult).flatten()
+                self.solver.add_state(mult, residual)
+
         self.has_been_setup = True
 
     def run(self):

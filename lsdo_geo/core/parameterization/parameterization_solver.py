@@ -81,23 +81,63 @@ class GeometricVariables:
 
 class ParameterizationSolver:
     '''
-    The ParameterizationSolver class is used to solve geometric parameterization problems.
+    The ParameterizationSolver class solves geometric parameterization problems using
+    either direct pre-factored KKT matrix multiplication or implicit Newton-KKT iterations.
+
+    Parameters
+    ----------
+    optimizer : Optional[NewtonOptimizer], optional
+        Custom optimizer instance. If None, instantiates a default NewtonOptimizer.
+    inner_parameterization_map : Optional[Callable], optional
+        Callable for the inner parameterization map: P_i(alpha_s) -> geometry/assembly.
+    constant_kkt : bool, optional
+        Set to True when the entire KKT system (both the quadratic cost weighting matrix W
+        and the constraint Jacobian A = dc/d(alpha_s)) is constant and completely independent
+        of top-level optimization design variables. When True, the KKT matrix is inverted/factored
+        once at setup, and every evaluation is performed via a single direct back-substitution step
+        (csdl.matvec) with zero Newton iterations. Takes precedence over
+        quadratic_objective_linear_constraints. Default is False.
+    quadratic_objective_linear_constraints : bool, optional
+        Set to True when the objective is quadratic (x^T W x) and the constraints are linear in the
+        parameterization states alpha_s (c(alpha_s, d) = A(d) alpha_s - b(d) = 0), but the constraint
+        Jacobian A(d) varies across outer optimization iterations with design variables d.
+        In this case, the Lagrangian Hessian with respect to alpha_s is mathematically exact 2W (since
+        constraint curvature nabla^2 c is zero). Setting this to True injects the constant 2W matrix
+        directly into the KKT matrix, completely bypassing reverse-mode autodiff sweeps for the primal
+        state residuals, and converges in 1 Newton iteration per optimization step.
+        Ignored if constant_kkt is True. Default is False.
+    assembly : Optional[Union[Assembly, lfs.FunctionNetwork]], optional
+        Assembly or function network containing geometric connections.
+    geometry : Optional[Geometry], optional
+        Geometry instance to be parameterized.
     '''
     def __init__(
         self,
         optimizer=None,
         inner_parameterization_map: Optional[Callable] = None,
-        linear: bool = False,
+        constant_kkt: bool = False,
+        quadratic_objective_linear_constraints: bool = False,
         assembly: Optional[Union[Assembly, lfs.FunctionNetwork]] = None,
         geometry: Optional[Geometry] = None,
     ) -> None:
+        self.constant_kkt = constant_kkt
+        # constant_kkt takes precedence over quadratic_objective_linear_constraints
+        if self.constant_kkt:
+            self.quadratic_objective_linear_constraints = False
+        else:
+            self.quadratic_objective_linear_constraints = quadratic_objective_linear_constraints
+
         self.optimization = Optimization()
-        self.optimizer = optimizer if optimizer is not None else NewtonOptimizer()
+        if optimizer is not None:
+            self.optimizer = optimizer
+        else:
+            self.optimizer = NewtonOptimizer(
+                quadratic_objective_linear_constraints=self.quadratic_objective_linear_constraints,
+            )
         self.states : list[State] = []
         self.inner_parameterization_map = inner_parameterization_map
-        self.linear = linear
         self.has_been_setup = False
-        self.has_linear_setup = False
+        self.has_constant_kkt_setup = False
         self.kkt_matrix = None
         self.kkt_matrix_inverse = None
         self.negative_kkt_matrix_inverse = None
@@ -299,9 +339,9 @@ class ParameterizationSolver:
         self.optimizer.add_optimization(self.optimization)
 
 
-    def setup_linear(self, geometric_variables: Optional[GeometricVariables] = None) -> None:
+    def setup_constant_kkt(self, geometric_variables: Optional[GeometricVariables] = None) -> None:
         '''
-        Sets up the linear KKT system, computes the exact constant KKT matrix,
+        Sets up the constant KKT system, computes the exact constant KKT matrix,
         and pre-factors / inverts it for instantaneous single-step back-substitution.
         
         Exploits block structure and symmetry:
@@ -389,15 +429,16 @@ class ParameterizationSolver:
             self._state_slices[var.name] = (curr_idx, curr_idx + sz, var.shape)
             curr_idx += sz
 
-        self.has_linear_setup = True
+        self.has_constant_kkt_setup = True
 
-    def solve_linear(self, geometric_variables: Optional[GeometricVariables] = None) -> Dict[str, csdl.Variable]:
+    def solve_constant_kkt(self, geometric_variables: Optional[GeometricVariables] = None) -> None:
         '''
-        Solves the linear KKT system in a single back-substitution (csdl.matvec)
+        Solves the constant KKT system in a single back-substitution (csdl.matvec)
         and automatically reevaluates the inner parameterization map in CSDL.
+        Results are saved in self.solved_states.
         '''
-        if not self.has_linear_setup:
-            self.setup_linear(geometric_variables)
+        if not self.has_constant_kkt_setup:
+            self.setup_constant_kkt(geometric_variables)
 
         # delta_y = negative_kkt_matrix_inverse @ R_vec (where negative_kkt_matrix_inverse = - K^{-1})
         delta_y = csdl.matvec(self.negative_kkt_matrix_inverse, self._R_vec)
@@ -414,8 +455,6 @@ class ParameterizationSolver:
             s_solved = s_var + delta_s
             s_solved.add_name(f"{s_var.name}_solved")
             solved_states[s_var.name] = s_solved
-            if hasattr(s_var, "set_value") and s_solved.value is not None:
-                s_var.set_value(s_solved.value)
 
         self.solved_states = solved_states
 
@@ -435,22 +474,27 @@ class ParameterizationSolver:
 
         # Automatically update representations on the re-evaluated geometry/assembly
         self._update_all_representations(res_geom)
+        return None
 
-        return solved_states
-
-    def evaluate(self, geometric_variables: Optional[GeometricVariables] = None, linear: Optional[bool] = None):
+    def evaluate(
+        self,
+        geometric_variables: Optional[GeometricVariables] = None,
+        constant_kkt: Optional[bool] = None,
+    ) -> None:
         '''
         Evaluate the parameterization solver.
+        Solves the parameterization and updates all geometry representations in-place.
 
         Parameters
         ----------
-        geometric_variables : Optional[GeometricVariables]
+        geometric_variables : Optional[GeometricVariables], optional
             The geometric variables dataclass.
-        linear : Optional[bool]
-            Whether to use linear pre-factorized solve. If None, uses self.linear.
+        constant_kkt : Optional[bool], optional
+            Whether to use direct pre-factorized constant KKT solve. If None, uses self.constant_kkt.
         '''
-        if linear or (linear is None and self.linear):
-            return self.solve_linear(geometric_variables)
+        if constant_kkt or (constant_kkt is None and self.constant_kkt):
+            self.solve_constant_kkt(geometric_variables)
+            return None
 
         if geometric_variables is not None:
             for i in range(len(geometric_variables.computed_value)):
@@ -460,6 +504,40 @@ class ParameterizationSolver:
                 self.add_variable(computed_value, desired_value, penalty_value)
 
         self.setup()
+        has_penalty_constraints = any(c.penalty is not None for c in self.optimization.equality_constraints)
+        if (
+            self.quadratic_objective_linear_constraints
+            and not has_penalty_constraints
+            and hasattr(self.optimizer, "solver")
+            and hasattr(self.optimizer.solver, "set_block_constant")
+        ):
+            if not self.optimizer.has_been_setup:
+                self.optimizer.setup()
+            for state_object in self.states:
+                state = state_object.state
+                cost = state_object.cost
+                sz = state.size
+                if isinstance(cost, (float, int)) or (getattr(cost, "size", 0) == 1):
+                    c_val = float(cost.value if hasattr(cost, "value") else cost)
+                    w_mat = 2.0 * np.eye(sz) * c_val
+                elif getattr(cost, "ndim", 0) == 1 or len(getattr(cost, "shape", ())) == 1:
+                    c_val = np.asarray(cost.value if hasattr(cost, "value") else cost, dtype=np.float64)
+                    w_mat = 2.0 * np.diag(c_val)
+                elif getattr(cost, "ndim", 0) == 2 or len(getattr(cost, "shape", ())) == 2:
+                    c_val = np.asarray(cost.value if hasattr(cost, "value") else cost, dtype=np.float64)
+                    w_mat = 2.0 * c_val
+                else:
+                    continue
+                res = self.optimizer.solver.state_to_residual_map[state]
+                self.optimizer.solver.set_block_constant(res, state, w_mat)
+
+            if hasattr(self.optimizer.solver, "set_block_zero"):
+                for i, si in enumerate(self.states):
+                    ri = self.optimizer.solver.state_to_residual_map[si.state]
+                    for j, sj in enumerate(self.states):
+                        if i != j:
+                            self.optimizer.solver.set_block_zero(ri, sj.state)
+
         self.optimizer.run()
 
         res_geom = None
@@ -476,18 +554,15 @@ class ParameterizationSolver:
                     res_geom = self.inner_parameterization_map(states_dict)
 
         self._update_all_representations(res_geom)
-
-        outputs : list[csdl.Variable] = []
-        if geometric_variables is not None:
-            for computed_value in geometric_variables.computed_value:
-                outputs.append(computed_value)
-        return outputs
+        return None
 
 
-class LinearParameterizationSolver(ParameterizationSolver):
+class ConstantKKTParameterizationSolver(ParameterizationSolver):
     '''
-    Automated Linear Geometry Parameterization Solver with pre-factorized KKT matrix.
-    Performs instantaneous single-step solve and automatically reevaluates the inner parameterization map.
+    Automated Constant KKT Geometry Parameterization Solver with pre-factorized KKT matrix.
+    Used when the entire KKT system (both weighting matrix W and constraint Jacobian A) is
+    constant and completely independent of design variables. Performs an instantaneous
+    single-step direct solve (csdl.matvec) with zero Newton iterations.
     '''
     def __init__(
         self,
@@ -497,7 +572,7 @@ class LinearParameterizationSolver(ParameterizationSolver):
     ) -> None:
         super().__init__(
             inner_parameterization_map=inner_parameterization_map,
-            linear=True,
+            constant_kkt=True,
             assembly=assembly,
             geometry=geometry,
         )

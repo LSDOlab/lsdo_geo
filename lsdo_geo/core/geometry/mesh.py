@@ -117,6 +117,7 @@ class Mesh(Marker):
         plot: bool = False,
         non_csdl: bool = False,
         sample_parameters: Optional[npt.NDArray[np.float64]] = None,
+        parametric_derivative_orders: Optional[Sequence[int]] = None,
     ) -> Union[csdl.Variable, npt.NDArray[np.float64]]:
         """
         Evaluates the mesh on the geometry.
@@ -134,6 +135,8 @@ class Mesh(Marker):
             If True, evaluates in NumPy without CSDL graph operations. Default is False.
         sample_parameters : Optional[npt.NDArray[np.float64]], optional
             Collocation / quadrature sampling parameters for continuous (IGA) function meshes.
+        parametric_derivative_orders : Optional[Sequence[int]], optional
+            Derivative orders for parametric derivatives.
 
         Returns
         -------
@@ -153,6 +156,7 @@ class Mesh(Marker):
                         plot=plot,
                         non_csdl=non_csdl,
                         sample_parameters=sample_parameters,
+                        parametric_derivative_orders=parametric_derivative_orders,
                     )
                     for name, m in self.markers.items()
                 }
@@ -163,6 +167,7 @@ class Mesh(Marker):
                     plot=plot,
                     non_csdl=non_csdl,
                     sample_parameters=sample_parameters,
+                    parametric_derivative_orders=parametric_derivative_orders,
                 )
                 res = self.subroutine(pts)
         else:
@@ -173,6 +178,7 @@ class Mesh(Marker):
                         plot=plot,
                         non_csdl=non_csdl,
                         sample_parameters=sample_parameters,
+                        parametric_derivative_orders=parametric_derivative_orders,
                     )
                     for name, m in self.markers.items()
                 }
@@ -186,6 +192,7 @@ class Mesh(Marker):
                     plot=plot,
                     non_csdl=non_csdl,
                     sample_parameters=sample_parameters,
+                    parametric_derivative_orders=parametric_derivative_orders,
                 )
 
         if not non_csdl and isinstance(res, csdl.Variable):
@@ -227,15 +234,42 @@ class CamberSurfaceMesh(Mesh):
         plot: bool = False,
         non_csdl: bool = False,
         sample_parameters: Optional[npt.NDArray[np.float64]] = None,
+        parametric_derivative_orders: Optional[Sequence[int]] = None,
     ) -> Union[csdl.Variable, npt.NDArray[np.float64]]:
         """
         Evaluates the mean camber surface by averaging upper and lower surface markers.
+
+        Parameters
+        ----------
+        geometry : Optional[Union[Geometry, lfs.FunctionSet, lfs.Function]], optional
+            Geometry to evaluate on.
+        plot : bool, optional
+            Whether to plot the evaluated mesh. Default is False.
+        non_csdl : bool, optional
+            If True, evaluates in NumPy without CSDL graph operations. Default is False.
+        sample_parameters : Optional[npt.NDArray[np.float64]], optional
+            Collocation / quadrature sampling parameters for continuous (IGA) function meshes.
+        parametric_derivative_orders : Optional[Sequence[int]], optional
+            Derivative orders for parametric derivatives.
+
+        Returns
+        -------
+        Union[csdl.Variable, npt.NDArray[np.float64]]
+            The evaluated camber surface coordinates.
         """
         upper = self.markers["upper"].evaluate(
-            geometry=geometry, plot=plot, non_csdl=non_csdl, sample_parameters=sample_parameters
+            geometry=geometry,
+            plot=plot,
+            non_csdl=non_csdl,
+            sample_parameters=sample_parameters,
+            parametric_derivative_orders=parametric_derivative_orders,
         )
         lower = self.markers["lower"].evaluate(
-            geometry=geometry, plot=plot, non_csdl=non_csdl, sample_parameters=sample_parameters
+            geometry=geometry,
+            plot=plot,
+            non_csdl=non_csdl,
+            sample_parameters=sample_parameters,
+            parametric_derivative_orders=parametric_derivative_orders,
         )
         camber = (upper + lower) / 2.0
         if self.shape is not None:

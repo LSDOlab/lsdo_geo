@@ -245,11 +245,10 @@ class Marker(lfs.Marker):
     def evaluate(
         self,
         geometry: Optional[Geometry] = None,
-        entity: Optional[Geometry] = None,
-        parametric_derivative_orders: Optional[Sequence[int]] = None,
         plot: bool = False,
         non_csdl: bool = False,
         sample_parameters: Optional[npt.NDArray[np.float64]] = None,
+        parametric_derivative_orders: Optional[Sequence[int]] = None,
     ) -> Union[csdl.Variable, npt.NDArray[np.float64]]:
         """
         Evaluates the physical 3D Cartesian position or parametric derivative of the marker.
@@ -258,25 +257,22 @@ class Marker(lfs.Marker):
         ----------
         geometry : Optional[Geometry], optional
             Geometry instance to evaluate on (overrides self.entity if provided).
-        entity : Optional[Geometry], optional
-            Alias for geometry.
-        parametric_derivative_orders : Optional[Sequence[int]], optional
-            Orders of derivative with respect to each parametric dimension, e.g. (1, 0) for tu.
         plot : bool, optional
             Whether to trigger visual plotting of the evaluation point. Default is False.
         non_csdl : bool, optional
             If True, evaluates purely in NumPy without building CSDL graph operations. Default is False.
         sample_parameters : Optional[npt.NDArray[np.float64]], optional
             Collocation / quadrature sampling nodes for continuous (m >= 1) markers.
+        parametric_derivative_orders : Optional[Sequence[int]], optional
+            Orders of derivative with respect to each parametric dimension, e.g. (1, 0) for tu.
 
         Returns
         -------
         Union[csdl.Variable, npt.NDArray[np.float64]]
             The evaluated 3D coordinates or derivative vector (CSDL Variable in graph mode, or NumPy array).
         """
-        target = geometry if geometry is not None else entity
         val = super().evaluate(
-            entity=target,
+            entity=geometry,
             parametric_derivative_orders=parametric_derivative_orders,
             plot=plot,
             non_csdl=non_csdl,
@@ -311,9 +307,9 @@ class Marker(lfs.Marker):
         Union[csdl.Variable, npt.NDArray[np.float64]]
             The evaluated surface derivative vector.
         """
-        return super().evaluate_derivatives(
-            derivative_orders=derivative_orders,
-            entity=geometry,
+        return self.evaluate(
+            geometry=geometry,
+            parametric_derivative_orders=derivative_orders,
             non_csdl=non_csdl,
             sample_parameters=sample_parameters,
         )
