@@ -339,6 +339,66 @@ class ParameterizationSolver:
         self.optimizer.add_optimization(self.optimization)
 
 
+    @staticmethod
+    def _state_hessian_block(state_object: State) -> npt.NDArray[np.float64]:
+        """Returns the constant 2 * W Hessian matrix block for a single parameterization state."""
+        sz = state_object.state.size
+        cost = state_object.cost
+        if isinstance(cost, (float, int)) or (getattr(cost, "size", 0) == 1):
+            c_val = float(np.asarray(cost.value if hasattr(cost, "value") else cost).item())
+            return 2.0 * np.eye(sz) * c_val
+        elif getattr(cost, "ndim", 0) == 1 or len(getattr(cost, "shape", ())) == 1:
+            c_val = np.asarray(cost.value if hasattr(cost, "value") else cost, dtype=np.float64)
+            return 2.0 * np.diag(c_val)
+        elif getattr(cost, "ndim", 0) == 2 or len(getattr(cost, "shape", ())) == 2:
+            c_val = np.asarray(cost.value if hasattr(cost, "value") else cost, dtype=np.float64)
+            return 2.0 * c_val
+        raise ValueError(f"Unsupported cost shape for state '{state_object.state.name}'")
+
+    def _compute_state_slices(self) -> Dict[str, tuple[int, int, tuple[int, ...]]]:
+        """Builds a mapping from state name to (start_idx, end_idx, shape) in the stacked KKT vector."""
+        slices: Dict[str, tuple[int, int, tuple[int, ...]]] = {}
+        curr_idx = 0
+        for state_object in self.states:
+            var = state_object.state
+            sz = var.size
+            slices[var.name] = (curr_idx, curr_idx + sz, var.shape)
+            curr_idx += sz
+        return slices
+
+    def _extract_solved_states(
+        self,
+        delta_y: csdl.Variable,
+        state_slices: Dict[str, tuple[int, int, tuple[int, ...]]],
+    ) -> Dict[str, csdl.Variable]:
+        """Extracts primal state increments from stacked KKT step vector and returns updated states."""
+        solved_states: Dict[str, csdl.Variable] = {}
+        for state_obj in self.states:
+            s_var = state_obj.state
+            start_i, end_i, shape = state_slices[s_var.name]
+            delta_s = delta_y[start_i:end_i]
+            if len(shape) > 1 or (len(shape) == 1 and shape[0] > 1):
+                delta_s = csdl.reshape(delta_s, shape)
+            elif len(shape) == 0:
+                delta_s = delta_s[0]
+            s_solved = s_var + delta_s
+            s_solved.add_name(f"{s_var.name}_solved")
+            solved_states[s_var.name] = s_solved
+        return solved_states
+
+    def _invoke_inner_map(self, states_dict: Dict[str, csdl.Variable]) -> Optional[Any]:
+        """Invokes self.inner_parameterization_map with the supplied states dictionary."""
+        if self.inner_parameterization_map is not None and callable(self.inner_parameterization_map):
+            import inspect
+            sig = inspect.signature(self.inner_parameterization_map)
+            if len(sig.parameters) == 1:
+                return self.inner_parameterization_map(states_dict)
+            try:
+                return self.inner_parameterization_map(**states_dict)
+            except TypeError:
+                return self.inner_parameterization_map(states_dict)
+        return None
+
     def setup_constant_kkt(self, geometric_variables: Optional[GeometricVariables] = None) -> None:
         '''
         Sets up the constant KKT system, computes the exact constant KKT matrix,
@@ -370,18 +430,8 @@ class ParameterizationSolver:
         # Top-left block: W = 2 * diag(cost) (from quadratic cost on states)
         counter = 0
         for state_object in self.states:
-            state = state_object.state
-            sz = state.size
-            cost = state_object.cost
-            if isinstance(cost, (float, int)) or (getattr(cost, "size", 0) == 1):
-                c_val = float(cost.value if hasattr(cost, "value") else cost)
-                kkt_matrix[counter : counter + sz, counter : counter + sz] = 2.0 * np.eye(sz) * c_val
-            elif getattr(cost, "ndim", 0) == 1 or len(getattr(cost, "shape", ())) == 1:
-                c_val = np.asarray(cost.value if hasattr(cost, "value") else cost, dtype=np.float64)
-                kkt_matrix[counter : counter + sz, counter : counter + sz] = 2.0 * np.diag(c_val)
-            elif getattr(cost, "ndim", 0) == 2 or len(getattr(cost, "shape", ())) == 2:
-                c_val = np.asarray(cost.value if hasattr(cost, "value") else cost, dtype=np.float64)
-                kkt_matrix[counter : counter + sz, counter : counter + sz] = 2.0 * c_val
+            sz = state_object.state.size
+            kkt_matrix[counter : counter + sz, counter : counter + sz] = self._state_hessian_block(state_object)
             counter += sz
 
         # Bottom-left block (A) and Top-right block (A.T)
@@ -420,15 +470,7 @@ class ParameterizationSolver:
             self.kkt_matrix_inverse = np.linalg.pinv(kkt_matrix)
         self.negative_kkt_matrix_inverse = - self.kkt_matrix_inverse
 
-        # Map state slices for solution extraction
-        self._state_slices = {}
-        curr_idx = 0
-        for state_object in self.states:
-            var = state_object.state
-            sz = var.size
-            self._state_slices[var.name] = (curr_idx, curr_idx + sz, var.shape)
-            curr_idx += sz
-
+        self._state_slices = self._compute_state_slices()
         self.has_constant_kkt_setup = True
 
     def solve_constant_kkt(self, geometric_variables: Optional[GeometricVariables] = None) -> None:
@@ -437,44 +479,60 @@ class ParameterizationSolver:
         and automatically reevaluates the inner parameterization map in CSDL.
         Results are saved in self.solved_states.
         '''
+        if self.inner_parameterization_map is None:
+            raise ValueError(
+                "When constant_kkt=True, an inner_parameterization_map must be provided to evaluate and update the parameterized geometry."
+            )
+
         if not self.has_constant_kkt_setup:
             self.setup_constant_kkt(geometric_variables)
 
         # delta_y = negative_kkt_matrix_inverse @ R_vec (where negative_kkt_matrix_inverse = - K^{-1})
         delta_y = csdl.matvec(self.negative_kkt_matrix_inverse, self._R_vec)
 
-        solved_states = {}
-        for state_obj in self.states:
-            s_var = state_obj.state
-            start_i, end_i, shape = self._state_slices[s_var.name]
-            delta_s = delta_y[start_i:end_i]
-            if len(shape) > 1 or (len(shape) == 1 and shape[0] > 1):
-                delta_s = csdl.reshape(delta_s, shape)
-            elif len(shape) == 0:
-                delta_s = delta_s[0]
-            s_solved = s_var + delta_s
-            s_solved.add_name(f"{s_var.name}_solved")
-            solved_states[s_var.name] = s_solved
-
-        self.solved_states = solved_states
-
-        # Reevaluate the inner parameterization map in CSDL
-        res_geom = None
-        if self.inner_parameterization_map is not None:
-            if callable(self.inner_parameterization_map):
-                import inspect
-                sig = inspect.signature(self.inner_parameterization_map)
-                if len(sig.parameters) == 1:
-                    res_geom = self.inner_parameterization_map(solved_states)
-                else:
-                    try:
-                        res_geom = self.inner_parameterization_map(**solved_states)
-                    except TypeError:
-                        res_geom = self.inner_parameterization_map(solved_states)
-
-        # Automatically update representations on the re-evaluated geometry/assembly
+        self.solved_states = self._extract_solved_states(delta_y, self._state_slices)
+        res_geom = self._invoke_inner_map(self.solved_states)
         self._update_all_representations(res_geom)
         return None
+
+    def _solve_quadratic_linear_direct(self) -> None:
+        """
+        Assembles the design-variable-dependent KKT matrix K(d) = [[2W, A(d)^T], [A(d), 0]] in CSDL
+        and solves K(d) * delta_y = -R(d) via a single csdl.solve_linear call (no iterative loop).
+        """
+        from csdl_alpha.src.operations.linalg.blockmat import blockmat
+
+        c_list = [csdl.reshape(c.constraint, (c.constraint.size,)) for c in self.optimization.equality_constraints]
+        c_vec = csdl.concatenate(c_list)
+        state_vars = [s.state for s in self.states]
+        A_jac = csdl.derivative(c_vec, state_vars, as_block=True)
+
+        num_dvs = sum(s.state.size for s in self.states)
+        num_constraints = c_vec.size
+
+        w_full = np.zeros((num_dvs, num_dvs), dtype=np.float64)
+        counter = 0
+        for state_object in self.states:
+            sz = state_object.state.size
+            w_full[counter : counter + sz, counter : counter + sz] = self._state_hessian_block(state_object)
+            counter += sz
+
+        w_var = csdl.Variable(value=w_full, name="param_kkt_W")
+        z_var = csdl.Variable(value=np.zeros((num_constraints, num_constraints), dtype=np.float64), name="param_kkt_zero")
+        kkt_mat = blockmat([[w_var, A_jac.T()], [A_jac, z_var]])
+
+        rhs_parts = []
+        for state_object in self.states:
+            obj_grad = self.optimization.compute_objective_gradient(design_variables=state_object.state)
+            rhs_parts.append(csdl.reshape(obj_grad, (state_object.state.size,)))
+        rhs_parts.append(c_vec)
+        rhs = -csdl.concatenate(rhs_parts)
+
+        delta_y = csdl.solve_linear(kkt_mat, rhs)
+        state_slices = self._compute_state_slices()
+        self.solved_states = self._extract_solved_states(delta_y, state_slices)
+        res_geom = self._invoke_inner_map(self.solved_states)
+        self._update_all_representations(res_geom)
 
     def evaluate(
         self,
@@ -505,6 +563,17 @@ class ParameterizationSolver:
 
         self.setup()
         has_penalty_constraints = any(c.penalty is not None for c in self.optimization.equality_constraints)
+        has_inequality_constraints = len(self.optimization.inequality_constraints) > 0
+        if (
+            self.quadratic_objective_linear_constraints
+            and self.inner_parameterization_map is not None
+            and not has_penalty_constraints
+            and not has_inequality_constraints
+            and len(self.optimization.equality_constraints) > 0
+        ):
+            self._solve_quadratic_linear_direct()
+            return None
+
         if (
             self.quadratic_objective_linear_constraints
             and not has_penalty_constraints
@@ -515,19 +584,7 @@ class ParameterizationSolver:
                 self.optimizer.setup()
             for state_object in self.states:
                 state = state_object.state
-                cost = state_object.cost
-                sz = state.size
-                if isinstance(cost, (float, int)) or (getattr(cost, "size", 0) == 1):
-                    c_val = float(cost.value if hasattr(cost, "value") else cost)
-                    w_mat = 2.0 * np.eye(sz) * c_val
-                elif getattr(cost, "ndim", 0) == 1 or len(getattr(cost, "shape", ())) == 1:
-                    c_val = np.asarray(cost.value if hasattr(cost, "value") else cost, dtype=np.float64)
-                    w_mat = 2.0 * np.diag(c_val)
-                elif getattr(cost, "ndim", 0) == 2 or len(getattr(cost, "shape", ())) == 2:
-                    c_val = np.asarray(cost.value if hasattr(cost, "value") else cost, dtype=np.float64)
-                    w_mat = 2.0 * c_val
-                else:
-                    continue
+                w_mat = self._state_hessian_block(state_object)
                 res = self.optimizer.solver.state_to_residual_map[state]
                 self.optimizer.solver.set_block_constant(res, state, w_mat)
 
@@ -540,19 +597,8 @@ class ParameterizationSolver:
 
         self.optimizer.run()
 
-        res_geom = None
-        if self.inner_parameterization_map is not None:
-            states_dict = {s.state.name: s.state for s in self.states}
-            import inspect
-            sig = inspect.signature(self.inner_parameterization_map)
-            if len(sig.parameters) == 1:
-                res_geom = self.inner_parameterization_map(states_dict)
-            else:
-                try:
-                    res_geom = self.inner_parameterization_map(**states_dict)
-                except TypeError:
-                    res_geom = self.inner_parameterization_map(states_dict)
-
+        states_dict = {s.state.name: s.state for s in self.states}
+        res_geom = self._invoke_inner_map(states_dict)
         self._update_all_representations(res_geom)
         return None
 

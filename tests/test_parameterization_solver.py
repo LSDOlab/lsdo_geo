@@ -429,6 +429,7 @@ def test_parameterization_solver_constant_kkt_precedence_over_quadratic_linear()
 
     # Both set to True: constant_kkt must take precedence
     solver = lg.ParameterizationSolver(
+        inner_parameterization_map=lambda s: None,
         constant_kkt=True,
         quadratic_objective_linear_constraints=True,
     )
@@ -458,6 +459,115 @@ def test_constant_kkt_parameterization_solver_class():
 
     solver1 = lg.ConstantKKTParameterizationSolver()
     assert solver1.constant_kkt is True
+
+
+def test_parameterization_solver_direct_kkt_solve_variable_jacobian():
+    """
+    Verifies quadratic_objective_linear_constraints=True with direct_kkt_solve=True
+    updates the KKT matrix and sensitivities accurately when A(d) varies with design variables.
+    """
+    recorder = csdl.Recorder(inline=True)
+    recorder.start()
+
+    d = csdl.Variable(value=np.array([2.0, 1.0]), name="design_var")
+    d.set_as_design_variable(lower=-10.0, upper=10.0)
+    target = csdl.Variable(value=np.array([5.0]), name="target")
+    target.set_as_design_variable(lower=-10.0, upper=10.0)
+
+    x1 = csdl.Variable(value=np.zeros((1,)), name="x1")
+    x2 = csdl.Variable(value=np.zeros((2,)), name="x2")
+
+    def inner_map(states):
+        s1 = states["x1"]
+        s2 = states["x2"]
+        gv = lg.GeometricVariables()
+        # Linear in states, nonlinear/varying Jacobian in design variable d:
+        # d[0]*s1[0] + d[1]*s2[0] = target[0]
+        # d[1]*s2[0] + d[0]*s2[1] = 2.0 * d[0]
+        gv.add_variable(
+            computed_value=d[0] * s1 + d[1] * s2[0:1],
+            desired_value=target,
+        )
+        gv.add_variable(
+            computed_value=d[1] * s2[0:1] + d[0] * s2[1:2],
+            desired_value=2.0 * d[0:1],
+        )
+        return gv
+
+    solver = lg.ParameterizationSolver(
+        inner_parameterization_map=inner_map,
+        quadratic_objective_linear_constraints=True,
+    )
+    solver.add_state(x1, cost=np.array([1.0]))
+    solver.add_state(x2, cost=np.array([2.0, 3.0]))
+    gv = inner_map({"x1": x1, "x2": x2})
+    solver.evaluate(gv)
+
+    # Access solved outputs updated via inner_parameterization_map / solver.solved_states
+    x1_sol = solver.solved_states["x1"]
+    x2_sol = solver.solved_states["x2"]
+    obj = csdl.vdot(x1_sol, x1_sol) + 2.0 * x2_sol[0] ** 2 + 3.0 * x2_sol[1] ** 2
+    obj.set_as_objective()
+    recorder.stop()
+
+    sim = csdl.experimental.JaxSimulator(
+        recorder=recorder,
+        additional_inputs=[d, target],
+        additional_outputs=[x1_sol, x2_sol, obj],
+    )
+
+    def expected_solution(d_val, tgt_val):
+        w = np.diag([1.0, 2.0, 3.0])
+        a = np.array([
+            [d_val[0], d_val[1], 0.0],
+            [0.0, d_val[1], d_val[0]],
+        ])
+        b = np.array([tgt_val[0], 2.0 * d_val[0]])
+        kkt = np.block([[2.0 * w, a.T], [a, np.zeros((2, 2))]])
+        rhs = np.concatenate([np.zeros(3), b])
+        sol = np.linalg.solve(kkt, rhs)
+        x_exp = sol[:3]
+        obj_exp = x_exp[0] ** 2 + 2.0 * x_exp[1] ** 2 + 3.0 * x_exp[2] ** 2
+        return x_exp[:1], x_exp[1:], np.array([obj_exp])
+
+    sim.run()
+    e_x1, e_x2, e_obj = expected_solution(np.array([2.0, 1.0]), np.array([5.0]))
+    np.testing.assert_allclose(sim[x1_sol], e_x1, atol=1e-10)
+    np.testing.assert_allclose(sim[x2_sol], e_x2, atol=1e-10)
+    np.testing.assert_allclose(np.array(sim[obj]).reshape(-1), e_obj, atol=1e-10)
+
+    # Mutate design variables to verify A(d) updates dynamically (unlike constant_kkt=True)
+    new_d = np.array([0.75, -1.5])
+    new_tgt = np.array([-3.2])
+    sim[d] = new_d
+    sim[target] = new_tgt
+    sim.run()
+    e_x1_new, e_x2_new, e_obj_new = expected_solution(new_d, new_tgt)
+    np.testing.assert_allclose(sim[x1_sol], e_x1_new, atol=1e-10)
+    np.testing.assert_allclose(sim[x2_sol], e_x2_new, atol=1e-10)
+    np.testing.assert_allclose(np.array(sim[obj]).reshape(-1), e_obj_new, atol=1e-10)
+
+    check = sim.check_totals(step_size=1e-6, raise_on_error=True)
+    assert len(check) == 6
+
+
+def test_constant_kkt_requires_inner_parameterization_map():
+    """
+    Verifies that constant_kkt=True requires an inner_parameterization_map to be provided.
+    """
+    recorder = csdl.Recorder(inline=True)
+    recorder.start()
+
+    solver = lg.ParameterizationSolver(constant_kkt=True)
+    x = csdl.Variable(value=np.zeros(1), name="x")
+    solver.add_state(x, cost=1.0)
+    gv = lg.GeometricVariables()
+    gv.add_variable(computed_value=x, desired_value=csdl.Variable(value=np.array([1.0])))
+
+    with pytest.raises(ValueError, match="inner_parameterization_map must be provided"):
+        solver.evaluate(gv)
+
+
 
 
 
