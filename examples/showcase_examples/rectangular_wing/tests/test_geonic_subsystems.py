@@ -17,15 +17,19 @@ if SHOWCASE_DIR not in sys.path:
 from physics_models.geonic_subsystems import (
     BoxSignedDistanceFunction,
     aggregate_constraints_by_mode,
+    build_box_bspline_geometry,
+    build_box_representation,
     build_box_surface_samples,
     build_local_frame_from_chord_vector,
     build_payload_box_sdfs,
+    build_payload_representations,
     compute_actuator_sizing,
     compute_landing_gear_sizing,
     evaluate_exterior_non_interference,
     get_box_corners_3d,
     parse_geonic_aggregation_mode,
     parse_geonic_subsystem_mode,
+    plot_geometry_with_payloads,
 )
 
 
@@ -402,3 +406,187 @@ def test_bspline_oml_subsystems_and_aggregation_modes(tmp_path, monkeypatch):
         assert np.all(np.isfinite(totals[(nlg_ext_partial, dv)]))
     # Body-frame SDF must have 0 sensitivity to pitch
     assert np.allclose(totals[(agg_outputs['full_aggregation'], pitch)], 0.0, atol=1e-12)
+
+
+def test_pallets_and_both_mode_subsystems_cg_coupling():
+    """Fast check of 'both' and 'pallets' payload-to-subsystem exterior SDFs,
+    landing-gear mass carve-out from misc_mass, composite CG, and MLG tip-back derivatives.
+    """
+    rec = csdl.Recorder(inline=True)
+    rec.start()
+
+    pay_cx = csdl.Variable(value=3.75, name='payload_center_x')
+    pal_cx = csdl.Variable(value=3.75, name='pallet_stack_center_x')
+    nlg_x = csdl.Variable(value=-7.0, name='nlg_center_x')
+    mlg_x = csdl.Variable(value=5.5, name='mlg_center_x')
+    mlg_y = csdl.Variable(value=5.5, name='mlg_center_y')
+    W_struct = csdl.Variable(value=3.0e5)
+    payload_weight = csdl.Variable(value=7.117e5)
+    misc_weight = csdl.Variable(value=6.0e5)
+
+    W_total_body = W_struct + payload_weight + misc_weight
+    lg = compute_landing_gear_sizing(W_total_body, W_ref_lg=1.6e6, scale_factor=7.5, dynamic_sizing=True)
+    nlg_mass = lg['nlg_mass'][0]
+    mlg_mass = lg['mlg_mass'][0]
+
+    misc_mass = misc_weight / 9.81
+    misc_mass_rem = csdl.maximum(misc_mass - (nlg_mass + 2.0 * mlg_mass), csdl.Variable(value=100.0), rho=50.0)
+    total_mass = (W_struct + payload_weight) / 9.81 + nlg_mass + 2.0 * mlg_mass + misc_mass_rem
+    x_cg = ((W_struct / 9.81) * 4.0 + (payload_weight / 9.81) * pay_cx + nlg_mass * nlg_x + 2.0 * mlg_mass * mlg_x + misc_mass_rem * 3.0) / total_mass
+    tipback_margin = (mlg_x - x_cg) - 0.5
+
+    nlg_c = csdl.concatenate([csdl.reshape(nlg_x, (1,)), csdl.Variable(value=np.array([0.0, 0.0]))])
+    mlg_r_c = csdl.concatenate([csdl.reshape(mlg_x, (1,)), csdl.reshape(mlg_y, (1,)), csdl.Variable(value=np.array([0.0]))])
+    mlg_l_c = csdl.concatenate([csdl.reshape(mlg_x, (1,)), csdl.reshape(-mlg_y, (1,)), csdl.Variable(value=np.array([0.0]))])
+    nlg_pts, nlg_groups = build_box_surface_samples(nlg_c, lg['nlg_half_lengths'], grid_res=(2, 2), symmetry_y_nonneg=True)
+
+    # 'both' mode creates 1 oversized SDF + 6 pallet SDFs
+    pay_both = build_payload_box_sdfs('both', payload_center_x=pay_cx, pallet_stack_center_x=pal_cx)
+    assert len(pay_both['oversized']) == 1 and len(pay_both['pallets']) == 6
+
+    mlg_r_sdf = BoxSignedDistanceFunction(lg['mlg_half_lengths'], center=mlg_r_c)
+    mlg_l_sdf = BoxSignedDistanceFunction(lg['mlg_half_lengths'], center=mlg_l_c)
+    nlg_ext_raw, _ = evaluate_exterior_non_interference(
+        nlg_pts, pay_both['oversized'] + pay_both['pallets'] + [mlg_r_sdf, mlg_l_sdf], clearance_buffer=0.2
+    )
+    nlg_ext_partial = aggregate_constraints_by_mode(nlg_ext_raw, nlg_groups, 'partial_aggregation')
+
+    rec.stop()
+
+    sim = csdl.experimental.JaxSimulator(
+        recorder=rec,
+        additional_inputs=[pay_cx, pal_cx, nlg_x, mlg_x, mlg_y, W_struct],
+        additional_outputs=[misc_mass_rem, total_mass, tipback_margin, nlg_ext_partial],
+    )
+    sim.run()
+    totals = sim.compute_totals()
+
+    # Mass conservation: misc_mass_rem + nlg_mass + 2*mlg_mass ~ misc_mass
+    assert np.isclose(float(np.asarray(sim[total_mass]).flatten()[0]), (3.0e5 + 7.117e5 + 6.0e5) / 9.81, rtol=1e-4)
+    # All NLG exterior residuals feasible (x=-7 far ahead of payload & pallets & MLG)
+    assert np.all(np.asarray(sim[nlg_ext_partial]) < 0.0)
+    # Check analytical tipback derivative wrt mlg_x matches centered FD
+    d_tip_analytic = float(np.asarray(totals[(tipback_margin, mlg_x)]).flatten()[0])
+    h = 1e-5
+    sim[mlg_x] = 5.5 + h
+    sim.run()
+    tp = float(np.asarray(sim[tipback_margin]).flatten()[0])
+    sim[mlg_x] = 5.5 - h
+    sim.run()
+    tm = float(np.asarray(sim[tipback_margin]).flatten()[0])
+    assert np.isclose(d_tip_analytic, (tp - tm) / (2.0 * h), rtol=1e-5, atol=1e-7)
+
+
+@pytest.mark.parametrize("subsys_mode,agg_mode,pay_mode,do_plot", [
+    ("full", "partial_aggregation", "both", True),
+    ("landing_gear", "volume_only", "oversized", False),
+])
+def test_bwb_script_subsystem_modes_py_diagnostic(subsys_mode, agg_mode, pay_mode, do_plot, tmp_path):
+    """Targeted end-to-end BWB script diagnostic checks using PySimulator (~15s each)
+    instead of full XLA compilation or multi-hour animation replay.
+    """
+    import subprocess
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[4]
+    screenshot_path = tmp_path / "bwb_payload_plot.png"
+    env = os.environ.copy()
+    env.update({
+        'BWB_SIMULATOR': 'py',
+        'DIAGNOSTIC_ONLY': 'true',
+        'RUN_PRE_DIAGNOSTICS': '1',
+        'VISCOUS_DRAG_MODE': 'constant_cd0',
+        'BWB_RESOLUTION': 'fast',
+        'GEONIC_PAYLOAD_MODE': pay_mode,
+        'GEONIC_SUBSYSTEM_MODE': subsys_mode,
+        'GEONIC_AGGREGATION_MODE': agg_mode,
+    })
+    if do_plot:
+        env.update({
+            'PLOT_GEOMETRY_WITH_PAYLOAD': '1',
+            'PLOT_GEOMETRY_WITH_PAYLOAD_INTERACTIVE': '0',
+            'PLOT_GEOMETRY_WITH_PAYLOAD_SCREENSHOT': str(screenshot_path),
+            'PYVISTA_OFF_SCREEN': 'true',
+        })
+    res = subprocess.run(
+        [sys.executable, "examples/showcase_examples/rectangular_wing/ex_rectangular_wing_to_bwb.py"],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert res.returncode == 0, f"BWB script failed:\n{res.stderr}\n{res.stdout[-1000:]}"
+    assert f"Subsystem Mode: {subsys_mode.upper()} | Aggregation: {agg_mode.upper()}" in res.stdout
+    assert "MLG Tip-Back Margin:" in res.stdout
+    if subsys_mode == 'full' and agg_mode != 'volume_only':
+        assert "Actuator OML Margin:" in res.stdout
+    if do_plot:
+        assert screenshot_path.is_file() and screenshot_path.stat().st_size > 1000
+
+
+def test_dual_explicit_bspline_and_implicit_sdf_representations(tmp_path):
+    """Verify every payload and subsystem box has BOTH a watertight 6-patch
+    B-spline lsdo_geo.Geometry and an implicit BoxSignedDistanceFunction that agree.
+    """
+    import lsdo_geo
+    import pyvista as pv
+
+    rec = csdl.Recorder(inline=True)
+    rec.start()
+
+    pay_cx = csdl.Variable(value=3.75, name='payload_center_x')
+    pal_cx = csdl.Variable(value=3.75, name='pallet_stack_center_x')
+    pay_reps = build_payload_representations('both', payload_center_x=pay_cx, pallet_stack_center_x=pal_cx)
+    assert len(pay_reps['oversized']) == 1
+    assert len(pay_reps['pallets']) == 6
+
+    all_reps = pay_reps['oversized'] + pay_reps['pallets']
+    for rep in all_reps:
+        assert isinstance(rep.explicit_geometry, lsdo_geo.Geometry)
+        assert len(rep.explicit_geometry.functions) == 6
+        assert isinstance(rep.implicit_sdf, BoxSignedDistanceFunction)
+
+    # Verify explicit B-spline signed_distance matches implicit BoxSignedDistanceFunction on oversized box
+    over_rep = pay_reps['oversized'][0]
+    probe_pts = csdl.Variable(value=np.array([
+        [3.75, 0.0, 0.0],    # Center (interior: -1.524 m)
+        [3.75, 0.0, 3.0],    # Outside top face (+z half-height = 1.524 -> +1.476 m)
+        [10.5, 0.0, 0.0],    # Outside rear face
+    ]))
+    explicit_sdf = over_rep.explicit_geometry.evaluate_signed_distance(probe_pts, sign_mode='winding_number')
+    implicit_sdf = over_rep.implicit_sdf.evaluate(probe_pts)
+
+    # Also build a rotated subsystem representation & verify headless plot_geometry_with_payloads
+    rot = build_local_frame_from_chord_vector(csdl.Variable(value=np.array([2.0, 0.2, -0.1])))
+    act_rep = build_box_representation(
+        name='actuator_test',
+        half_lengths=np.array([0.4, 0.15, 0.08]),
+        center=np.array([6.0, 10.0, 0.0]),
+        rotation=rot,
+    )
+    assert len(act_rep.explicit_geometry.functions) == 6
+    wing_mock = build_box_bspline_geometry(np.array([15.0, 20.0, 5.0]), center=np.array([5.0, 0.0, 0.0]), name='mock_oml')
+
+    rec.stop()
+
+    sim = csdl.experimental.PySimulator(recorder=rec)
+    sim.run()
+    exp_vals = np.asarray(sim[explicit_sdf]).flatten()
+    imp_vals = np.asarray(sim[implicit_sdf]).flatten()
+    assert np.allclose(exp_vals, imp_vals, atol=1e-2)
+
+    # Render without blocking using PyVista off-screen helper
+    pv.OFF_SCREEN = True
+    shot = str(tmp_path / 'dual_repr_plot.png')
+    elems = plot_geometry_with_payloads(
+        wing_geometry=wing_mock,
+        payload_representations=pay_reps,
+        subsystem_representations=[act_rep],
+        sample_points=[('payload', probe_pts)],
+        interactive=False,
+        screenshot=shot,
+        show=True,
+    )
+    assert len(elems) > 0
+    assert os.path.isfile(shot) and os.path.getsize(shot) > 1000

@@ -72,7 +72,7 @@ recorder.start()
 #   'explicit' -> Direct chord stretch, sweep translation, span stretch, twist, camber/thickness shape DVs (formerly 'chord_span')
 ParameterizationType = Literal['implicit', 'explicit', 'ar_area', 'chord_span']
 ParamerizationType = ParameterizationType  # backward-compatibility alias
-geometry_parameterization_formulation: ParameterizationType = 'implicit'  # Options: 'implicit' or 'explicit'
+geometry_parameterization_formulation: ParameterizationType = 'explicit'  # Options: 'implicit' or 'explicit'
 geometry_parameterization_formulation = os.environ.get(
     'BWB_GEOMETRY_PARAMETERIZATION_FORMULATION',
     os.environ.get('BWB_FORMULATION', geometry_parameterization_formulation)
@@ -151,7 +151,7 @@ geonic_method = os.environ.get('GEONIC_METHOD', os.environ.get('GEONIC_MESH', ge
 #   'none'         -> Payload cargo only (baseline)
 #   'landing_gear' -> NLG bay + 2 symmetric MLG bays
 #   'full'         -> NLG + 2 MLG + outboard elevon actuator housings
-geonic_subsystem_mode: Literal['none', 'landing_gear', 'full'] = 'none'
+geonic_subsystem_mode: Literal['none', 'landing_gear', 'full'] = 'landing_gear'
 geonic_subsystem_mode = os.environ.get('GEONIC_SUBSYSTEM_MODE', geonic_subsystem_mode)
 
 # 3d. Subsystem coupled dynamic sizing toggles:
@@ -243,6 +243,7 @@ warm_start_folder: str = os.environ.get(
 
 # 9. Diagnostics & pre-flight verification:
 run_pre_diagnostics: bool = os.environ.get('RUN_PRE_DIAGNOSTICS', '0').strip().lower() in ('1', 'true', 'yes')
+plot_geometry_with_payload: bool = os.environ.get('PLOT_GEOMETRY_WITH_PAYLOAD', '0').strip().lower() in ('1', 'true', 'yes')
 # =============================================================================
 
 # Validate viscous drag mode
@@ -291,20 +292,24 @@ geonic_subsystem_mode = parse_geonic_subsystem_mode(mode=geonic_subsystem_mode)
 geonic_aggregation_mode = parse_geonic_aggregation_mode(mode=geonic_aggregation_mode)
 use_geonic_subsystems: bool = (geonic_subsystem_mode != 'none')
 
-if use_geonic_subsystems:
+if use_geonic or use_geonic_subsystems or plot_geometry_with_payload:
     from physics_models.geonic_subsystems import (
         ACTUATOR_CHORD_FRACTION,
         ACTUATOR_MASS_KG,
         ACTUATOR_SPAN_FRACTIONS,
+        GEONIC_ACTUATOR_CLEARANCE_M,
         BoxSignedDistanceFunction,
         aggregate_constraints_by_mode,
+        build_box_representation,
         build_box_surface_samples,
         build_local_frame_from_chord_vector,
         build_payload_box_sdfs,
+        build_payload_representations,
         compute_actuator_sizing,
         compute_landing_gear_sizing,
         evaluate_exterior_non_interference,
         get_box_corners_3d,
+        plot_geometry_with_payloads,
     )
 
 if use_geonic or use_geonic_subsystems:
@@ -1839,6 +1844,15 @@ if use_geonic:
         pallet_sample_points.name = 'pallet_sample_points'
         active_sample_points = csdl.concatenate([payload_sample_points, pallet_sample_points])
 
+    # Explicit (B-spline lsdo_geo.Geometry) + Implicit (BoxSignedDistanceFunction) for every active payload
+    payload_representations = build_payload_representations(
+        geonic_payload_mode=geonic_payload_mode,
+        payload_center_x=payload_center_x if geonic_payload_mode in {'oversized', 'both'} else None,
+        pallet_stack_center_x=pallet_stack_center_x if geonic_payload_mode in {'pallets', 'both'} else None,
+    )
+else:
+    payload_representations = {'oversized': [], 'pallets': []}
+
 if use_geonic or (use_geonic_subsystems and geonic_aggregation_mode != 'volume_only'):
     if use_geonic and use_geonic_subsystems and geonic_aggregation_mode != 'volume_only':
         num_payload_oml_pts = int(active_sample_points.shape[0])
@@ -2037,6 +2051,62 @@ if use_geonic:
         pallet_stack_center_inertial.name = 'pallet_stack_center_inertial'
 
 if use_geonic_subsystems:
+    # Dual Explicit (B-spline lsdo_geo.Geometry) + Implicit (BoxSignedDistanceFunction) subsystem representations
+    nlg_rep = build_box_representation(
+        name='nlg_bay',
+        half_lengths=nlg_half_lengths,
+        center=csdl.reshape(nlg_center_body, (3,)),
+    )
+    mlg_right_rep = build_box_representation(
+        name='mlg_right_bay',
+        half_lengths=mlg_half_lengths,
+        center=csdl.reshape(mlg_center_body, (3,)),
+    )
+    mlg_left_rep = build_box_representation(
+        name='mlg_left_bay',
+        half_lengths=mlg_half_lengths,
+        center=csdl.reshape(mlg_left_center_body, (3,)),
+    )
+    subsystem_representations = [nlg_rep, mlg_right_rep, mlg_left_rep]
+
+    if geonic_subsystem_mode == 'full':
+        for s_idx in range(len(ACTUATOR_SPAN_FRACTIONS)):
+            c_b_s = act_centers_body[s_idx]
+            hl_s = act_half_lengths_list[s_idx]
+            R_s = act_rotations_list[s_idx]
+            c_left_s = csdl.concatenate([
+                csdl.reshape(c_b_s[0], (1,)),
+                csdl.reshape(-c_b_s[1], (1,)),
+                csdl.reshape(c_b_s[2], (1,)),
+            ])
+            # Mirror columns/rows across y=0 for left-wing actuator frame: M = diag(1, -1, 1), R_left = M @ R @ M
+            R_rows_flipped = csdl.concatenate([
+                csdl.reshape(R_s[0, :], (1, 3)),
+                csdl.reshape(-R_s[1, :], (1, 3)),
+                csdl.reshape(R_s[2, :], (1, 3)),
+            ], axis=0)
+            R_left_s = csdl.concatenate([
+                csdl.reshape(R_rows_flipped[:, 0], (3, 1)),
+                csdl.reshape(-R_rows_flipped[:, 1], (3, 1)),
+                csdl.reshape(R_rows_flipped[:, 2], (3, 1)),
+            ], axis=1)
+            subsystem_representations.append(
+                build_box_representation(
+                    name=f'actuator_{s_idx}_right',
+                    half_lengths=hl_s,
+                    center=c_b_s,
+                    rotation=R_s,
+                )
+            )
+            subsystem_representations.append(
+                build_box_representation(
+                    name=f'actuator_{s_idx}_left',
+                    half_lengths=hl_s,
+                    center=c_left_s,
+                    rotation=R_left_s,
+                )
+            )
+
     if geonic_aggregation_mode == 'volume_only':
         dy_body = beam_mesh_body[1:, 1] - beam_mesh_body[:-1, 1]
         V_wing_full = 2.0 * csdl.sum(local_chord_body * local_height_body * dy_body)
@@ -2066,25 +2136,14 @@ if use_geonic_subsystems:
         nlg_int_raw = nlg_oml_sdf + GEONIC_CLEARANCE_M
         mlg_int_raw = mlg_oml_sdf + GEONIC_CLEARANCE_M
 
-        # Build analytical SDF objects for exterior-exterior non-interference
-        nlg_sdf_obj = BoxSignedDistanceFunction(
-            half_lengths=nlg_half_lengths,
-            center=csdl.reshape(nlg_center_body, (3,)),
-        )
-        mlg_right_sdf_obj = BoxSignedDistanceFunction(
-            half_lengths=mlg_half_lengths,
-            center=csdl.reshape(mlg_center_body, (3,)),
-        )
-        mlg_left_sdf_obj = BoxSignedDistanceFunction(
-            half_lengths=mlg_half_lengths,
-            center=csdl.reshape(mlg_left_center_body, (3,)),
-        )
-        pay_sdf_dict = build_payload_box_sdfs(
-            geonic_payload_mode=geonic_payload_mode,
-            payload_center_x=payload_center_x if geonic_payload_mode in {'oversized', 'both'} else None,
-            pallet_stack_center_x=pallet_stack_center_x if geonic_payload_mode in {'pallets', 'both'} else None,
-        )
-        active_pay_sdfs = pay_sdf_dict['oversized'] + pay_sdf_dict['pallets']
+        # Reuse analytical SDF objects from dual payload/subsystem representations
+        nlg_sdf_obj = nlg_rep.implicit_sdf
+        mlg_right_sdf_obj = mlg_right_rep.implicit_sdf
+        mlg_left_sdf_obj = mlg_left_rep.implicit_sdf
+        active_pay_sdfs = [
+            rep.implicit_sdf
+            for rep in (payload_representations['oversized'] + payload_representations['pallets'])
+        ]
 
         nlg_obstacles = [mlg_right_sdf_obj, mlg_left_sdf_obj] + active_pay_sdfs
         mlg_obstacles = [nlg_sdf_obj, mlg_left_sdf_obj] + active_pay_sdfs
@@ -2111,7 +2170,7 @@ if use_geonic_subsystems:
                 n_act_s = int(pts_act_s.shape[0])
                 act_sdf_s = subsys_sdf_all[offset_act:offset_act + n_act_s]
                 offset_act += n_act_s
-                act_int_raw_list.append(act_sdf_s + GEONIC_CLEARANCE_M)
+                act_int_raw_list.append(act_sdf_s + GEONIC_ACTUATOR_CLEARANCE_M)
 
         if geonic_aggregation_mode == 'full_aggregation':
             all_subsys_raw = [nlg_int_raw, mlg_int_raw, nlg_ext_raw, mlg_ext_raw] + act_int_raw_list
@@ -2209,6 +2268,32 @@ if use_geonic_subsystems:
                 (3,),
             )
             act_centers_inertial.append(c_act_in)
+
+else:
+    subsystem_representations = []
+
+if plot_geometry_with_payload:
+    plot_sample_clouds = []
+    if use_geonic:
+        if geonic_payload_mode in {'oversized', 'both'}:
+            plot_sample_clouds.append(('payload_samples', payload_sample_points))
+        if geonic_payload_mode in {'pallets', 'both'}:
+            plot_sample_clouds.append(('pallet_samples', pallet_sample_points))
+    if use_geonic_subsystems:
+        for s_pts in subsys_pts_list:
+            plot_sample_clouds.append(('subsys_samples', s_pts))
+    plot_screenshot = os.environ.get('PLOT_GEOMETRY_WITH_PAYLOAD_SCREENSHOT', '')
+    plot_interactive = os.environ.get('PLOT_GEOMETRY_WITH_PAYLOAD_INTERACTIVE', '1').strip().lower() not in ('0', 'false', 'no')
+    plot_geometry_with_payloads(
+        wing_geometry=geometry,
+        payload_representations=payload_representations,
+        subsystem_representations=subsystem_representations,
+        sample_points=plot_sample_clouds,
+        title=f"BWB Geometry + Payload ({geonic_payload_mode.upper()}, Subsystems: {geonic_subsystem_mode.upper()})",
+        interactive=plot_interactive,
+        screenshot=plot_screenshot,
+        show=True,
+    )
 
 geometry.rotate(rotation_origin=quarter_chord_rot_origin, axis_vector=np.array([0., 1., 0.]), angles=pitch, units='radians')
 
@@ -3506,12 +3591,18 @@ additional_outs += [
 ]
 additional_outs += geometry_coefficients
 
-jax_sim = csdl.experimental.JaxSimulator(
-    recorder=recorder,
-    additional_inputs=[dv_info.variable for dv_info in design_variables.values()],
-    additional_outputs=additional_outs,
-    gpu=False
-)
+bwb_simulator_backend = os.environ.get('BWB_SIMULATOR', 'jax').strip().lower()
+if bwb_simulator_backend == 'py':
+    jax_sim = csdl.experimental.PySimulator(recorder=recorder)
+elif bwb_simulator_backend == 'jax':
+    jax_sim = csdl.experimental.JaxSimulator(
+        recorder=recorder,
+        additional_inputs=[dv_info.variable for dv_info in design_variables.values()],
+        additional_outputs=additional_outs,
+        gpu=False
+    )
+else:
+    raise ValueError(f"Invalid BWB_SIMULATOR '{bwb_simulator_backend}'. Must be 'jax' or 'py'.")
 
 # Populate design variables with initial, warm-started, or explicitly evaluated optimal vector
 eval_x_opt_path = os.environ.get('BWB_EVAL_X_OPT', None)

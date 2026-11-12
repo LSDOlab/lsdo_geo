@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Literal, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import csdl_alpha as csdl
 import numpy as np
@@ -56,10 +56,14 @@ MLG_BASE_DIMS_M: np.ndarray = np.array([3.4, 1.5, 1.2], dtype=float)
 MLG_BASE_MASS_KG: float = 1950.0
 
 # Outboard Elevon Actuator Housing per unit (length, width, height) in metres and mass in kg
-ACTUATOR_BASE_DIMS_M: np.ndarray = np.array([1.2, 0.40, 0.22], dtype=float)
-ACTUATOR_MASS_KG: float = 45.0
+# Standard thin electromechanical / rotary actuator dimensions for outboard elevon installation
+ACTUATOR_BASE_DIMS_M: np.ndarray = np.array([1.0, 0.30, 0.08], dtype=float)
+ACTUATOR_MASS_KG: float = 25.0
 ACTUATOR_SPAN_FRACTIONS: Tuple[float, ...] = (0.65, 0.85)
-ACTUATOR_CHORD_FRACTION: float = 0.75
+ACTUATOR_CHORD_FRACTION: float = 0.65
+
+# Dedicated clearance buffer for compact internal actuators (30-40 mm)
+GEONIC_ACTUATOR_CLEARANCE_M: float = 0.04
 
 
 def parse_geonic_subsystem_mode(
@@ -384,6 +388,209 @@ def build_box_surface_samples(
     return points, partition_groups
 
 
+def _as_csdl_var(
+    val: Union[np.ndarray, Sequence[float], csdl.Variable],
+    expected_shape: Tuple[int, ...],
+) -> csdl.Variable:
+    """Ensure input is a CSDL Variable with `expected_shape`."""
+    if isinstance(val, csdl.Variable):
+        var = val
+    else:
+        var = csdl.Variable(value=np.asarray(val, dtype=float))
+    if var.shape != expected_shape:
+        var = csdl.reshape(var, expected_shape)
+    return var
+
+
+@dataclass
+class BoxRepresentation:
+    """Dual explicit (B-spline lsdo_geo.Geometry) + implicit (BoxSignedDistanceFunction)
+    representation of a 3D rectangular prism payload or subsystem component.
+    """
+    name: str
+    center: csdl.Variable
+    half_lengths: csdl.Variable
+    implicit_sdf: BoxSignedDistanceFunction
+    explicit_geometry: Any
+    rotation: Optional[csdl.Variable] = None
+
+
+def build_box_bspline_geometry(
+    half_lengths: Union[np.ndarray, Sequence[float], csdl.Variable],
+    center: Optional[Union[np.ndarray, Sequence[float], csdl.Variable]] = None,
+    rotation: Optional[Union[np.ndarray, csdl.Variable]] = None,
+    name: str = 'box',
+) -> Any:
+    """
+    Construct a watertight 6-patch degree-(1, 1) B-spline `lsdo_geo.Geometry`
+    representing a rectangular box centered at `center` with axis half-lengths
+    `half_lengths` and optional 3x3 rotation matrix `rotation` (local-to-body).
+    """
+    import lsdo_function_spaces as lfs
+    import lsdo_geo
+
+    hl_var = _as_csdl_var(half_lengths, (3,))
+    c_var = _as_csdl_var(center, (3,)) if center is not None else csdl.Variable(value=np.zeros((3,)))
+    rot_var = _as_csdl_var(rotation, (3, 3)) if rotation is not None else None
+
+    # Standard bilinear B-spline space for each planar face: 2x2 control net
+    face_space = lfs.BSplineSpace(
+        num_parametric_dimensions=2,
+        degree=(1, 1),
+        coefficients_shape=(2, 2),
+        knots=(np.array([0.0, 0.0, 1.0, 1.0]), np.array([0.0, 0.0, 1.0, 1.0])),
+    )
+
+    # 8 box corners ordered as (sx in {-1,1}, sy in {-1,1}, sz in {-1,1})
+    corner_signs = np.array([
+        [sx, sy, sz]
+        for sx in (-1.0, 1.0)
+        for sy in (-1.0, 1.0)
+        for sz in (-1.0, 1.0)
+    ], dtype=float)  # shape (8, 3)
+
+    hl_exp = csdl.expand(hl_var, (8, 3), 'i->ji')
+    local_corners = csdl.Variable(value=corner_signs) * hl_exp  # (8, 3)
+    if rot_var is not None:
+        # local @ R^T  -> shape (8, 3)
+        rot_corners = csdl.einsum(local_corners, rot_var, action='ij,kj->ik')
+    else:
+        rot_corners = local_corners
+    corners = rot_corners + csdl.expand(c_var, (8, 3), 'i->ji')
+
+    # Face corner indices shaped (2, 2) with consistent outward normals:
+    # Corner index table: idx = 4*(sx>0) + 2*(sy>0) + (sz>0)
+    # 0:(-,-,-), 1:(-,-,+), 2:(-,+,-), 3:(-,+,+), 4:(+,-,-), 5:(+,-,+), 6:(+,+,-), 7:(+,+,+)
+    face_specs = [
+        ('neg_x', np.array([[0, 1], [2, 3]])),  # x = -hx
+        ('pos_x', np.array([[4, 6], [5, 7]])),  # x = +hx
+        ('neg_y', np.array([[0, 4], [1, 5]])),  # y = -hy
+        ('pos_y', np.array([[2, 3], [6, 7]])),  # y = +hy
+        ('neg_z', np.array([[0, 2], [4, 6]])),  # z = -hz
+        ('pos_z', np.array([[1, 5], [3, 7]])),  # z = +hz
+    ]
+
+    functions: Dict[int, lfs.Function] = {}
+    function_names: Dict[int, str] = {}
+    for f_idx, (face_label, idx_grid) in enumerate(face_specs):
+        row0 = csdl.concatenate([
+            csdl.reshape(corners[int(idx_grid[0, 0]), :], (1, 1, 3)),
+            csdl.reshape(corners[int(idx_grid[0, 1]), :], (1, 1, 3)),
+        ], axis=1)
+        row1 = csdl.concatenate([
+            csdl.reshape(corners[int(idx_grid[1, 0]), :], (1, 1, 3)),
+            csdl.reshape(corners[int(idx_grid[1, 1]), :], (1, 1, 3)),
+        ], axis=1)
+        face_coeffs = csdl.concatenate([row0, row1], axis=0)  # (2, 2, 3)
+        functions[f_idx] = lfs.Function(space=face_space, coefficients=face_coeffs, name=f'{name}_{face_label}')
+        function_names[f_idx] = f'{name}_{face_label}'
+
+    return lsdo_geo.Geometry(
+        functions=functions,
+        function_names=function_names,
+        name=name,
+        space=face_space,
+    )
+
+
+def build_box_representation(
+    name: str,
+    half_lengths: Union[np.ndarray, Sequence[float], csdl.Variable],
+    center: Optional[Union[np.ndarray, Sequence[float], csdl.Variable]] = None,
+    rotation: Optional[Union[np.ndarray, csdl.Variable]] = None,
+    sharpness: float = 200.0,
+) -> BoxRepresentation:
+    """Construct BOTH implicit SDF and explicit B-spline representations for a box."""
+    hl_var = _as_csdl_var(half_lengths, (3,))
+    c_var = _as_csdl_var(center, (3,)) if center is not None else csdl.Variable(value=np.zeros((3,)))
+    rot_var = _as_csdl_var(rotation, (3, 3)) if rotation is not None else None
+    implicit_sdf = BoxSignedDistanceFunction(
+        half_lengths=hl_var,
+        center=c_var,
+        rotation=rot_var,
+        sharpness=sharpness,
+    )
+    explicit_geom = build_box_bspline_geometry(
+        half_lengths=hl_var,
+        center=c_var,
+        rotation=rot_var,
+        name=name,
+    )
+    return BoxRepresentation(
+        name=name,
+        center=c_var,
+        half_lengths=hl_var,
+        implicit_sdf=implicit_sdf,
+        explicit_geometry=explicit_geom,
+        rotation=rot_var,
+    )
+
+
+def build_payload_representations(
+    geonic_payload_mode: str,
+    payload_center_x: Optional[csdl.Variable] = None,
+    pallet_stack_center_x: Optional[csdl.Variable] = None,
+    sharpness: float = 200.0,
+) -> Dict[str, List[BoxRepresentation]]:
+    """
+    Construct dual explicit (B-spline `lsdo_geo.Geometry`) + implicit
+    (`BoxSignedDistanceFunction`) representations for every active payload box.
+    """
+    result: Dict[str, List[BoxRepresentation]] = {'oversized': [], 'pallets': []}
+    zero_s = csdl.Variable(value=0.0)
+
+    if geonic_payload_mode in {'oversized', 'both'} and payload_center_x is not None:
+        center = csdl.concatenate([
+            csdl.reshape(payload_center_x, (1,)),
+            csdl.reshape(zero_s, (1,)),
+            csdl.reshape(zero_s, (1,)),
+        ])
+        hl = np.array([0.5 * PAYLOAD_LENGTH_M, 0.5 * PAYLOAD_WIDTH_M, 0.5 * PAYLOAD_HEIGHT_M])
+        result['oversized'].append(
+            build_box_representation(
+                name='oversized_payload',
+                half_lengths=hl,
+                center=center,
+                sharpness=sharpness,
+            )
+        )
+
+    if geonic_payload_mode in {'pallets', 'both'} and pallet_stack_center_x is not None:
+        x_shift = pallet_stack_center_x - PALLET_STACK_REFERENCE_CG_X
+        w = PALLET_WIDTH_M
+        h = PALLET_HEIGHT_M
+        l_s = PALLET_L_SHORT_M
+        l_l = PALLET_L_LONG_M
+        base_x = PALLET_STACK_FRONT_M
+
+        # Full 6-pallet stack specs: (label, cx_offset, cy, half_l, half_w, half_h)
+        specs = [
+            ('pallet_front_short', 0.5 * l_s, 0.0, 0.5 * l_s, 0.5 * w, 0.5 * h),
+            ('pallet_second_short_right', 1.5 * l_s, 0.5 * w, 0.5 * l_s, 0.5 * w, 0.5 * h),
+            ('pallet_second_short_left', 1.5 * l_s, -0.5 * w, 0.5 * l_s, 0.5 * w, 0.5 * h),
+            ('pallet_center_long', 2.0 * l_s + 0.5 * l_l, 0.0, 0.5 * l_l, 0.5 * w, 0.5 * h),
+            ('pallet_outer_long_right', 2.0 * l_s + 0.5 * l_l, w, 0.5 * l_l, 0.5 * w, 0.5 * h),
+            ('pallet_outer_long_left', 2.0 * l_s + 0.5 * l_l, -w, 0.5 * l_l, 0.5 * w, 0.5 * h),
+        ]
+        for pal_name, cx_off, cy, hl_x, hl_y, hl_z in specs:
+            cx = base_x + cx_off + x_shift
+            c_vec = csdl.concatenate([
+                csdl.reshape(cx, (1,)),
+                csdl.Variable(value=np.array([cy])),
+                csdl.Variable(value=np.array([0.0])),
+            ])
+            result['pallets'].append(
+                build_box_representation(
+                    name=pal_name,
+                    half_lengths=np.array([hl_x, hl_y, hl_z]),
+                    center=c_vec,
+                    sharpness=sharpness,
+                )
+            )
+
+    return result
+
+
 def build_payload_box_sdfs(
     geonic_payload_mode: str,
     payload_center_x: Optional[csdl.Variable] = None,
@@ -394,51 +601,16 @@ def build_payload_box_sdfs(
     Construct BoxSignedDistanceFunction objects for active payload loading cases
     so permanent subsystems (NLG, MLG) can enforce exterior non-interference against them.
     """
-    result: Dict[str, List[BoxSignedDistanceFunction]] = {'oversized': [], 'pallets': []}
-    zero_s = csdl.Variable(value=0.0)
-
-    if geonic_payload_mode in {'oversized', 'both'} and payload_center_x is not None:
-        center = csdl.concatenate([
-            csdl.reshape(payload_center_x, (1,)),
-            csdl.reshape(zero_s, (1,)),
-            csdl.reshape(zero_s, (1,)),
-        ])
-        hl = np.array([0.5 * PAYLOAD_LENGTH_M, 0.5 * PAYLOAD_WIDTH_M, 0.5 * PAYLOAD_HEIGHT_M])
-        result['oversized'].append(BoxSignedDistanceFunction(half_lengths=hl, center=center, sharpness=sharpness))
-
-    if geonic_payload_mode in {'pallets', 'both'} and pallet_stack_center_x is not None:
-        x_shift = pallet_stack_center_x - PALLET_STACK_REFERENCE_CG_X
-        w = PALLET_WIDTH_M
-        h = PALLET_HEIGHT_M
-        l_s = PALLET_L_SHORT_M
-        l_l = PALLET_L_LONG_M
-        base_x = PALLET_STACK_FRONT_M
-
-        # Full 6-pallet stack specs: (cx_offset, cy, half_l, half_w, half_h)
-        specs = [
-            (0.5 * l_s, 0.0, 0.5 * l_s, 0.5 * w, 0.5 * h),              # Front short
-            (1.5 * l_s, 0.5 * w, 0.5 * l_s, 0.5 * w, 0.5 * h),          # Second short right
-            (1.5 * l_s, -0.5 * w, 0.5 * l_s, 0.5 * w, 0.5 * h),         # Second short left
-            (2.0 * l_s + 0.5 * l_l, 0.0, 0.5 * l_l, 0.5 * w, 0.5 * h),  # Center long
-            (2.0 * l_s + 0.5 * l_l, w, 0.5 * l_l, 0.5 * w, 0.5 * h),    # Outer long right
-            (2.0 * l_s + 0.5 * l_l, -w, 0.5 * l_l, 0.5 * w, 0.5 * h),   # Outer long left
-        ]
-        for cx_off, cy, hl_x, hl_y, hl_z in specs:
-            cx = base_x + cx_off + x_shift
-            c_vec = csdl.concatenate([
-                csdl.reshape(cx, (1,)),
-                csdl.Variable(value=np.array([cy])),
-                csdl.Variable(value=np.array([0.0])),
-            ])
-            result['pallets'].append(
-                BoxSignedDistanceFunction(
-                    half_lengths=np.array([hl_x, hl_y, hl_z]),
-                    center=c_vec,
-                    sharpness=sharpness,
-                )
-            )
-
-    return result
+    reps = build_payload_representations(
+        geonic_payload_mode=geonic_payload_mode,
+        payload_center_x=payload_center_x,
+        pallet_stack_center_x=pallet_stack_center_x,
+        sharpness=sharpness,
+    )
+    return {
+        'oversized': [rep.implicit_sdf for rep in reps['oversized']],
+        'pallets': [rep.implicit_sdf for rep in reps['pallets']],
+    }
 
 
 def aggregate_constraints_by_mode(
@@ -526,3 +698,107 @@ def get_box_corners_3d(
     if rotation is not None:
         local_corners = local_corners @ rotation.T
     return local_corners + np.asarray(center, dtype=float).reshape(1, 3)
+
+
+def plot_geometry_with_payloads(
+    wing_geometry: Any,
+    payload_representations: Optional[Union[Dict[str, List[BoxRepresentation]], Sequence[BoxRepresentation]]] = None,
+    subsystem_representations: Optional[Sequence[BoxRepresentation]] = None,
+    sample_points: Optional[Sequence[Tuple[str, Union[csdl.Variable, np.ndarray]]]] = None,
+    title: str = 'BWB OML Geometry & Payload / Subsystem Packaging',
+    interactive: bool = True,
+    screenshot: str = '',
+    show: bool = True,
+) -> list:
+    """
+    Plot the aircraft OML B-spline geometry alongside all active explicit B-spline
+    payload and subsystem geometries (plus optional SDF sample point clouds) using
+    LSDO_GEO / PyVista.
+    """
+    import lsdo_function_spaces.utils.plotting_functions as pf
+
+    plotting_elements: list = []
+    plotting_elements = wing_geometry.plot(
+        point_types=['evaluated_points'],
+        plot_types=['function'],
+        opacity=0.25,
+        color='#00629B',
+        additional_plotting_elements=plotting_elements,
+        show=False,
+    )
+
+    if isinstance(payload_representations, dict):
+        oversized_list = list(payload_representations.get('oversized', []))
+        pallet_list = list(payload_representations.get('pallets', []))
+    elif payload_representations is not None:
+        oversized_list = [r for r in payload_representations if 'pallet' not in r.name]
+        pallet_list = [r for r in payload_representations if 'pallet' in r.name]
+    else:
+        oversized_list, pallet_list = [], []
+
+    for rep in oversized_list:
+        plotting_elements = rep.explicit_geometry.plot(
+            point_types=['evaluated_points'],
+            plot_types=['function', 'wireframe'],
+            opacity=0.55,
+            color='#9467bd',
+            line_width=2.0,
+            additional_plotting_elements=plotting_elements,
+            show=False,
+        )
+
+    for rep in pallet_list:
+        plotting_elements = rep.explicit_geometry.plot(
+            point_types=['evaluated_points'],
+            plot_types=['function', 'wireframe'],
+            opacity=0.55,
+            color='cyan',
+            line_width=1.5,
+            additional_plotting_elements=plotting_elements,
+            show=False,
+        )
+
+    if subsystem_representations is not None:
+        for rep in subsystem_representations:
+            if 'nlg' in rep.name:
+                color_str = 'orange'
+            elif 'mlg' in rep.name:
+                color_str = 'limegreen'
+            else:
+                color_str = 'gold'
+            plotting_elements = rep.explicit_geometry.plot(
+                point_types=['evaluated_points'],
+                plot_types=['function', 'wireframe'],
+                opacity=0.65,
+                color=color_str,
+                line_width=2.0,
+                additional_plotting_elements=plotting_elements,
+                show=False,
+            )
+
+    if sample_points is not None:
+        for pt_label, pts in sample_points:
+            pts_val = np.asarray(pts.value if hasattr(pts, 'value') else pts, dtype=float)
+            if pts_val.size == 0:
+                continue
+            pts_val = pts_val.reshape((-1, 3))
+            pt_color = '#d62728' if 'subsys' in pt_label or 'lg' in pt_label or 'act' in pt_label else '#1f77b4'
+            plotting_elements = pf.plot_points(
+                pts_val,
+                opacity=0.95,
+                color=pt_color,
+                size=8.0,
+                additional_plotting_elements=plotting_elements,
+                show=False,
+            )
+
+    if show:
+        pf.show_plot(
+            plotting_elements,
+            title=title,
+            axes=True,
+            view_up='z',
+            interactive=interactive,
+            screenshot=screenshot,
+        )
+    return plotting_elements
