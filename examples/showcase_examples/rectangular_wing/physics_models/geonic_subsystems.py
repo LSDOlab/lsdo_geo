@@ -57,30 +57,88 @@ MLG_BASE_MASS_KG: float = 1950.0
 
 # Outboard Elevon Actuator Housing per unit (length, width, height) in metres and mass in kg
 # Standard thin electromechanical / rotary actuator dimensions for outboard elevon installation
-ACTUATOR_BASE_DIMS_M: np.ndarray = np.array([1.0, 0.30, 0.08], dtype=float)
-ACTUATOR_MASS_KG: float = 25.0
+ACTUATOR_BASE_LENGTH_M: float = float(os.environ.get('ACTUATOR_BASE_LENGTH_M', '1.00'))
+ACTUATOR_BASE_WIDTH_M: float = float(os.environ.get('ACTUATOR_BASE_WIDTH_M', '0.32'))
+ACTUATOR_BASE_HEIGHT_M: float = float(os.environ.get('ACTUATOR_BASE_HEIGHT_M', '0.14'))
+ACTUATOR_BASE_DIMS_M: np.ndarray = np.array([ACTUATOR_BASE_LENGTH_M, ACTUATOR_BASE_WIDTH_M, ACTUATOR_BASE_HEIGHT_M], dtype=float)
+ACTUATOR_MASS_KG: float = float(os.environ.get('ACTUATOR_MASS_KG', '35.0'))
+ACTUATOR_HEIGHT_FLOOR: float = float(os.environ.get('ACTUATOR_HEIGHT_FLOOR', '0.70'))
 ACTUATOR_SPAN_FRACTIONS: Tuple[float, ...] = (0.65, 0.85)
 ACTUATOR_CHORD_FRACTION: float = 0.65
 
-# Dedicated clearance buffer for compact internal actuators (30-40 mm)
+# Dual Symmetric APU Bays per unit (length, width, height) in metres and mass per unit in kg
+APU_BASE_DIMS_M: np.ndarray = np.array([2.0, 1.0, 0.8], dtype=float)
+APU_BASE_MASS_KG: float = 220.0
+
+# Dedicated clearance buffers
 GEONIC_ACTUATOR_CLEARANCE_M: float = 0.04
+GEONIC_APU_CLEARANCE_M: float = 0.10
+
+ALL_SUBSYSTEM_KEYS: set[str] = {'nlg', 'mlg', 'actuators', 'apu'}
+
+
+def parse_geonic_subsystems(
+    subsystems: Optional[Union[str, Sequence[str]]] = None,
+    env: Optional[dict] = None,
+) -> List[str]:
+    """
+    Parse and validate the active subsystem list.
+    Supports:
+      - List/tuple of names: e.g. ['nlg', 'mlg', 'actuators', 'apu']
+      - Comma-separated string: e.g. 'nlg,mlg,apu'
+      - Legacy mode strings:
+          'none' -> []
+          'landing_gear' -> ['nlg', 'mlg']
+          'full' -> ['nlg', 'mlg', 'actuators']
+    """
+    if env is None:
+        env = os.environ
+    if subsystems is None:
+        if 'GEONIC_SUBSYSTEMS' in env:
+            subsystems = env['GEONIC_SUBSYSTEMS']
+        else:
+            subsystems = env.get('GEONIC_SUBSYSTEM_MODE', 'none')
+
+    if isinstance(subsystems, str):
+        s_clean = subsystems.strip().lower()
+        if s_clean in ('none', '0', 'false', ''):
+            return []
+        if s_clean == 'landing_gear':
+            return ['nlg', 'mlg']
+        if s_clean == 'full':
+            return ['nlg', 'mlg', 'actuators']
+        # Comma or space separated list
+        tokens = [t.strip().lower() for t in s_clean.replace(',', ' ').split() if t.strip()]
+    else:
+        tokens = [str(t).strip().lower() for t in subsystems if str(t).strip()]
+
+    # Validate tokens
+    for tok in tokens:
+        if tok not in ALL_SUBSYSTEM_KEYS:
+            raise ValueError(
+                f"Invalid subsystem key '{tok}'. Must be one of {sorted(ALL_SUBSYSTEM_KEYS)}."
+            )
+    # Deduplicate while preserving order
+    seen = set()
+    result = []
+    for tok in tokens:
+        if tok not in seen:
+            seen.add(tok)
+            result.append(tok)
+    return result
 
 
 def parse_geonic_subsystem_mode(
     mode: Optional[str] = None,
     env: Optional[dict] = None,
 ) -> str:
-    """Parse and validate geonic_subsystem_mode ('none', 'landing_gear', 'full')."""
-    if env is None:
-        env = os.environ
-    if mode is None:
-        mode = env.get('GEONIC_SUBSYSTEM_MODE', 'none')
-    mode = str(mode).strip().lower()
-    if mode not in VALID_GEONIC_SUBSYSTEM_MODES:
-        raise ValueError(
-            f"Invalid geonic_subsystem_mode: '{mode}'. Must be one of {sorted(VALID_GEONIC_SUBSYSTEM_MODES)}."
-        )
-    return mode
+    """Legacy helper for backward compatibility."""
+    active = parse_geonic_subsystems(subsystems=mode, env=env)
+    if not active:
+        return 'none'
+    if set(active) == {'nlg', 'mlg'}:
+        return 'landing_gear'
+    return 'full'
 
 
 def parse_geonic_aggregation_mode(
@@ -245,20 +303,49 @@ def compute_actuator_sizing(
     c_ref_local: float,
     scale_factor: float = 7.5,
     dynamic_sizing: bool = True,
+    sizing_method: str = 'level1_hinge_moment',
 ) -> csdl.Variable:
     """
     Compute outboard elevon actuator housing half-lengths (shape (3,)),
-    optionally scaled with local chord c_local / c_ref_local.
+    using Level 1 hinge-moment-based scaling with a realistic mechanical envelope floor.
+
+    Physics scaling:
+      - Aerodynamic hinge moment H ~ q * c_e^2 * b_e
+      - Required actuator force F_act ~ H / r_horn ~ c_local
+      - Actuator cross-section / motor-cylinder diameter scales with sqrt(F_act) ~ sqrt(c_local / c_ref)
+      - Hard mechanical packaging floor (stator, bearings, casing, trunnions) prevents shrinking below k_floor
+      - Linkage / stroke length scales with local chord
     """
     sf_ratio = float(scale_factor) / 7.5
-    if dynamic_sizing:
-        c_ratio = c_local / float(c_ref_local)
-        act_scale = 0.5 + 0.5 * c_ratio
-    else:
-        act_scale = csdl.Variable(value=1.0)
-
     base_hl = 0.5 * ACTUATOR_BASE_DIMS_M * sf_ratio
-    return csdl.Variable(value=base_hl) * csdl.expand(csdl.reshape(act_scale, (1,)), (3,))
+
+    if not dynamic_sizing:
+        return csdl.Variable(value=base_hl)
+
+    c_ratio = c_local / float(c_ref_local)
+
+    # Allow runtime method override
+    method = os.environ.get('ACTUATOR_SIZING_METHOD', sizing_method).strip().lower()
+
+    if method == 'linear':
+        # Legacy linear scaling
+        act_scale = 0.5 + 0.5 * c_ratio
+        return csdl.Variable(value=base_hl) * csdl.expand(csdl.reshape(act_scale, (1,)), (3,))
+
+    # Level 1 hinge-moment-based scaling:
+    # Axis 0 (length): linkage stroke scales with local chord
+    scale_L = 0.50 + 0.50 * c_ratio
+    # Axis 1 (width): dual-redundant motor manifold & mounting lugs scale with sqrt(c_ratio)
+    scale_W = 0.60 + 0.40 * csdl.sqrt(c_ratio + 1e-12)
+    # Axis 2 (height): motor / cylinder diameter scales with sqrt(hinge moment) with hard packaging floor
+    scale_H = ACTUATOR_HEIGHT_FLOOR + (1.0 - ACTUATOR_HEIGHT_FLOOR) * csdl.sqrt(c_ratio + 1e-12)
+
+    scale_vec = csdl.concatenate([
+        csdl.reshape(scale_L, (1,)),
+        csdl.reshape(scale_W, (1,)),
+        csdl.reshape(scale_H, (1,)),
+    ])
+    return csdl.Variable(value=base_hl) * scale_vec
 
 
 def build_local_frame_from_chord_vector(c_vec: csdl.Variable) -> csdl.Variable:
@@ -662,6 +749,12 @@ def evaluate_exterior_non_interference(
         raise ValueError("obstacle_sdfs cannot be empty")
 
     d_list = [csdl.reshape(sdf.evaluate(query_points), (1, query_points.shape[0])) for sdf in obstacle_sdfs]
+    if len(d_list) == 1:
+        d_stacked = d_list[0]
+        union_dist = d_stacked[0, :]
+        raw_residuals = -union_dist + clearance_buffer
+        return raw_residuals, union_dist
+
     d_stacked = csdl.concatenate(d_list, axis=0)  # (num_obstacles, N)
 
     if aggregation_mode == 'pairwise':
@@ -670,11 +763,7 @@ def evaluate_exterior_non_interference(
         min_dist = csdl_smooth_min(d_stacked, axes=(0,), rho=rho_union)
         return raw_residuals, min_dist
 
-    if len(obstacle_sdfs) == 1:
-        union_dist = d_stacked[0, :]
-    else:
-        union_dist = csdl_smooth_min(d_stacked, axes=(0,), rho=rho_union)
-
+    union_dist = csdl_smooth_min(d_stacked, axes=(0,), rho=rho_union)
     raw_residuals = -union_dist + clearance_buffer
     return raw_residuals, union_dist
 
@@ -764,6 +853,8 @@ def plot_geometry_with_payloads(
                 color_str = 'orange'
             elif 'mlg' in rep.name:
                 color_str = 'limegreen'
+            elif 'apu' in rep.name:
+                color_str = 'crimson'
             else:
                 color_str = 'gold'
             plotting_elements = rep.explicit_geometry.plot(

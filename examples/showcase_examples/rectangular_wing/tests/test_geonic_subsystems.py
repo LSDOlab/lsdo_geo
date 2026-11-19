@@ -15,7 +15,10 @@ if SHOWCASE_DIR not in sys.path:
     sys.path.insert(0, SHOWCASE_DIR)
 
 from physics_models.geonic_subsystems import (
+    APU_BASE_DIMS_M,
+    APU_BASE_MASS_KG,
     BoxSignedDistanceFunction,
+    GEONIC_APU_CLEARANCE_M,
     aggregate_constraints_by_mode,
     build_box_bspline_geometry,
     build_box_representation,
@@ -28,17 +31,27 @@ from physics_models.geonic_subsystems import (
     evaluate_exterior_non_interference,
     get_box_corners_3d,
     parse_geonic_aggregation_mode,
+    parse_geonic_subsystems,
     parse_geonic_subsystem_mode,
     plot_geometry_with_payloads,
 )
 
 
 def test_subsystem_mode_parsers():
+    # List parser
+    assert parse_geonic_subsystems(env={}) == []
+    assert parse_geonic_subsystems(env={'GEONIC_SUBSYSTEMS': 'nlg, mlg, apu'}) == ['nlg', 'mlg', 'apu']
+    assert parse_geonic_subsystems(env={'GEONIC_SUBSYSTEM_MODE': 'landing_gear'}) == ['nlg', 'mlg']
+    assert parse_geonic_subsystems(subsystems=['NLG', 'apu']) == ['nlg', 'apu']
+    with pytest.raises(ValueError):
+        parse_geonic_subsystems(subsystems=['invalid'])
+
+    # Legacy mode parser
     assert parse_geonic_subsystem_mode(env={}) == 'none'
     assert parse_geonic_subsystem_mode(env={'GEONIC_SUBSYSTEM_MODE': 'landing_gear'}) == 'landing_gear'
     assert parse_geonic_subsystem_mode(mode='FULL') == 'full'
-    with pytest.raises(ValueError):
-        parse_geonic_subsystem_mode(mode='invalid')
+    assert parse_geonic_subsystem_mode(mode=['nlg', 'mlg']) == 'landing_gear'
+    assert parse_geonic_subsystem_mode(mode=['nlg', 'mlg', 'apu']) == 'full'
 
     assert parse_geonic_aggregation_mode(env={}) == 'partial_aggregation'
     assert parse_geonic_aggregation_mode(env={'GEONIC_AGGREGATION_MODE': 'pairwise'}) == 'pairwise'
@@ -590,3 +603,69 @@ def test_dual_explicit_bspline_and_implicit_sdf_representations(tmp_path):
     )
     assert len(elems) > 0
     assert os.path.isfile(shot) and os.path.getsize(shot) > 1000
+
+
+def test_apu_box_samples_and_derivatives():
+    rec = csdl.Recorder(inline=True)
+    rec.start()
+
+    apu_cx = csdl.Variable(value=8.6)
+    apu_cy = csdl.Variable(value=5.5)
+    apu_center = csdl.concatenate([
+        csdl.reshape(apu_cx, (1,)),
+        csdl.reshape(apu_cy, (1,)),
+        csdl.Variable(value=np.array([0.0])),
+    ])
+    apu_hl = csdl.Variable(value=0.5 * APU_BASE_DIMS_M)
+
+    pts, pgroups = build_box_surface_samples(
+        center=csdl.reshape(apu_center, (3,)),
+        half_lengths=apu_hl,
+        grid_res=(3, 3),
+        num_partitions_per_axis=2,
+        symmetry_y_nonneg=False,
+    )
+
+    apu_rep = build_box_representation(
+        name='apu_right_bay',
+        half_lengths=apu_hl,
+        center=csdl.reshape(apu_center, (3,)),
+    )
+
+    # Obstacle mock
+    obs_hl = csdl.Variable(value=np.array([1.7, 0.75, 0.6]))
+    obs_c = csdl.Variable(value=np.array([5.5, 5.5, 0.0]))
+    obs_sdf = BoxSignedDistanceFunction(half_lengths=obs_hl, center=obs_c)
+
+    ext_raw, min_dist = evaluate_exterior_non_interference(
+        query_points=pts,
+        obstacle_sdfs=[obs_sdf],
+        clearance_buffer=GEONIC_APU_CLEARANCE_M,
+        aggregation_mode='partial_aggregation',
+    )
+    ext_c = aggregate_constraints_by_mode(ext_raw, pgroups, 'partial_aggregation')
+    margin = -csdl.maximum(ext_c, axes=(0,), rho=50.0)
+
+    sim = csdl.experimental.JaxSimulator(
+        rec,
+        additional_inputs=[apu_cx, apu_cy],
+        additional_outputs=[margin, pts],
+    )
+    sim.run()
+    totals = sim.compute_totals()
+
+    margin_val = float(np.asarray(sim[margin]).flatten()[0])
+    # APU at x=8.6 is well clear of obstacle at x=5.5 (distance > 1.0 m), so margin > 0
+    assert margin_val > 0.0
+
+    # Test analytical derivatives wrt apu_cx vs centered finite differences
+    d_margin_dx_analytic = float(np.asarray(totals[(margin, apu_cx)]).flatten()[0])
+    h = 1e-5
+    sim[apu_cx] = 8.6 + h
+    sim.run()
+    m_plus = float(np.asarray(sim[margin]).flatten()[0])
+    sim[apu_cx] = 8.6 - h
+    sim.run()
+    m_minus = float(np.asarray(sim[margin]).flatten()[0])
+    d_margin_dx_fd = (m_plus - m_minus) / (2.0 * h)
+    assert np.isclose(d_margin_dx_analytic, d_margin_dx_fd, rtol=1e-4, atol=1e-6)

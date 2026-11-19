@@ -43,6 +43,8 @@ from physics_models.wave_drag import (
     compute_half_chord_sweep,
     compute_strip_thickness_to_chord,
     evaluate_wave_drag,
+    build_panel_strip_wave_mapping,
+    evaluate_wave_drag_karman_tsien_rh,
 )
 from physics_models.ar_area_bspline import BsplineTargetRegularization
 
@@ -136,7 +138,7 @@ else:
 #   'oversized' -> Constrain TCP0 oversized box (8 sample points, payload_center_x DV, 0.2 m buffer)
 #   'pallets'   -> Constrain TCP0 6-pallet stack (32 sample points, pallet_stack_center_x DV, 0.2 m buffer)
 #   'both'      -> Constrain both payload cases (40-point batch, equal CG consistency constraint)
-geonic_payload_mode: str = 'both'  # Options: 'none', 'oversized', 'pallets', 'both'
+geonic_payload_mode: str = 'none'  # Options: 'none', 'oversized', 'pallets', 'both'
 geonic_payload_mode = os.environ.get('GEONIC_PAYLOAD_MODE', geonic_payload_mode)
 if 'GEONIC_PAYLOAD_MODE' not in os.environ and 'USE_GEONIC' in os.environ:
     geonic_payload_mode = 'oversized' if str(os.environ['USE_GEONIC']).strip() == '1' else 'none'
@@ -147,12 +149,22 @@ if 'GEONIC_PAYLOAD_MODE' not in os.environ and 'USE_GEONIC' in os.environ:
 geonic_method: Literal['selective_aggregation', 'sdfpack'] = 'selective_aggregation'  # Options: 'selective_aggregation', 'sdfpack'
 geonic_method = os.environ.get('GEONIC_METHOD', os.environ.get('GEONIC_MESH', geonic_method))
 
-# 3c. Internal subsystem packaging mode:
-#   'none'         -> Payload cargo only (baseline)
-#   'landing_gear' -> NLG bay + 2 symmetric MLG bays
-#   'full'         -> NLG + 2 MLG + outboard elevon actuator housings
-geonic_subsystem_mode: Literal['none', 'landing_gear', 'full'] = 'landing_gear'
-geonic_subsystem_mode = os.environ.get('GEONIC_SUBSYSTEM_MODE', geonic_subsystem_mode)
+# 3c. Internal subsystem packaging specification:
+#   List of active subsystems to package inside the airframe.
+#   Options: any subset of ['nlg', 'mlg', 'actuators', 'apu']
+#   Legacy string modes ('none', 'landing_gear', 'full') are also supported.
+# active_subsystems: list[str] = ['nlg', 'mlg', 'actuators', 'apu']
+active_subsystems: list[str] = []
+if 'GEONIC_SUBSYSTEMS' in os.environ:
+    active_subsystems = [s.strip().lower() for s in os.environ['GEONIC_SUBSYSTEMS'].replace(',', ' ').split() if s.strip()]
+elif 'GEONIC_SUBSYSTEM_MODE' in os.environ:
+    _leg_mode = os.environ['GEONIC_SUBSYSTEM_MODE'].strip().lower()
+    if _leg_mode in ('none', '0', 'false'):
+        active_subsystems = []
+    elif _leg_mode == 'landing_gear':
+        active_subsystems = ['nlg', 'mlg']
+    elif _leg_mode == 'full':
+        active_subsystems = ['nlg', 'mlg', 'actuators']
 
 # 3d. Subsystem coupled dynamic sizing toggles:
 dynamic_landing_gear_sizing: bool = os.environ.get('DYNAMIC_LANDING_GEAR_SIZING', '1').strip().lower() not in ('0', 'false', 'no')
@@ -233,6 +245,18 @@ if 'INCLUDE_WAKE_LOAD_PENALTY' in os.environ:
 wake_load_penalty_weight: float = float(os.environ.get('WAKE_LOAD_PENALTY_WEIGHT', 20.0))
 wake_load_penalty_threshold: float = float(os.environ.get('WAKE_LOAD_PENALTY_THRESHOLD', 0.10))
 
+# 7d. Transonic Wave Drag Model selector:
+#   'korn_lock'        -> Empirical Korn-Lock strip theory using quarter-chord sweep (legacy default)
+#   'karman_tsien_rh'  -> Karman-Tsien compressibility correction + surface-integrated Rankine-Hugoniot weak shock entropy wave drag
+WaveDragModelType = Literal['korn_lock', 'karman_tsien_rh']
+wave_drag_model: WaveDragModelType = 'korn_lock'  # default preserves exact legacy behavior
+wave_drag_model = os.environ.get('WAVE_DRAG_MODEL', wave_drag_model).strip().lower()
+if wave_drag_model not in ('korn_lock', 'karman_tsien_rh'):
+    raise ValueError(f"Unknown wave_drag_model '{wave_drag_model}'. Must be 'korn_lock' or 'karman_tsien_rh'.")
+
+# Calibration factor for Karman-Tsien + Rankine-Hugoniot wave drag:
+wave_drag_c_cal: float = float(os.environ.get('WAVE_DRAG_C_CAL', '1.0'))
+
 # 8. Scale factor & warm start:
 scale_factor: float = 7.5             # Scale factor (7.5 for 50 m full-scale BWB; 1.0 for wind-tunnel scale)
 warm_start: bool = os.environ.get('WARM_START', '0').strip().lower() not in ('0', 'false', 'no')
@@ -285,19 +309,24 @@ geonic_payload_mode, use_geonic = parse_geonic_payload_mode(mode=geonic_payload_
 geonic_method = parse_geonic_method(method=geonic_method)
 
 from physics_models.geonic_subsystems import (
+    parse_geonic_subsystems,
     parse_geonic_subsystem_mode,
     parse_geonic_aggregation_mode,
 )
-geonic_subsystem_mode = parse_geonic_subsystem_mode(mode=geonic_subsystem_mode)
+active_subsystems = parse_geonic_subsystems(subsystems=active_subsystems)
+geonic_subsystem_mode = parse_geonic_subsystem_mode(mode=active_subsystems)
 geonic_aggregation_mode = parse_geonic_aggregation_mode(mode=geonic_aggregation_mode)
-use_geonic_subsystems: bool = (geonic_subsystem_mode != 'none')
+use_geonic_subsystems: bool = (len(active_subsystems) > 0)
 
 if use_geonic or use_geonic_subsystems or plot_geometry_with_payload:
     from physics_models.geonic_subsystems import (
         ACTUATOR_CHORD_FRACTION,
         ACTUATOR_MASS_KG,
         ACTUATOR_SPAN_FRACTIONS,
+        APU_BASE_DIMS_M,
+        APU_BASE_MASS_KG,
         GEONIC_ACTUATOR_CLEARANCE_M,
+        GEONIC_APU_CLEARANCE_M,
         BoxSignedDistanceFunction,
         aggregate_constraints_by_mode,
         build_box_representation,
@@ -607,7 +636,7 @@ for i in range(num_beam_nodes):
     for k in range(num_box_samples):
         W_box_mat[i, k * num_beam_nodes + i] = simpson_weights_box[k]
 
-if geonic_subsystem_mode == 'full':
+if 'actuators' in active_subsystems:
     # Project outboard elevon actuator hinge-line markers (LE, TE, upper & lower 75% chord)
     act_y_stations = np.array([eta * 4.99 * scale_factor for eta in ACTUATOR_SPAN_FRACTIONS])
     num_act_stations = len(act_y_stations)
@@ -861,6 +890,14 @@ for i, yd in enumerate(y_drag_centers_init):
         M_interp_drag[i, k] = 1.0 - t
         M_interp_drag[i, k+1] = t
 
+# Build static panel-to-strip mapping for Karman-Tsien RH wave drag
+wave_panel_mapping = build_panel_strip_wave_mapping(
+    W_strip=W_strip,
+    M_interp_drag=M_interp_drag,
+    y_strip_centers=y_strip_centers,
+    y_drag_centers=y_drag_centers_init,
+)
+
 # Compute B-spline spaces and matrices for drag strip lift coefficient fitting
 # Exact 101-CP cubic B-spline fit with root symmetry S'(0)=0 for the 100 drag strip collocation points
 tau_drag_init = y_drag_centers_init / b_tip_ref
@@ -970,11 +1007,18 @@ if use_geonic:
     # Misc weight CG location as fraction of root chord (bounded equivalently to payload_cg: 0.05 to 0.95)
     misc_cg = csdl.Variable(value=0.25, name='misc_cg')
 if use_geonic_subsystems:
-    # Landing gear bay position DVs (initialized collision-free relative to payload & pallets)
+    # Subsystem position DVs (initialized collision-free relative to payload & pallets)
     sf_ratio_init = float(scale_factor) / 7.5
-    nlg_center_x = csdl.Variable(value=-7.0 * sf_ratio_init, name='nlg_center_x')
-    mlg_center_x = csdl.Variable(value=5.5 * sf_ratio_init, name='mlg_center_x')
-    mlg_center_y = csdl.Variable(value=5.5 * sf_ratio_init, name='mlg_center_y')
+    if 'nlg' in active_subsystems:
+        nlg_center_x = csdl.Variable(value=-7.0 * sf_ratio_init, name='nlg_center_x')
+    if 'mlg' in active_subsystems:
+        mlg_center_x = csdl.Variable(value=5.5 * sf_ratio_init, name='mlg_center_x')
+        mlg_center_y = csdl.Variable(value=5.5 * sf_ratio_init, name='mlg_center_y')
+    if 'apu' in active_subsystems:
+        # Initialized directly behind the MLG bay (x_mlg = 5.5 m, L_mlg = 3.4 m -> aft face at 7.2 m)
+        # APU (L = 2.0 m, hx = 1.0 m) with front face at 7.6 m -> center at 8.6 m, y centered at MLG spanwise station (5.5 m)
+        apu_center_x = csdl.Variable(value=8.6 * sf_ratio_init, name='apu_center_x')
+        apu_center_y = csdl.Variable(value=5.5 * sf_ratio_init, name='apu_center_y')
 
 @dataclass
 class DVInfo:
@@ -1097,15 +1141,24 @@ if geometry_parameterization_formulation == 'implicit':
         )
     if use_geonic_subsystems:
         sf_ratio_dv = float(scale_factor) / 7.5
-        design_variables['nlg_center_x'] = DVInfo(
-            variable=nlg_center_x, lower=-10.0 * sf_ratio_dv, upper=5.0 * sf_ratio_dv, scaler=1.0 / scale_factor
-        )
-        design_variables['mlg_center_x'] = DVInfo(
-            variable=mlg_center_x, lower=0.0, upper=15.0 * sf_ratio_dv, scaler=1.0 / scale_factor
-        )
-        design_variables['mlg_center_y'] = DVInfo(
-            variable=mlg_center_y, lower=2.4 * sf_ratio_dv, upper=12.0 * sf_ratio_dv, scaler=1.0 / scale_factor
-        )
+        if 'nlg' in active_subsystems:
+            design_variables['nlg_center_x'] = DVInfo(
+                variable=nlg_center_x, lower=-10.0 * sf_ratio_dv, upper=5.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+            )
+        if 'mlg' in active_subsystems:
+            design_variables['mlg_center_x'] = DVInfo(
+                variable=mlg_center_x, lower=0.0, upper=15.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+            )
+            design_variables['mlg_center_y'] = DVInfo(
+                variable=mlg_center_y, lower=2.4 * sf_ratio_dv, upper=12.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+            )
+        if 'apu' in active_subsystems:
+            design_variables['apu_center_x'] = DVInfo(
+                variable=apu_center_x, lower=0.0, upper=15.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+            )
+            design_variables['apu_center_y'] = DVInfo(
+                variable=apu_center_y, lower=1.0 * sf_ratio_dv, upper=10.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+            )
     design_variables['ttop_dvs'] = DVInfo(variable=ttop_dvs, lower=t_min_gauge, upper=t_max_gauge, scaler=thick_scaler)
     design_variables['tweb_dvs'] = DVInfo(variable=tweb_dvs, lower=t_min_gauge, upper=t_max_gauge, scaler=thick_scaler)
     if include_elevator:
@@ -1230,12 +1283,16 @@ if geometry_parameterization_formulation == 'implicit':
             if use_geonic and geonic_payload_mode in {'pallets', 'both'} and 'dv_opt_pallet_stack_center_x' in prior_data:
                 pallet_stack_center_x.value = float(np.asarray(prior_data['dv_opt_pallet_stack_center_x']).flatten()[0])
             if use_geonic_subsystems:
-                if 'dv_opt_nlg_center_x' in prior_data:
+                if 'nlg' in active_subsystems and 'dv_opt_nlg_center_x' in prior_data:
                     nlg_center_x.value = float(np.asarray(prior_data['dv_opt_nlg_center_x']).flatten()[0])
-                if 'dv_opt_mlg_center_x' in prior_data:
+                if 'mlg' in active_subsystems and 'dv_opt_mlg_center_x' in prior_data:
                     mlg_center_x.value = float(np.asarray(prior_data['dv_opt_mlg_center_x']).flatten()[0])
-                if 'dv_opt_mlg_center_y' in prior_data:
+                if 'mlg' in active_subsystems and 'dv_opt_mlg_center_y' in prior_data:
                     mlg_center_y.value = float(np.asarray(prior_data['dv_opt_mlg_center_y']).flatten()[0])
+                if 'apu' in active_subsystems and 'dv_opt_apu_center_x' in prior_data:
+                    apu_center_x.value = float(np.asarray(prior_data['dv_opt_apu_center_x']).flatten()[0])
+                if 'apu' in active_subsystems and 'dv_opt_apu_center_y' in prior_data:
+                    apu_center_y.value = float(np.asarray(prior_data['dv_opt_apu_center_y']).flatten()[0])
 
     # ParameterizationSolver drives chord stretch states, thickness stretch states, 1 span stretch state, and sweep translation states
     chord_stretch_states = csdl.Variable(shape=(num_chord_stations,), value=np.zeros(num_chord_stations))
@@ -1336,15 +1393,24 @@ elif geometry_parameterization_formulation == 'explicit':
         )
     if use_geonic_subsystems:
         sf_ratio_dv = float(scale_factor) / 7.5
-        design_variables['nlg_center_x'] = DVInfo(
-            variable=nlg_center_x, lower=-10.0 * sf_ratio_dv, upper=5.0 * sf_ratio_dv, scaler=1.0 / scale_factor
-        )
-        design_variables['mlg_center_x'] = DVInfo(
-            variable=mlg_center_x, lower=0.0, upper=15.0 * sf_ratio_dv, scaler=1.0 / scale_factor
-        )
-        design_variables['mlg_center_y'] = DVInfo(
-            variable=mlg_center_y, lower=2.4 * sf_ratio_dv, upper=12.0 * sf_ratio_dv, scaler=1.0 / scale_factor
-        )
+        if 'nlg' in active_subsystems:
+            design_variables['nlg_center_x'] = DVInfo(
+                variable=nlg_center_x, lower=-10.0 * sf_ratio_dv, upper=5.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+            )
+        if 'mlg' in active_subsystems:
+            design_variables['mlg_center_x'] = DVInfo(
+                variable=mlg_center_x, lower=0.0, upper=15.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+            )
+            design_variables['mlg_center_y'] = DVInfo(
+                variable=mlg_center_y, lower=2.4 * sf_ratio_dv, upper=12.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+            )
+        if 'apu' in active_subsystems:
+            design_variables['apu_center_x'] = DVInfo(
+                variable=apu_center_x, lower=0.0, upper=15.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+            )
+            design_variables['apu_center_y'] = DVInfo(
+                variable=apu_center_y, lower=1.0 * sf_ratio_dv, upper=10.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+            )
     design_variables['ttop_dvs'] = DVInfo(variable=ttop_dvs, lower=t_min_gauge, upper=t_max_gauge, scaler=thick_scaler)
     design_variables['tweb_dvs'] = DVInfo(variable=tweb_dvs, lower=t_min_gauge, upper=t_max_gauge, scaler=thick_scaler)
     if include_elevator:
@@ -1428,12 +1494,16 @@ elif geometry_parameterization_formulation == 'explicit':
             if use_geonic and geonic_payload_mode in {'pallets', 'both'} and 'dv_opt_pallet_stack_center_x' in prior_data:
                 pallet_stack_center_x.value = float(np.asarray(prior_data['dv_opt_pallet_stack_center_x']).flatten()[0])
             if use_geonic_subsystems:
-                if 'dv_opt_nlg_center_x' in prior_data:
+                if 'nlg' in active_subsystems and 'dv_opt_nlg_center_x' in prior_data:
                     nlg_center_x.value = float(np.asarray(prior_data['dv_opt_nlg_center_x']).flatten()[0])
-                if 'dv_opt_mlg_center_x' in prior_data:
+                if 'mlg' in active_subsystems and 'dv_opt_mlg_center_x' in prior_data:
                     mlg_center_x.value = float(np.asarray(prior_data['dv_opt_mlg_center_x']).flatten()[0])
-                if 'dv_opt_mlg_center_y' in prior_data:
+                if 'mlg' in active_subsystems and 'dv_opt_mlg_center_y' in prior_data:
                     mlg_center_y.value = float(np.asarray(prior_data['dv_opt_mlg_center_y']).flatten()[0])
+                if 'apu' in active_subsystems and 'dv_opt_apu_center_x' in prior_data:
+                    apu_center_x.value = float(np.asarray(prior_data['dv_opt_apu_center_x']).flatten()[0])
+                if 'apu' in active_subsystems and 'dv_opt_apu_center_y' in prior_data:
+                    apu_center_y.value = float(np.asarray(prior_data['dv_opt_apu_center_y']).flatten()[0])
 
     chord_params = csdl.concatenate(
         [chord_stretch_dvs[i] for i in range(num_chord_stations - 1, 0, -1)] +
@@ -1771,28 +1841,68 @@ if use_geonic_subsystems:
         (1, 3),
     )
 
-    nlg_samples, nlg_part_groups = build_box_surface_samples(
-        center=csdl.reshape(nlg_center_body, (3,)),
-        half_lengths=nlg_half_lengths,
-        grid_res=(3, 3),
-        num_partitions_per_axis=2,
-        symmetry_y_nonneg=True,
-    )
-    mlg_samples, mlg_part_groups = build_box_surface_samples(
-        center=csdl.reshape(mlg_center_body, (3,)),
-        half_lengths=mlg_half_lengths,
-        grid_res=(3, 3),
-        num_partitions_per_axis=2,
-        symmetry_y_nonneg=False,
-    )
-    subsys_pts_list = [nlg_samples, mlg_samples]
+    subsys_pts_list = []
+    if 'nlg' in active_subsystems:
+        nlg_samples, nlg_part_groups = build_box_surface_samples(
+            center=csdl.reshape(nlg_center_body, (3,)),
+            half_lengths=nlg_half_lengths,
+            grid_res=(3, 3),
+            num_partitions_per_axis=2,
+            symmetry_y_nonneg=True,
+        )
+        subsys_pts_list.append(nlg_samples)
+    else:
+        nlg_samples, nlg_part_groups = None, None
+
+    if 'mlg' in active_subsystems:
+        mlg_samples, mlg_part_groups = build_box_surface_samples(
+            center=csdl.reshape(mlg_center_body, (3,)),
+            half_lengths=mlg_half_lengths,
+            grid_res=(3, 3),
+            num_partitions_per_axis=2,
+            symmetry_y_nonneg=False,
+        )
+        subsys_pts_list.append(mlg_samples)
+    else:
+        mlg_samples, mlg_part_groups = None, None
+
+    if 'apu' in active_subsystems:
+        apu_half_lengths = csdl.Variable(value=0.5 * APU_BASE_DIMS_M * (scale_factor / 7.5), name='apu_half_lengths')
+        apu_right_center_body = csdl.reshape(
+            csdl.concatenate([
+                csdl.reshape(apu_center_x, (1,)),
+                csdl.reshape(apu_center_y, (1,)),
+                csdl.Variable(value=np.array([0.0])),
+            ]),
+            (1, 3),
+        )
+        apu_right_center_body.name = 'apu_right_center_body'
+        apu_left_center_body = csdl.reshape(
+            csdl.concatenate([
+                csdl.reshape(apu_center_x, (1,)),
+                csdl.reshape(-apu_center_y, (1,)),
+                csdl.Variable(value=np.array([0.0])),
+            ]),
+            (1, 3),
+        )
+        apu_left_center_body.name = 'apu_left_center_body'
+        apu_samples, apu_part_groups = build_box_surface_samples(
+            center=csdl.reshape(apu_right_center_body, (3,)),
+            half_lengths=apu_half_lengths,
+            grid_res=(3, 3),
+            num_partitions_per_axis=2,
+            symmetry_y_nonneg=False,
+        )
+        subsys_pts_list.append(apu_samples)
+    else:
+        apu_samples, apu_part_groups = None, None
 
     act_centers_body = []
     act_half_lengths_list = []
     act_rotations_list = []
     act_samples_list = []
     act_part_groups_list = []
-    if geonic_subsystem_mode == 'full':
+    if 'actuators' in active_subsystems:
         act_le_pts = geometry.evaluate(projected_act_le, plot=False)
         act_te_pts = geometry.evaluate(projected_act_te, plot=False)
         act_u75_pts = geometry.evaluate(projected_act_u75, plot=False)
@@ -2052,24 +2162,50 @@ if use_geonic:
 
 if use_geonic_subsystems:
     # Dual Explicit (B-spline lsdo_geo.Geometry) + Implicit (BoxSignedDistanceFunction) subsystem representations
-    nlg_rep = build_box_representation(
-        name='nlg_bay',
-        half_lengths=nlg_half_lengths,
-        center=csdl.reshape(nlg_center_body, (3,)),
-    )
-    mlg_right_rep = build_box_representation(
-        name='mlg_right_bay',
-        half_lengths=mlg_half_lengths,
-        center=csdl.reshape(mlg_center_body, (3,)),
-    )
-    mlg_left_rep = build_box_representation(
-        name='mlg_left_bay',
-        half_lengths=mlg_half_lengths,
-        center=csdl.reshape(mlg_left_center_body, (3,)),
-    )
-    subsystem_representations = [nlg_rep, mlg_right_rep, mlg_left_rep]
+    subsystem_representations = []
+    if 'nlg' in active_subsystems:
+        nlg_rep = build_box_representation(
+            name='nlg_bay',
+            half_lengths=nlg_half_lengths,
+            center=csdl.reshape(nlg_center_body, (3,)),
+        )
+        subsystem_representations.append(nlg_rep)
+    else:
+        nlg_rep = None
 
-    if geonic_subsystem_mode == 'full':
+    if 'mlg' in active_subsystems:
+        mlg_right_rep = build_box_representation(
+            name='mlg_right_bay',
+            half_lengths=mlg_half_lengths,
+            center=csdl.reshape(mlg_center_body, (3,)),
+        )
+        mlg_left_rep = build_box_representation(
+            name='mlg_left_bay',
+            half_lengths=mlg_half_lengths,
+            center=csdl.reshape(mlg_left_center_body, (3,)),
+        )
+        subsystem_representations.extend([mlg_right_rep, mlg_left_rep])
+    else:
+        mlg_right_rep = None
+        mlg_left_rep = None
+
+    if 'apu' in active_subsystems:
+        apu_right_rep = build_box_representation(
+            name='apu_right_bay',
+            half_lengths=apu_half_lengths,
+            center=csdl.reshape(apu_right_center_body, (3,)),
+        )
+        apu_left_rep = build_box_representation(
+            name='apu_left_bay',
+            half_lengths=apu_half_lengths,
+            center=csdl.reshape(apu_left_center_body, (3,)),
+        )
+        subsystem_representations.extend([apu_right_rep, apu_left_rep])
+    else:
+        apu_right_rep = None
+        apu_left_rep = None
+
+    if 'actuators' in active_subsystems:
         for s_idx in range(len(ACTUATOR_SPAN_FRACTIONS)):
             c_b_s = act_centers_body[s_idx]
             hl_s = act_half_lengths_list[s_idx]
@@ -2107,6 +2243,7 @@ if use_geonic_subsystems:
                 )
             )
 
+    all_subsys_margin_inputs = []
     if geonic_aggregation_mode == 'volume_only':
         dy_body = beam_mesh_body[1:, 1] - beam_mesh_body[:-1, 1]
         V_wing_full = 2.0 * csdl.sum(local_chord_body * local_height_body * dy_body)
@@ -2122,140 +2259,212 @@ if use_geonic_subsystems:
         subsystem_volume_constraint.set_as_constraint(upper=0.0, scaler=1.0 / 100.0)
         subsystem_overall_margin = -subsystem_volume_constraint
         subsystem_overall_margin.name = 'subsystem_overall_margin'
+        all_subsys_margin_inputs.append(subsystem_volume_constraint)
         nlg_oml_margin = subsystem_overall_margin
         mlg_oml_margin = subsystem_overall_margin
         nlg_ext_margin = subsystem_overall_margin
         mlg_ext_margin = subsystem_overall_margin
     else:
         subsys_sdf_all = all_signed_distance_full[num_payload_oml_pts:]
-        num_nlg_pts = int(nlg_samples.shape[0])
-        num_mlg_pts = int(mlg_samples.shape[0])
-        nlg_oml_sdf = subsys_sdf_all[:num_nlg_pts]
-        mlg_oml_sdf = subsys_sdf_all[num_nlg_pts:num_nlg_pts + num_mlg_pts]
-
-        nlg_int_raw = nlg_oml_sdf + GEONIC_CLEARANCE_M
-        mlg_int_raw = mlg_oml_sdf + GEONIC_CLEARANCE_M
+        offset_subsys = 0
+        all_subsys_raw = []
 
         # Reuse analytical SDF objects from dual payload/subsystem representations
-        nlg_sdf_obj = nlg_rep.implicit_sdf
-        mlg_right_sdf_obj = mlg_right_rep.implicit_sdf
-        mlg_left_sdf_obj = mlg_left_rep.implicit_sdf
         active_pay_sdfs = [
             rep.implicit_sdf
             for rep in (payload_representations['oversized'] + payload_representations['pallets'])
         ]
+        active_subsys_sdfs = [
+            rep.implicit_sdf
+            for rep in subsystem_representations
+        ]
 
-        nlg_obstacles = [mlg_right_sdf_obj, mlg_left_sdf_obj] + active_pay_sdfs
-        mlg_obstacles = [nlg_sdf_obj, mlg_left_sdf_obj] + active_pay_sdfs
+        # NLG constraints
+        if 'nlg' in active_subsystems:
+            num_nlg_pts = int(nlg_samples.shape[0])
+            nlg_oml_sdf = subsys_sdf_all[offset_subsys:offset_subsys + num_nlg_pts]
+            offset_subsys += num_nlg_pts
+            nlg_int_raw = nlg_oml_sdf + GEONIC_CLEARANCE_M
+            nlg_obstacles = [sdf for sdf in active_subsys_sdfs if sdf is not nlg_rep.implicit_sdf] + active_pay_sdfs
+            nlg_ext_raw, _ = evaluate_exterior_non_interference(
+                query_points=nlg_samples,
+                obstacle_sdfs=nlg_obstacles,
+                clearance_buffer=GEONIC_CLEARANCE_M,
+                rho_union=50.0,
+                aggregation_mode=geonic_aggregation_mode,
+            )
+            all_subsys_raw.extend([nlg_int_raw, nlg_ext_raw])
+            all_subsys_margin_inputs.extend([nlg_int_raw, nlg_ext_raw])
+            nlg_oml_margin = -csdl.maximum(nlg_int_raw, axes=(0,), rho=50.0)
+            nlg_ext_margin = -csdl.maximum(nlg_ext_raw, axes=(0,), rho=50.0)
+            nlg_oml_margin.name = 'nlg_oml_margin'
+            nlg_ext_margin.name = 'nlg_ext_margin'
+            if geonic_aggregation_mode == 'pairwise':
+                nlg_int_c = aggregate_constraints_by_mode(nlg_int_raw, nlg_part_groups, 'unaggregated')
+                nlg_int_c.name = 'geonic_nlg_oml_clearance'
+                nlg_ext_raw.name = 'geonic_nlg_exterior_clearance'
+                nlg_int_c.set_as_constraint(upper=0.0, scaler=1.0)
+                nlg_ext_raw.set_as_constraint(upper=0.0, scaler=1.0)
+            elif geonic_aggregation_mode != 'full_aggregation':
+                nlg_int_c = aggregate_constraints_by_mode(nlg_int_raw, nlg_part_groups, geonic_aggregation_mode)
+                nlg_ext_c = aggregate_constraints_by_mode(nlg_ext_raw, nlg_part_groups, geonic_aggregation_mode)
+                nlg_int_c.name = 'geonic_nlg_oml_clearance'
+                nlg_ext_c.name = 'geonic_nlg_exterior_clearance'
+                nlg_int_c.set_as_constraint(upper=0.0, scaler=1.0)
+                nlg_ext_c.set_as_constraint(upper=0.0, scaler=1.0)
 
-        nlg_ext_raw, _ = evaluate_exterior_non_interference(
-            query_points=nlg_samples,
-            obstacle_sdfs=nlg_obstacles,
-            clearance_buffer=GEONIC_CLEARANCE_M,
-            rho_union=50.0,
-            aggregation_mode=geonic_aggregation_mode,
-        )
-        mlg_ext_raw, _ = evaluate_exterior_non_interference(
-            query_points=mlg_samples,
-            obstacle_sdfs=mlg_obstacles,
-            clearance_buffer=GEONIC_CLEARANCE_M,
-            rho_union=50.0,
-            aggregation_mode=geonic_aggregation_mode,
-        )
+        # MLG constraints (enforced for right bay only due to symmetry)
+        if 'mlg' in active_subsystems:
+            num_mlg_pts = int(mlg_samples.shape[0])
+            mlg_oml_sdf = subsys_sdf_all[offset_subsys:offset_subsys + num_mlg_pts]
+            offset_subsys += num_mlg_pts
+            mlg_int_raw = mlg_oml_sdf + GEONIC_CLEARANCE_M
+            mlg_obstacles = [sdf for sdf in active_subsys_sdfs if sdf is not mlg_right_rep.implicit_sdf] + active_pay_sdfs
+            mlg_ext_raw, _ = evaluate_exterior_non_interference(
+                query_points=mlg_samples,
+                obstacle_sdfs=mlg_obstacles,
+                clearance_buffer=GEONIC_CLEARANCE_M,
+                rho_union=50.0,
+                aggregation_mode=geonic_aggregation_mode,
+            )
+            all_subsys_raw.extend([mlg_int_raw, mlg_ext_raw])
+            all_subsys_margin_inputs.extend([mlg_int_raw, mlg_ext_raw])
+            mlg_oml_margin = -csdl.maximum(mlg_int_raw, axes=(0,), rho=50.0)
+            mlg_ext_margin = -csdl.maximum(mlg_ext_raw, axes=(0,), rho=50.0)
+            mlg_oml_margin.name = 'mlg_oml_margin'
+            mlg_ext_margin.name = 'mlg_ext_margin'
+            if geonic_aggregation_mode == 'pairwise':
+                mlg_int_c = aggregate_constraints_by_mode(mlg_int_raw, mlg_part_groups, 'unaggregated')
+                mlg_int_c.name = 'geonic_mlg_oml_clearance'
+                mlg_ext_raw.name = 'geonic_mlg_exterior_clearance'
+                mlg_int_c.set_as_constraint(upper=0.0, scaler=1.0)
+                mlg_ext_raw.set_as_constraint(upper=0.0, scaler=1.0)
+            elif geonic_aggregation_mode != 'full_aggregation':
+                mlg_int_c = aggregate_constraints_by_mode(mlg_int_raw, mlg_part_groups, geonic_aggregation_mode)
+                mlg_ext_c = aggregate_constraints_by_mode(mlg_ext_raw, mlg_part_groups, geonic_aggregation_mode)
+                mlg_int_c.name = 'geonic_mlg_oml_clearance'
+                mlg_ext_c.name = 'geonic_mlg_exterior_clearance'
+                mlg_int_c.set_as_constraint(upper=0.0, scaler=1.0)
+                mlg_ext_c.set_as_constraint(upper=0.0, scaler=1.0)
 
+        # APU constraints (enforced for right bay only due to symmetry)
+        if 'apu' in active_subsystems:
+            num_apu_pts = int(apu_samples.shape[0])
+            apu_oml_sdf = subsys_sdf_all[offset_subsys:offset_subsys + num_apu_pts]
+            offset_subsys += num_apu_pts
+            apu_int_raw = apu_oml_sdf + GEONIC_APU_CLEARANCE_M
+            apu_obstacles = [sdf for sdf in active_subsys_sdfs if sdf is not apu_right_rep.implicit_sdf] + active_pay_sdfs
+            apu_ext_raw, _ = evaluate_exterior_non_interference(
+                query_points=apu_samples,
+                obstacle_sdfs=apu_obstacles,
+                clearance_buffer=GEONIC_APU_CLEARANCE_M,
+                rho_union=50.0,
+                aggregation_mode=geonic_aggregation_mode,
+            )
+            all_subsys_raw.extend([apu_int_raw, apu_ext_raw])
+            all_subsys_margin_inputs.extend([apu_int_raw, apu_ext_raw])
+            apu_oml_margin = -csdl.maximum(apu_int_raw, axes=(0,), rho=50.0)
+            apu_ext_margin = -csdl.maximum(apu_ext_raw, axes=(0,), rho=50.0)
+            apu_oml_margin.name = 'apu_oml_margin'
+            apu_ext_margin.name = 'apu_ext_margin'
+            if geonic_aggregation_mode == 'pairwise':
+                apu_int_c = aggregate_constraints_by_mode(apu_int_raw, apu_part_groups, 'unaggregated')
+                apu_int_c.name = 'geonic_apu_oml_clearance'
+                apu_ext_raw.name = 'geonic_apu_exterior_clearance'
+                apu_int_c.set_as_constraint(upper=0.0, scaler=1.0)
+                apu_ext_raw.set_as_constraint(upper=0.0, scaler=1.0)
+            elif geonic_aggregation_mode != 'full_aggregation':
+                apu_int_c = aggregate_constraints_by_mode(apu_int_raw, apu_part_groups, geonic_aggregation_mode)
+                apu_ext_c = aggregate_constraints_by_mode(apu_ext_raw, apu_part_groups, geonic_aggregation_mode)
+                apu_int_c.name = 'geonic_apu_oml_clearance'
+                apu_ext_c.name = 'geonic_apu_exterior_clearance'
+                apu_int_c.set_as_constraint(upper=0.0, scaler=1.0)
+                apu_ext_c.set_as_constraint(upper=0.0, scaler=1.0)
+
+        # Actuator constraints (enforced for right wing actuators only due to symmetry)
         act_int_raw_list = []
-        offset_act = num_nlg_pts + num_mlg_pts
-        if geonic_subsystem_mode == 'full':
+        if 'actuators' in active_subsystems:
             for s_idx, pts_act_s in enumerate(act_samples_list):
                 n_act_s = int(pts_act_s.shape[0])
-                act_sdf_s = subsys_sdf_all[offset_act:offset_act + n_act_s]
-                offset_act += n_act_s
-                act_int_raw_list.append(act_sdf_s + GEONIC_ACTUATOR_CLEARANCE_M)
+                act_sdf_s = subsys_sdf_all[offset_subsys:offset_subsys + n_act_s]
+                offset_subsys += n_act_s
+                act_raw_s = act_sdf_s + GEONIC_ACTUATOR_CLEARANCE_M
+                act_int_raw_list.append(act_raw_s)
+                all_subsys_raw.append(act_raw_s)
+                all_subsys_margin_inputs.append(act_raw_s)
+                if geonic_aggregation_mode == 'pairwise':
+                    act_c_s = aggregate_constraints_by_mode(act_raw_s, act_part_groups_list[s_idx], 'unaggregated')
+                    act_c_s.name = f'geonic_actuator_{s_idx}_oml_clearance'
+                    act_c_s.set_as_constraint(upper=0.0, scaler=1.0)
+                elif geonic_aggregation_mode != 'full_aggregation':
+                    act_c_s = aggregate_constraints_by_mode(act_raw_s, act_part_groups_list[s_idx], geonic_aggregation_mode)
+                    act_c_s.name = f'geonic_actuator_{s_idx}_oml_clearance'
+                    act_c_s.set_as_constraint(upper=0.0, scaler=1.0)
+            if len(act_int_raw_list) > 0:
+                actuator_oml_margin = -csdl.maximum(csdl.concatenate(act_int_raw_list), axes=(0,), rho=50.0)
+                actuator_oml_margin.name = 'actuator_oml_margin'
 
-        if geonic_aggregation_mode == 'full_aggregation':
-            all_subsys_raw = [nlg_int_raw, mlg_int_raw, nlg_ext_raw, mlg_ext_raw] + act_int_raw_list
+        if geonic_aggregation_mode == 'full_aggregation' and len(all_subsys_raw) > 0:
             subsys_global_c = csdl.reshape(
                 csdl.maximum(csdl.concatenate(all_subsys_raw), axes=(0,), rho=50.0),
                 (1,),
             )
             subsys_global_c.name = 'geonic_subsystems_global_clearance'
             subsys_global_c.set_as_constraint(upper=0.0, scaler=1.0)
-        elif geonic_aggregation_mode == 'pairwise':
-            nlg_int_c = aggregate_constraints_by_mode(nlg_int_raw, nlg_part_groups, 'unaggregated')
-            mlg_int_c = aggregate_constraints_by_mode(mlg_int_raw, mlg_part_groups, 'unaggregated')
-            nlg_int_c.name = 'geonic_nlg_oml_clearance'
-            mlg_int_c.name = 'geonic_mlg_oml_clearance'
-            nlg_ext_raw.name = 'geonic_nlg_exterior_clearance'
-            mlg_ext_raw.name = 'geonic_mlg_exterior_clearance'
-            nlg_int_c.set_as_constraint(upper=0.0, scaler=1.0)
-            mlg_int_c.set_as_constraint(upper=0.0, scaler=1.0)
-            nlg_ext_raw.set_as_constraint(upper=0.0, scaler=1.0)
-            mlg_ext_raw.set_as_constraint(upper=0.0, scaler=1.0)
-            for s_idx, act_raw_s in enumerate(act_int_raw_list):
-                act_c_s = aggregate_constraints_by_mode(act_raw_s, act_part_groups_list[s_idx], 'unaggregated')
-                act_c_s.name = f'geonic_actuator_{s_idx}_oml_clearance'
-                act_c_s.set_as_constraint(upper=0.0, scaler=1.0)
-        else:
-            # 'partial_aggregation' or 'unaggregated'
-            nlg_int_c = aggregate_constraints_by_mode(nlg_int_raw, nlg_part_groups, geonic_aggregation_mode)
-            mlg_int_c = aggregate_constraints_by_mode(mlg_int_raw, mlg_part_groups, geonic_aggregation_mode)
-            nlg_ext_c = aggregate_constraints_by_mode(nlg_ext_raw, nlg_part_groups, geonic_aggregation_mode)
-            mlg_ext_c = aggregate_constraints_by_mode(mlg_ext_raw, mlg_part_groups, geonic_aggregation_mode)
-            nlg_int_c.name = 'geonic_nlg_oml_clearance'
-            mlg_int_c.name = 'geonic_mlg_oml_clearance'
-            nlg_ext_c.name = 'geonic_nlg_exterior_clearance'
-            mlg_ext_c.name = 'geonic_mlg_exterior_clearance'
-            nlg_int_c.set_as_constraint(upper=0.0, scaler=1.0)
-            mlg_int_c.set_as_constraint(upper=0.0, scaler=1.0)
-            nlg_ext_c.set_as_constraint(upper=0.0, scaler=1.0)
-            mlg_ext_c.set_as_constraint(upper=0.0, scaler=1.0)
-            for s_idx, act_raw_s in enumerate(act_int_raw_list):
-                act_c_s = aggregate_constraints_by_mode(act_raw_s, act_part_groups_list[s_idx], geonic_aggregation_mode)
-                act_c_s.name = f'geonic_actuator_{s_idx}_oml_clearance'
-                act_c_s.set_as_constraint(upper=0.0, scaler=1.0)
 
-        # Scalar diagnostic margins (>= 0 means feasible)
-        nlg_oml_margin = -csdl.maximum(nlg_int_raw, axes=(0,), rho=50.0)
-        mlg_oml_margin = -csdl.maximum(mlg_int_raw, axes=(0,), rho=50.0)
-        nlg_ext_margin = -csdl.maximum(nlg_ext_raw, axes=(0,), rho=50.0)
-        mlg_ext_margin = -csdl.maximum(mlg_ext_raw, axes=(0,), rho=50.0)
-        nlg_oml_margin.name = 'nlg_oml_margin'
-        mlg_oml_margin.name = 'mlg_oml_margin'
-        nlg_ext_margin.name = 'nlg_ext_margin'
-        mlg_ext_margin.name = 'mlg_ext_margin'
-
-        all_subsys_margin_inputs = [nlg_int_raw, mlg_int_raw, nlg_ext_raw, mlg_ext_raw] + act_int_raw_list
-        subsystem_overall_margin = -csdl.maximum(csdl.concatenate(all_subsys_margin_inputs), axes=(0,), rho=50.0)
-        subsystem_overall_margin.name = 'subsystem_overall_margin'
-        if geonic_subsystem_mode == 'full' and len(act_int_raw_list) > 0:
-            actuator_oml_margin = -csdl.maximum(csdl.concatenate(act_int_raw_list), axes=(0,), rho=50.0)
-            actuator_oml_margin.name = 'actuator_oml_margin'
+        # Overall scalar margin (>= 0 means feasible)
+        if len(all_subsys_margin_inputs) > 0:
+            subsystem_overall_margin = -csdl.maximum(csdl.concatenate(all_subsys_margin_inputs), axes=(0,), rho=50.0)
+            subsystem_overall_margin.name = 'subsystem_overall_margin'
 
     # Unified pitch kinematics: copy payload rotation pattern around quarter_chord_rot_origin
-    nlg_center_inertial = csdl.reshape(
-        rotate(
-            points=nlg_center_body,
-            rotation_origin=quarter_chord_rot_origin,
-            axis_vector=np.array([0., 1., 0.]),
-            angles=pitch,
-            units='radians',
-        ),
-        (3,),
-    )
-    nlg_center_inertial.name = 'nlg_center_inertial'
-    mlg_center_inertial = csdl.reshape(
-        rotate(
-            points=mlg_center_body,
-            rotation_origin=quarter_chord_rot_origin,
-            axis_vector=np.array([0., 1., 0.]),
-            angles=pitch,
-            units='radians',
-        ),
-        (3,),
-    )
-    mlg_center_inertial.name = 'mlg_center_inertial'
+    if 'nlg' in active_subsystems:
+        nlg_center_inertial = csdl.reshape(
+            rotate(
+                points=nlg_center_body,
+                rotation_origin=quarter_chord_rot_origin,
+                axis_vector=np.array([0., 1., 0.]),
+                angles=pitch,
+                units='radians',
+            ),
+            (3,),
+        )
+        nlg_center_inertial.name = 'nlg_center_inertial'
+    else:
+        nlg_center_inertial = None
+
+    if 'mlg' in active_subsystems:
+        mlg_center_inertial = csdl.reshape(
+            rotate(
+                points=mlg_center_body,
+                rotation_origin=quarter_chord_rot_origin,
+                axis_vector=np.array([0., 1., 0.]),
+                angles=pitch,
+                units='radians',
+            ),
+            (3,),
+        )
+        mlg_center_inertial.name = 'mlg_center_inertial'
+    else:
+        mlg_center_inertial = None
+
+    if 'apu' in active_subsystems:
+        apu_center_inertial = csdl.reshape(
+            rotate(
+                points=apu_right_center_body,
+                rotation_origin=quarter_chord_rot_origin,
+                axis_vector=np.array([0., 1., 0.]),
+                angles=pitch,
+                units='radians',
+            ),
+            (3,),
+        )
+        apu_center_inertial.name = 'apu_center_inertial'
+    else:
+        apu_center_inertial = None
+
     act_centers_inertial = []
-    if geonic_subsystem_mode == 'full':
+    if 'actuators' in active_subsystems:
         for s_idx, c_act_b in enumerate(act_centers_body):
             c_act_in = csdl.reshape(
                 rotate(
@@ -2469,9 +2678,10 @@ W_total = structural_mass * 9.81 + payload_weight + misc_weight
 
 if use_geonic_subsystems:
     sf_ratio_mass = float(scale_factor) / 7.5
-    nlg_mass_val = nlg_mass_var
-    mlg_mass_total = 2.0 * mlg_mass_var
-    if geonic_subsystem_mode == 'full':
+    nlg_mass_val = nlg_mass_var if 'nlg' in active_subsystems else 0.0
+    mlg_mass_total = 2.0 * mlg_mass_var if 'mlg' in active_subsystems else 0.0
+
+    if 'actuators' in active_subsystems:
         act_unit_mass = ACTUATOR_MASS_KG * (sf_ratio_mass ** 3)
         act_mass_total = 2.0 * len(ACTUATOR_SPAN_FRACTIONS) * act_unit_mass
         act_moment_x = sum(2.0 * act_unit_mass * c_act_in[0] for c_act_in in act_centers_inertial)
@@ -2483,28 +2693,55 @@ if use_geonic_subsystems:
         act_moment_z = 0.0
         act_moment_x_body = 0.0
 
+    if 'apu' in active_subsystems:
+        apu_unit_mass = APU_BASE_MASS_KG * (sf_ratio_mass ** 3)
+        apu_mass_total = 2.0 * apu_unit_mass
+        apu_moment_x = 2.0 * apu_unit_mass * apu_center_inertial[0]
+        apu_moment_z = 2.0 * apu_unit_mass * apu_center_inertial[2]
+        apu_moment_x_body = 2.0 * apu_unit_mass * apu_center_x
+    else:
+        apu_mass_total = 0.0
+        apu_moment_x = 0.0
+        apu_moment_z = 0.0
+        apu_moment_x_body = 0.0
+
     misc_mass_rem = csdl.maximum(
-        misc_mass - nlg_mass_val - mlg_mass_total - act_mass_total,
+        misc_mass - nlg_mass_val - mlg_mass_total - act_mass_total - apu_mass_total,
         csdl.Variable(value=100.0),
         rho=50.0,
     )
-    total_mass = structural_mass + cargo_mass + nlg_mass_val + mlg_mass_total + act_mass_total + misc_mass_rem
+    total_mass = (
+        structural_mass
+        + cargo_mass
+        + nlg_mass_val
+        + mlg_mass_total
+        + act_mass_total
+        + apu_mass_total
+        + misc_mass_rem
+    )
 
     # Dynamic composite aircraft Center of Mass (CG) including pitch-rotated subsystems
+    nlg_inertial_x = nlg_center_inertial[0] if 'nlg' in active_subsystems else 0.0
+    nlg_inertial_z = nlg_center_inertial[2] if 'nlg' in active_subsystems else 0.0
+    mlg_inertial_x = mlg_center_inertial[0] if 'mlg' in active_subsystems else 0.0
+    mlg_inertial_z = mlg_center_inertial[2] if 'mlg' in active_subsystems else 0.0
+
     x_cg = (
         structural_mass * x_struct
         + cargo_mass * x_payload
-        + nlg_mass_val * nlg_center_inertial[0]
-        + mlg_mass_total * mlg_center_inertial[0]
+        + nlg_mass_val * nlg_inertial_x
+        + mlg_mass_total * mlg_inertial_x
         + act_moment_x
+        + apu_moment_x
         + misc_mass_rem * x_misc
     ) / total_mass
     z_cg = (
         structural_mass * z_struct
         + cargo_mass * z_payload
-        + nlg_mass_val * nlg_center_inertial[2]
-        + mlg_mass_total * mlg_center_inertial[2]
+        + nlg_mass_val * nlg_inertial_z
+        + mlg_mass_total * mlg_inertial_z
         + act_moment_z
+        + apu_moment_z
         + misc_mass_rem * z_misc
     ) / total_mass
 
@@ -2521,19 +2758,24 @@ if use_geonic_subsystems:
         x_payload_body = le_mesh_body[0, 0] + payload_cg * (te_mesh_body[0, 0] - le_mesh_body[0, 0])
         x_misc_body = x_payload_body
 
+    nlg_bx = nlg_center_x if 'nlg' in active_subsystems else 0.0
+    mlg_bx = mlg_center_x if 'mlg' in active_subsystems else 0.0
+
     x_cg_body = (
         structural_mass_body * x_struct_body
         + cargo_mass * x_payload_body
-        + nlg_mass_val * nlg_center_x
-        + mlg_mass_total * mlg_center_x
+        + nlg_mass_val * nlg_bx
+        + mlg_mass_total * mlg_bx
         + act_moment_x_body
+        + apu_moment_x_body
         + misc_mass_rem * x_misc_body
     ) / total_mass
-    mlg_tipback_constraint = (x_cg_body + 0.8 * sf_ratio_mass) - mlg_center_x
-    mlg_tipback_constraint.name = 'mlg_tipback_constraint'
-    mlg_tipback_constraint.set_as_constraint(upper=0.0, scaler=1.0 / scale_factor)
-    mlg_tipback_margin = -mlg_tipback_constraint
-    mlg_tipback_margin.name = 'mlg_tipback_margin'
+    if 'mlg' in active_subsystems:
+        mlg_tipback_constraint = (x_cg_body + 0.8 * sf_ratio_mass) - mlg_center_x
+        mlg_tipback_constraint.name = 'mlg_tipback_constraint'
+        mlg_tipback_constraint.set_as_constraint(upper=0.0, scaler=1.0 / scale_factor)
+        mlg_tipback_margin = -mlg_tipback_constraint
+        mlg_tipback_margin.name = 'mlg_tipback_margin'
 else:
     total_mass = structural_mass + cargo_mass + misc_mass
 
@@ -2753,36 +2995,37 @@ if include_neg1g_sizing:
 knots_thick = thickness_space.knots[0]
 thickness_peaks = np.array([(knots_thick[i+1] + knots_thick[i+2]) / 2.0 for i in range(num_thickness_stations)])
 
-# 2. Evaluate two equally spaced points in between each of these peak points
-eval_points_list = []
+# 2. Partition [0, 1] into num_thickness_stations intervals centered around thickness_peaks
+midpoints = 0.5 * (thickness_peaks[:-1] + thickness_peaks[1:])
+bounds = np.concatenate([[0.0], midpoints, [1.0]])
+
+# 3. Dense evaluation grid across the span guaranteeing every beam element center is captured
+# Include all beam element centers (y_norm_elem), thickness peaks, and fine intermediate points
+pts_list = [y_norm_elem.flatten(), thickness_peaks]
 for i in range(num_thickness_stations - 1):
-    eval_points_list.append(thickness_peaks[i])
-    pts = np.linspace(thickness_peaks[i], thickness_peaks[i+1], 4)[1:3]
-    eval_points_list.extend(pts)
-eval_points_list.append(thickness_peaks[-1])
-eval_points_arr = np.array(eval_points_list).reshape((-1, 1))  # shape (3 * num_thickness_stations - 2, 1)
+    pts_list.append(np.linspace(thickness_peaks[i], thickness_peaks[i+1], 11)[1:-1])
+eval_points_arr = np.sort(np.unique(np.concatenate(pts_list))).reshape((-1, 1))
 
-# Evaluate the stress function at all peak and intermediate points
-all_eval_stresses = stress_func.evaluate(eval_points_arr)  # shape (3 * num_thickness_stations - 2,)
+# Evaluate the stress function at all peak, element center, and intermediate points
+all_eval_stresses = stress_func.evaluate(eval_points_arr)
 
-# 3. Aggregate each peak point with its immediate neighboring points (within 1 point on either side)
+# 4. Local aggregation per thickness station:
+# Each station i aggregates all sample points within its interval [bounds[i], bounds[i+1]].
+# Boundary points are included in both adjacent intervals to ensure no gaps between stations.
+# Every beam element center is guaranteed to be captured in at least one station.
 aggregated_stress_list = []
 for i in range(num_thickness_stations):
-    if i == 0:
-        grp = [0, 1]
-    elif i == num_thickness_stations - 1:
-        grp = [3*i - 1, 3*i]
-    else:
-        grp = [3*i - 1, 3*i, 3*i + 1]
+    grp = np.where((eval_points_arr.flatten() >= bounds[i]) & (eval_points_arr.flatten() <= bounds[i+1]))[0]
     sub_stresses = csdl.concatenate([all_eval_stresses[idx] for idx in grp])
     grp_max = csdl.maximum(sub_stresses, axes=(0,), rho=1.0)
     aggregated_stress_list.append(csdl.reshape(grp_max, (1,)))
 
-# dv_stresses has shape (num_thickness_stations,) -> 5 constraints in fast, 8 in full
+# dv_stresses has shape (num_thickness_stations,) -> equal to num_spanwise_dvs
 dv_stresses = csdl.concatenate(aggregated_stress_list)
-# don't enforce stresses at tips since load goes to 0
-# stresses_to_enforce = dv_stresses[:-2] if resolution == 'fast' else dv_stresses[:-3]
-stresses_to_enforce = dv_stresses[:-1] if resolution == 'fast' else dv_stresses[:-1]
+# Enforce all num_thickness_stations constraints matching num_spanwise_dvs
+# (Tip station stress is low and remains naturally inactive; set ENFORCE_TIP_STRESS=0 to exclude tip)
+enforce_tip_stress = os.environ.get('ENFORCE_TIP_STRESS', '1') == '1'
+stresses_to_enforce = dv_stresses if enforce_tip_stress else dv_stresses[:-1]
 
 # Yield stress for Aluminum 6061 is 276 MPa.
 # Safety factor of 1.5 applied to obtain the allowable stress:
@@ -2843,10 +3086,14 @@ max_strip_qc_sweep = csdl.maximum(strip_sweep_qc, axes=(0,), rho=50.0)
 strip_qc_sweep_excess = max_strip_qc_sweep - (60.0 * np.pi / 180.0)
 
 # Backward-compatible aliases for diagnostics and logging:
+# Strip half-chord points and aerodynamic half-chord sweep angle Lambda_c/2:
 mid_chord_drag_pts = 0.5 * (le_strip_center + te_strip_center)
 strip_sweep_halfchord = strip_sweep_qc  # Korn-Lock wave drag now uses quarter-chord sweep
 max_half_chord_sweep = max_strip_qc_sweep
 half_chord_sweep_excess = strip_qc_sweep_excess
+strip_sweep_halfchord = compute_half_chord_sweep(mid_chord_drag_pts)
+max_half_chord_sweep = csdl.maximum(strip_sweep_halfchord, axes=(0,), rho=50.0)
+half_chord_sweep_excess = max_half_chord_sweep - (60.0 * np.pi / 180.0)
 
 # Dynamic spanwise scaling: dy scales with wingspan stretch
 span_scale = wingspan / (10.0 * scale_factor)
@@ -2882,6 +3129,34 @@ for node_idx in range(num_nodes):
         q_node=q_node_val,
         planform_area=planform_area,
     )
+    if wave_drag_model == 'korn_lock':
+        node_wave = evaluate_wave_drag(
+            strip_tc=strip_tc,
+            strip_sweep=strip_sweep_qc,
+            strip_cl=cl_strip_node,
+            strip_area=strip_area,
+            total_strip_area=total_strip_area,
+            mach_node=atm_mach_numbers[node_idx],
+            q_node=q_node_val,
+            planform_area=planform_area,
+        )
+    elif wave_drag_model == 'karman_tsien_rh':
+        node_wave = evaluate_wave_drag_karman_tsien_rh(
+            cp_right=Cp[node_idx, :num_right_panels],
+            panel_area_right=outputs['panel_area'][0, :num_right_panels],
+            strip_sweep_halfchord=strip_sweep_halfchord,
+            strip_area=strip_area,
+            total_strip_area=total_strip_area,
+            mach_node=atm_mach_numbers[node_idx],
+            q_node=q_node_val,
+            planform_area=planform_area,
+            wave_panel_mapping=wave_panel_mapping,
+            M_interp_drag=M_interp_drag,
+            W_strip=W_strip,
+            dy_aero_dyn=dy_aero_dyn,
+            local_chord_drag=local_chord_drag,
+            c_cal=wave_drag_c_cal,
+        )
     wave_drag_results.append(node_wave)
     CD_wave_nodes.append(csdl.reshape(node_wave['CD_wave'], (1,)))
     D_wave_nodes.append(csdl.reshape(node_wave['D_wave'], (1,)))
@@ -3524,26 +3799,41 @@ if use_geonic:
 else:
     additional_outs += [payload_cg]
 if use_geonic_subsystems:
-    additional_outs += [
-        nlg_center_x,
-        mlg_center_x,
-        mlg_center_y,
-        nlg_half_lengths,
-        mlg_half_lengths,
-        nlg_mass_var,
-        mlg_mass_var,
-        nlg_center_body,
-        mlg_center_body,
-        nlg_center_inertial,
-        mlg_center_inertial,
-        nlg_oml_margin,
-        mlg_oml_margin,
-        nlg_ext_margin,
-        mlg_ext_margin,
-        subsystem_overall_margin,
-        mlg_tipback_margin,
-    ]
-    if geonic_subsystem_mode == 'full':
+    if 'nlg' in active_subsystems:
+        additional_outs += [
+            nlg_center_x,
+            nlg_half_lengths,
+            nlg_mass_var,
+            nlg_center_body,
+            nlg_center_inertial,
+            nlg_oml_margin,
+            nlg_ext_margin,
+        ]
+    if 'mlg' in active_subsystems:
+        additional_outs += [
+            mlg_center_x,
+            mlg_center_y,
+            mlg_half_lengths,
+            mlg_mass_var,
+            mlg_center_body,
+            mlg_center_inertial,
+            mlg_oml_margin,
+            mlg_ext_margin,
+            mlg_tipback_margin,
+        ]
+    if 'apu' in active_subsystems:
+        additional_outs += [
+            apu_center_x,
+            apu_center_y,
+            apu_half_lengths,
+            apu_right_center_body,
+            apu_center_inertial,
+            apu_oml_margin,
+            apu_ext_margin,
+        ]
+    if len(all_subsys_margin_inputs) > 0:
+        additional_outs += [subsystem_overall_margin]
+    if 'actuators' in active_subsystems:
         additional_outs += act_centers_body + act_centers_inertial + act_half_lengths_list + act_rotations_list
         if geonic_aggregation_mode != 'volume_only' and len(act_int_raw_list) > 0:
             additional_outs += [actuator_oml_margin]
@@ -3706,7 +3996,10 @@ if run_pre_diagnostics:
 
     dv_mdd_excess_arr = np.asarray(jax_sim[dv_mdd_excess]).flatten()
     global_mdd_excess_val = float(np.asarray(jax_sim[global_mdd_excess]).flatten()[0])
+    d_wave_val_diag = float(np.asarray(jax_sim[D_wave_cruise]).flatten()[0])
+    cd_wave_val_diag = float(np.asarray(jax_sim[CD_wave_cruise]).flatten()[0])
     print(f"\n================ {num_stations} STATION TRANSONIC DRAG DIVERGENCE / BUFFET MARGIN (Cruise M_inf = {cruise_cond['mach']:.3f}) ================")
+    print(f"Wave Drag Model: {wave_drag_model.upper()} | C_cal: {wave_drag_c_cal:.2f} | D_wave: {d_wave_val_diag:.2f} N ({cd_wave_val_diag*1e4:.2f} counts)")
     print(f"{'Station':7s} | {'eta_peak':8s} | {'M_inf - M_dd':14s} | {'M_dd - M_inf Margin':20s} | {'Status':8s}")
     print("-" * 75)
     for j in range(num_stations):
@@ -3790,9 +4083,12 @@ if run_pre_diagnostics:
         print(f"NLG: x={nlg_x_val:.3f}m, dims={2*nlg_hl_val} m, OML_margin={nlg_oml_m:+.4f}m, Ext_margin={nlg_ext_m:+.4f}m")
         print(f"MLG: x={mlg_x_val:.3f}m, y=±{mlg_y_val:.3f}m, dims={2*mlg_hl_val} m, OML_margin={mlg_oml_m:+.4f}m, Ext_margin={mlg_ext_m:+.4f}m")
         print(f"MLG Tip-Back Margin: {tip_m:+.4f}m | Overall Subsystem Margin: {sub_ov_m:+.4f}m ({'FEASIBLE' if sub_ov_m >= 0.0 else 'VIOLATED'})")
-        if geonic_subsystem_mode == 'full' and geonic_aggregation_mode != 'volume_only' and len(act_int_raw_list) > 0:
+        if ('actuators' in active_subsystems or geonic_subsystem_mode == 'full') and geonic_aggregation_mode != 'volume_only' and len(act_int_raw_list) > 0:
             act_m = float(np.asarray(jax_sim[actuator_oml_margin]).flatten()[0])
-            print(f"Actuator OML Margin: {act_m:+.4f}m")
+            print(f"Actuator OML Overall Margin: {act_m:+.4f}m ({'FEASIBLE' if act_m >= 0.0 else 'VIOLATED'})")
+            for s_idx in range(len(ACTUATOR_SPAN_FRACTIONS)):
+                act_dims_s = 2.0 * np.asarray(jax_sim[act_half_lengths_list[s_idx]]).flatten()
+                print(f"  Actuator {s_idx} (eta={ACTUATOR_SPAN_FRACTIONS[s_idx]:.2f}): L={act_dims_s[0]:.2f}m, W={act_dims_s[1]:.2f}m, H={act_dims_s[2]:.3f}m ({act_dims_s[2]*100:.1f}cm)")
         print()
 
     # Viscous Drag & Attachment Diagnostic
@@ -4365,22 +4661,6 @@ if __name__ == '__main__':
             pay_cg_str = f"x_pay={xpay_val:.3f}m [{pay_cg_val*100:.1f}%]"
 
         if use_geonic_subsystems:
-            nlg_cx_v = float(np.asarray(jax_sim[nlg_center_x]).flatten()[0])
-            mlg_cx_v = float(np.asarray(jax_sim[mlg_center_x]).flatten()[0])
-            mlg_cy_v = float(np.asarray(jax_sim[mlg_center_y]).flatten()[0])
-            nlg_hl_v = np.asarray(jax_sim[nlg_half_lengths]).flatten()
-            mlg_hl_v = np.asarray(jax_sim[mlg_half_lengths]).flatten()
-            nlg_in_v = np.asarray(jax_sim[nlg_center_inertial]).flatten()
-            mlg_in_v = np.asarray(jax_sim[mlg_center_inertial]).flatten()
-            sub_m_v = float(np.asarray(jax_sim[subsystem_overall_margin]).flatten()[0])
-            tip_m_v = float(np.asarray(jax_sim[mlg_tipback_margin]).flatten()[0])
-            sub_st = "FEAS" if (sub_m_v >= 0.0 and tip_m_v >= 0.0) else "VIOL"
-            subsys_hud_str = (
-                f"Subsystems ({geonic_subsystem_mode.upper()} | {geonic_aggregation_mode}): "
-                f"nlg_x={nlg_cx_v:.2f}m, mlg=({mlg_cx_v:.2f}, ±{mlg_cy_v:.2f})m | "
-                f"margin={sub_m_v:+.3f}m, tip={tip_m_v:+.2f}m ({sub_st})\n"
-            )
-
             def _add_rotated_box(c_body, hl_vec, c_in, color_str):
                 corners_b = get_box_corners_3d(c_body, hl_vec)
                 corners_r = np.empty_like(corners_b)
@@ -4393,11 +4673,33 @@ if __name__ == '__main__':
                 plotter.add_mesh(poly, color=color_str, opacity=0.45, style='wireframe', line_width=2.0)
                 plotter.add_mesh(poly, color=color_str, opacity=0.18, style='surface')
 
-            _add_rotated_box(np.array([nlg_cx_v, 0.0, 0.0]), nlg_hl_v, nlg_in_v, 'orange')
-            _add_rotated_box(np.array([mlg_cx_v, mlg_cy_v, 0.0]), mlg_hl_v, mlg_in_v, 'limegreen')
-            _add_rotated_box(np.array([mlg_cx_v, -mlg_cy_v, 0.0]), mlg_hl_v, np.array([mlg_in_v[0], -mlg_in_v[1], mlg_in_v[2]]), 'limegreen')
+            subsys_loc_parts = []
+            if 'nlg' in active_subsystems:
+                nlg_cx_v = float(np.asarray(unscaled_values['nlg_center_x']).flatten()[0]) if 'nlg_center_x' in unscaled_values else float(np.asarray(jax_sim[nlg_center_x]).flatten()[0])
+                nlg_hl_v = np.asarray(jax_sim[nlg_half_lengths]).flatten()
+                nlg_in_v = np.asarray(jax_sim[nlg_center_inertial]).flatten()
+                _add_rotated_box(np.array([nlg_cx_v, 0.0, 0.0]), nlg_hl_v, nlg_in_v, 'orange')
+                subsys_loc_parts.append(f"nlg_x={nlg_cx_v:.2f}m")
 
-            if geonic_subsystem_mode == 'full':
+            if 'mlg' in active_subsystems:
+                mlg_cx_v = float(np.asarray(unscaled_values['mlg_center_x']).flatten()[0]) if 'mlg_center_x' in unscaled_values else float(np.asarray(jax_sim[mlg_center_x]).flatten()[0])
+                mlg_cy_v = float(np.asarray(unscaled_values['mlg_center_y']).flatten()[0]) if 'mlg_center_y' in unscaled_values else float(np.asarray(jax_sim[mlg_center_y]).flatten()[0])
+                mlg_hl_v = np.asarray(jax_sim[mlg_half_lengths]).flatten()
+                mlg_in_v = np.asarray(jax_sim[mlg_center_inertial]).flatten()
+                _add_rotated_box(np.array([mlg_cx_v, mlg_cy_v, 0.0]), mlg_hl_v, mlg_in_v, 'limegreen')
+                _add_rotated_box(np.array([mlg_cx_v, -mlg_cy_v, 0.0]), mlg_hl_v, np.array([mlg_in_v[0], -mlg_in_v[1], mlg_in_v[2]]), 'limegreen')
+                subsys_loc_parts.append(f"mlg=({mlg_cx_v:.2f}, ±{mlg_cy_v:.2f})m")
+
+            if 'apu' in active_subsystems:
+                apu_cx_v = float(np.asarray(unscaled_values['apu_center_x']).flatten()[0]) if 'apu_center_x' in unscaled_values else float(np.asarray(jax_sim[apu_center_x]).flatten()[0])
+                apu_cy_v = float(np.asarray(unscaled_values['apu_center_y']).flatten()[0]) if 'apu_center_y' in unscaled_values else float(np.asarray(jax_sim[apu_center_y]).flatten()[0])
+                apu_hl_v = np.asarray(jax_sim[apu_half_lengths]).flatten()
+                apu_in_v = np.asarray(jax_sim[apu_center_inertial]).flatten()
+                _add_rotated_box(np.array([apu_cx_v, apu_cy_v, 0.0]), apu_hl_v, apu_in_v, 'crimson')
+                _add_rotated_box(np.array([apu_cx_v, -apu_cy_v, 0.0]), apu_hl_v, np.array([apu_in_v[0], -apu_in_v[1], apu_in_v[2]]), 'crimson')
+                subsys_loc_parts.append(f"apu=({apu_cx_v:.2f}, ±{apu_cy_v:.2f})m")
+
+            if 'actuators' in active_subsystems:
                 for s_idx in range(len(ACTUATOR_SPAN_FRACTIONS)):
                     c_b_s = np.asarray(jax_sim[act_centers_body[s_idx]]).flatten()
                     c_in_s = np.asarray(jax_sim[act_centers_inertial[s_idx]]).flatten()
@@ -4424,6 +4726,17 @@ if __name__ == '__main__':
                         poly_a = pv.PolyData(corners_r, box_faces)
                         plotter.add_mesh(poly_a, color='gold', opacity=0.55, style='wireframe', line_width=1.5)
                         plotter.add_mesh(poly_a, color='gold', opacity=0.25, style='surface')
+
+            sub_m_v = float(np.asarray(jax_sim[subsystem_overall_margin]).flatten()[0]) if len(all_subsys_margin_inputs) > 0 else 0.0
+            tip_m_v = float(np.asarray(jax_sim[mlg_tipback_margin]).flatten()[0]) if 'mlg' in active_subsystems else 0.0
+            sub_st = "FEAS" if (sub_m_v >= 0.0 and tip_m_v >= 0.0) else "VIOL"
+            hud_loc_str = ", ".join(subsys_loc_parts)
+            tip_str = f", tip={tip_m_v:+.2f}m" if 'mlg' in active_subsystems else ""
+            subsys_hud_str = (
+                f"Subsystems ({geonic_subsystem_mode.upper()} | {geonic_aggregation_mode}): "
+                f"{hud_loc_str} | "
+                f"margin={sub_m_v:+.3f}m{tip_str} ({sub_st})\n"
+            )
         else:
             subsys_hud_str = ""
     
@@ -4555,6 +4868,8 @@ if __name__ == '__main__':
                     mach_cruise=float(cruise_cond['mach']),
                     q_cruise=float(cruise_cond['dynamic_pressure_Pa']),
                     altitude_m=float(cruise_cond['altitude_m']),
+                    wave_drag_model=str(wave_drag_model),
+                    wave_drag_c_cal=float(wave_drag_c_cal),
                     geometry_parameterization_formulation=str(geometry_parameterization_formulation),
                     formulation=str(geometry_parameterization_formulation),
                     resolution=str(resolution),
@@ -4766,6 +5081,8 @@ if __name__ == '__main__':
                     mach_cruise=float(cruise_cond['mach']),
                     q_cruise=float(cruise_cond['dynamic_pressure_Pa']),
                     altitude_m=float(cruise_cond['altitude_m']),
+                    wave_drag_model=str(wave_drag_model),
+                    wave_drag_c_cal=float(wave_drag_c_cal),
                 )
                 print(f"Cached wave drag telemetry saved to: {wave_cache_opt}")
             except Exception as e:
