@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Union, Optional, Sequence, Dict, List, Tuple
+from typing import Union, Optional, Sequence, Dict, List, Tuple, Literal, Any, Callable
 import numpy as np
 import numpy.typing as npt
 import csdl_alpha as csdl
@@ -438,6 +438,81 @@ class PrismaticConnection(Connection):
         )
 
 
+@dataclass
+class ContactPair:
+    """
+    Declares a contact relationship between two components in an Assembly.
+
+    Parameters
+    ----------
+    source : Union[Geometry, FunctionSet, Function, str]
+        The discretized / moving component whose boundary is evaluated.
+    target : Union[Geometry, FunctionSet, Function, str, Any]
+        The obstacle / constraint component providing the signed distance field.
+    interaction : Literal["exterior", "interior"]
+        "exterior": non-penetration / repulsion between disjoint bodies (c_g = -d_s <= 0).
+        "interior": containment / enclosure within target cavity (c_g = +d_s <= 0).
+    method : Literal["variational", "selective_aggregation", "sdfpack"]
+        The mathematical enforcement method to dispatch. Default is "variational".
+    formulation : Literal["basis_weighted_ks", "rectified_galerkin"]
+        Variational local aggregation formulation. Default is "basis_weighted_ks".
+    quadrature_scheme : Literal["gauss_lobatto", "gauss_legendre"]
+        Quadrature scheme for variational integration. Default is "gauss_lobatto".
+    degree_elevation : int
+        Extra quadrature points per element along each axis beyond p + 1. Default is 1.
+    rho_local : float
+        Sharpness factor for local basis aggregation. Default is 50.0.
+    rho_union : float
+        Smooth-minimum sharpness factor across multi-component obstacle sets. Default is 50.0.
+    tolerance : float
+        Upper bound tolerance for rectified Galerkin. Default is 1e-4.
+    min_clearance : float
+        Minimum physical separation distance (only used for non-variational methods). Default is 0.0.
+    target_sdf : Optional[Any]
+        Explicit signed distance evaluator callable or object. If None, inferred from target.
+    name : Optional[str]
+        Descriptive identifier for the contact pair.
+    """
+    source: Union[Geometry, FunctionSet, Function, str]
+    target: Union[Geometry, FunctionSet, Function, str, Any]
+    interaction: Literal["exterior", "interior"] = "exterior"
+    method: Literal["variational", "selective_aggregation", "sdfpack"] = "variational"
+    formulation: Literal["basis_weighted_ks", "rectified_galerkin"] = "basis_weighted_ks"
+    quadrature_scheme: Literal["gauss_lobatto", "gauss_legendre"] = "gauss_lobatto"
+    degree_elevation: int = 1
+    rho_local: float = 50.0
+    rho_union: float = 50.0
+    tolerance: float = 1e-4
+    min_clearance: float = 0.0
+    target_sdf: Optional[Any] = None
+    test_space: Optional[Union[Any, Dict[Any, Any]]] = None
+    test_space_refinement: Optional[Union[int, Tuple[int, ...], Dict[Any, Tuple[int, ...]]]] = None
+    name: Optional[str] = None
+
+    def rebind(self, target_map: Dict[Any, Any]) -> ContactPair:
+        src = self.source
+        new_src = target_map.get(src, src)
+        tgt = self.target
+        new_tgt = target_map.get(tgt, tgt)
+        return ContactPair(
+            source=new_src,
+            target=new_tgt,
+            interaction=self.interaction,
+            method=self.method,
+            formulation=self.formulation,
+            quadrature_scheme=self.quadrature_scheme,
+            degree_elevation=self.degree_elevation,
+            rho_local=self.rho_local,
+            rho_union=self.rho_union,
+            tolerance=self.tolerance,
+            min_clearance=self.min_clearance,
+            target_sdf=self.target_sdf,
+            test_space=self.test_space,
+            test_space_refinement=self.test_space_refinement,
+            name=self.name,
+        )
+
+
 class Assembly(lfs.FunctionNetwork):
     """
     Geometric Assembly representing a graph of components and kinematic connections.
@@ -448,10 +523,12 @@ class Assembly(lfs.FunctionNetwork):
         name: str = "assembly",
         components: Optional[Dict[str, Union[Geometry, FunctionSet, Function]]] = None,
         connections: Optional[Dict[str, Connection]] = None,
+        contact_pairs: Optional[Dict[str, ContactPair]] = None,
     ):
         super().__init__(name=name)
         self.components: Dict[str, Union[Geometry, FunctionSet, Function]] = components if components is not None else {}
         self.connections: Dict[str, Connection] = connections if connections is not None else {}
+        self.contact_pairs: Dict[str, ContactPair] = contact_pairs if contact_pairs is not None else {}
 
     def add_component(
         self,
@@ -519,6 +596,263 @@ class Assembly(lfs.FunctionNetwork):
 
     def get_component(self, name: str) -> Optional[Union[Geometry, FunctionSet, Function]]:
         return self.components.get(name)
+
+    def add_contact_pair(
+        self,
+        source: Union[Geometry, FunctionSet, Function, str, ContactPair],
+        target: Optional[Union[Geometry, FunctionSet, Function, str, Any]] = None,
+        interaction: Literal["exterior", "interior"] = "exterior",
+        method: Literal["variational", "selective_aggregation", "sdfpack"] = "variational",
+        formulation: Literal["basis_weighted_ks", "rectified_galerkin"] = "basis_weighted_ks",
+        quadrature_scheme: Literal["gauss_lobatto", "gauss_legendre"] = "gauss_lobatto",
+        degree_elevation: int = 1,
+        rho_local: float = 50.0,
+        rho_union: float = 50.0,
+        tolerance: float = 1e-4,
+        min_clearance: float = 0.0,
+        target_sdf: Optional[Any] = None,
+        test_space: Optional[Union[Any, Dict[Any, Any]]] = None,
+        test_space_refinement: Optional[Union[int, Tuple[int, ...], Dict[Any, Tuple[int, ...]]]] = None,
+        name: Optional[str] = None,
+    ) -> ContactPair:
+        """
+        Registers a contact pair between two components in the assembly graph.
+
+        Parameters
+        ----------
+        source : Union[Geometry, FunctionSet, Function, str, ContactPair]
+            The moving / discretized component, or an already constructed ContactPair.
+        target : Optional[Union[Geometry, FunctionSet, Function, str, Any]]
+            The obstacle / constraint component providing the signed distance field.
+        interaction : Literal["exterior", "interior"]
+            "exterior" for non-penetration (c_g = -d_s <= 0); "interior" for containment (c_g = +d_s <= 0).
+        method : Literal["variational", "selective_aggregation", "sdfpack"]
+            Enforcement method. Default is "variational".
+        formulation : Literal["basis_weighted_ks", "rectified_galerkin"]
+            Variational local aggregation formulation. Default is "basis_weighted_ks".
+        quadrature_scheme : Literal["gauss_lobatto", "gauss_legendre"]
+            Quadrature scheme. Default is "gauss_lobatto".
+        degree_elevation : int
+            Extra quadrature points per element along each axis beyond p + 1. Default is 1.
+        rho_local : float
+            Kreisselmeier-Steinhauser sharpness parameter. Default is 50.0.
+        rho_union : float
+            Smooth-minimum sharpness across obstacle set. Default is 50.0.
+        tolerance : float
+            Tolerance for rectified Galerkin. Default is 1e-4.
+        min_clearance : float
+            Minimum physical clearance distance (for non-variational methods). Default is 0.0.
+        target_sdf : Optional[Any]
+            Explicit SDF evaluator. If None, inferred from target component.
+        test_space : Optional[Union[Any, Dict[Any, Any]]]
+            Explicit multiplier / test function space for variational projection.
+        test_space_refinement : Optional[Union[int, Tuple[int, ...], Dict[Any, Tuple[int, ...]]]]
+            Automated h-refinement target basis shape (e.g. (4, 4) for a 4x4 basis net per face).
+        name : Optional[str]
+            Identifier name for the contact pair.
+
+        Returns
+        -------
+        ContactPair
+            The registered contact pair.
+        """
+        if isinstance(source, ContactPair):
+            pair = source
+            pname = pair.name if pair.name is not None else f"contact_{len(self.contact_pairs) + 1}"
+            self.contact_pairs[pname] = pair
+            return pair
+
+        if name is None:
+            name = f"contact_{len(self.contact_pairs) + 1}"
+
+        pair = ContactPair(
+            source=source,
+            target=target,
+            interaction=interaction,
+            method=method,
+            formulation=formulation,
+            quadrature_scheme=quadrature_scheme,
+            degree_elevation=degree_elevation,
+            rho_local=rho_local,
+            rho_union=rho_union,
+            tolerance=tolerance,
+            min_clearance=min_clearance,
+            target_sdf=target_sdf,
+            test_space=test_space,
+            test_space_refinement=test_space_refinement,
+            name=name,
+        )
+        self.contact_pairs[name] = pair
+        return pair
+
+    def get_contact_pair(self, name: str) -> Optional[ContactPair]:
+        return self.contact_pairs.get(name)
+
+    def evaluate_contact_constraints(
+        self,
+        method_override: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Evaluates all registered contact pairs in the assembly, registering
+        non-penetration / containment constraints in CSDL.
+
+        Parameters
+        ----------
+        method_override : Optional[str]
+            Optional override for the enforcement method ('variational', 'selective_aggregation', 'sdfpack').
+            If None, uses the method specified on each ContactPair.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Dictionary mapping contact pair names to their evaluated constraint residuals.
+        """
+        results = {}
+        for pair_name, pair in self.contact_pairs.items():
+            active_method = method_override if method_override is not None else pair.method
+
+            # Resolve source component
+            if isinstance(pair.source, str):
+                if pair.source not in self.components:
+                    raise KeyError(f"ContactPair source '{pair.source}' not found in assembly components.")
+                src = self.components[pair.source]
+            else:
+                src = pair.source
+
+            # Resolve target component
+            if isinstance(pair.target, str):
+                tgt = self.components.get(pair.target, pair.target)
+            else:
+                tgt = pair.target
+
+            # Resolve target SDF evaluator
+            if pair.target_sdf is not None:
+                sdf_evaluator = pair.target_sdf
+            elif hasattr(tgt, "compute_signed_distance"):
+                sdf_evaluator = tgt.compute_signed_distance
+            elif hasattr(tgt, "signed_distance_function"):
+                sdf_evaluator = tgt.signed_distance_function
+            elif hasattr(tgt, "sdf"):
+                sdf_evaluator = tgt.sdf
+            elif callable(tgt):
+                sdf_evaluator = tgt
+            elif hasattr(tgt, "functions"):
+                from lsdo_geo.core.geometry.signed_distance import FunctionSetSignedDistanceOperation
+                sdf_evaluator = FunctionSetSignedDistanceOperation(function_set=tgt).compute_signed_distance
+            else:
+                raise ValueError(
+                    f"Could not determine signed distance evaluator for target '{pair.target}'. "
+                    "Please provide `target_sdf` on the ContactPair or ensure target provides compute_signed_distance()."
+                )
+
+            def _eval_sdf(query_pts):
+                if hasattr(sdf_evaluator, "compute_signed_distance"):
+                    return sdf_evaluator.compute_signed_distance(query_pts)
+                elif hasattr(sdf_evaluator, "evaluate"):
+                    return sdf_evaluator.evaluate(query_pts)
+                else:
+                    return sdf_evaluator(query_pts)
+
+            # Resolve boundary patches from source
+            if hasattr(src, "functions") and len(src.functions) > 0:
+                patches = src.functions
+            elif hasattr(src, "space"):
+                patches = {0: src}
+            else:
+                raise ValueError(f"Source component '{src}' has neither functions nor space.")
+
+            if active_method == "variational":
+                pair_residuals = {}
+                for p_idx, fn in patches.items():
+                    patch_space = fn.space if hasattr(fn, "space") else fn
+
+                    # Determine test space: explicit, h-refined, or native patch space
+                    if getattr(pair, "test_space", None) is not None:
+                        t_space = pair.test_space
+                        test_space = t_space.get(p_idx, patch_space) if isinstance(t_space, dict) else t_space
+                    elif getattr(pair, "test_space_refinement", None) is not None:
+                        ref = pair.test_space_refinement
+                        if isinstance(ref, dict):
+                            ref = ref.get(p_idx, ref)
+                        if isinstance(ref, int):
+                            ref_shape = (ref,) * patch_space.num_parametric_dimensions
+                        else:
+                            ref_shape = tuple(ref)
+                        if hasattr(patch_space, "refine"):
+                            test_space = patch_space.refine(coefficients_shape=ref_shape)
+                        else:
+                            test_space = lfs.BSplineSpace(
+                                num_parametric_dimensions=patch_space.num_parametric_dimensions,
+                                degree=getattr(patch_space, "degree", (1, 1)),
+                                coefficients_shape=ref_shape,
+                            )
+                    else:
+                        test_space = patch_space
+
+                    # Automatically adapt quadrature resolution to target if target has spline space
+                    effective_degree_elevation = pair.degree_elevation
+                    tgt_space = getattr(tgt, "space", None)
+                    if tgt_space is None and hasattr(tgt, "functions") and len(tgt.functions) > 0:
+                        first_fn = next(iter(tgt.functions.values()))
+                        tgt_space = getattr(first_fn, "space", None)
+
+                    if tgt_space is not None and hasattr(tgt_space, "degree"):
+                        tgt_deg = tgt_space.degree
+                        tgt_p = max(tgt_deg) if isinstance(tgt_deg, (list, tuple)) else tgt_deg
+                        src_deg = getattr(test_space, "degree", 1)
+                        src_p = max(src_deg) if isinstance(src_deg, (list, tuple)) else src_deg
+                        effective_degree_elevation = max(pair.degree_elevation, int(tgt_p - src_p + 1))
+
+                    cond = lfs.VariationalInequalityCondition(
+                        space=test_space,
+                        method=pair.formulation,
+                        rho=pair.rho_local,
+                        tolerance=pair.tolerance,
+                        discretization_scheme=pair.quadrature_scheme,
+                        degree_elevation=effective_degree_elevation,
+                        name=f"{pair_name}_patch_{p_idx}",
+                    )
+
+                    # 1. Evaluate physical coordinates on patch at quadrature nodes
+                    P_q = fn.evaluate(cond.nodes)
+
+                    # 2. Evaluate target SDF at physical coordinates
+                    d_s = _eval_sdf(P_q)
+
+                    # 3. Form continuous constraint: c_g <= 0
+                    if pair.interaction == "interior":
+                        c_g = d_s
+                    else:
+                        c_g = -d_s
+
+                    # 4. Project onto test basis space
+                    R_patch = cond.evaluate_projection(c_g)
+
+                    # 5. Register in CSDL
+                    upper_bound = 0.0 if pair.formulation == "basis_weighted_ks" else pair.tolerance
+                    R_patch.set_as_constraint(upper=upper_bound, scaler=1.0)
+                    pair_residuals[f"patch_{p_idx}"] = R_patch
+
+                results[pair_name] = pair_residuals
+
+            elif active_method in ("selective_aggregation", "sdfpack"):
+                try:
+                    import contact_constraints as cc
+                    results[pair_name] = cc.enforce_assembly_contact(
+                        assembly=self,
+                        pair=pair,
+                        src=src,
+                        tgt=tgt,
+                        method=active_method,
+                    )
+                except Exception as e:
+                    raise NotImplementedError(
+                        f"Method '{active_method}' requires contact_constraints integration: {e}"
+                    )
+            else:
+                raise ValueError(f"Unknown contact method '{active_method}'")
+
+        return results
 
     def rebind(
         self,
@@ -588,6 +922,10 @@ class Assembly(lfs.FunctionNetwork):
                 new_patches.append((new_target, patch_id))
             new_groupings[gname] = new_patches
         new_assembly.component_groupings = new_groupings
+
+        # 5. Rebind contact pairs
+        for cp_name, cp in self.contact_pairs.items():
+            new_assembly.add_contact_pair(cp.rebind(target_map))
 
         return new_assembly
 

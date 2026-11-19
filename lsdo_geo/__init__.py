@@ -16,6 +16,7 @@ from .core.geometry.assembly import (
     PinConnection,
     PrismaticConnection,
     Assembly,
+    ContactPair,
 )
 from .core.geometry.geometry_functions import (
     import_geometry,
