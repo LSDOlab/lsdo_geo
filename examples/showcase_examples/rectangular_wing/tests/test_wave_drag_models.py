@@ -44,14 +44,17 @@ def test_build_panel_strip_wave_mapping():
     M_drag_to_aero = mapping['M_drag_to_aero']
     M_drag_to_panel = mapping['M_drag_to_panel']
     strip_panel_slices = mapping['strip_panel_slices']
+    M_smooth_drag = mapping['M_smooth_drag']
 
     assert M_drag_to_aero.shape == (num_aero, num_drag)
     assert M_drag_to_panel.shape == (num_panels, num_drag)
+    assert M_smooth_drag.shape == (num_drag, num_aero)
     assert len(strip_panel_slices) == num_aero
 
     # Partition of unity: each row should sum to 1.0
     np.testing.assert_allclose(np.sum(M_drag_to_aero, axis=1), 1.0, atol=1e-12)
     np.testing.assert_allclose(np.sum(M_drag_to_panel, axis=1), 1.0, atol=1e-12)
+    np.testing.assert_allclose(np.sum(M_smooth_drag, axis=1), 1.0, atol=1e-12)
 
     # Check slice indices
     for s, (start, end) in enumerate(strip_panel_slices):

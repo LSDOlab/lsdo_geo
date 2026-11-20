@@ -289,6 +289,7 @@ def build_panel_strip_wave_mapping(
     M_interp_drag: np.ndarray,
     y_strip_centers: np.ndarray,
     y_drag_centers: np.ndarray,
+    b_tip: float = None,
 ) -> dict:
     """Build static interpolation and panel-slicing mappings for Karman-Tsien RH wave drag.
 
@@ -302,6 +303,8 @@ def build_panel_strip_wave_mapping(
         Spanwise coordinates of aero strip centers (shape: (num_aero_strips,)).
     y_drag_centers : np.ndarray
         Spanwise coordinates of drag strip centers (shape: (num_drag_strips,)).
+    b_tip : float, optional
+        Tip spanwise coordinate for B-spline parameterization normalization (default: max(y_drag_centers)).
 
     Returns
     -------
@@ -310,6 +313,7 @@ def build_panel_strip_wave_mapping(
         - 'M_drag_to_aero': shape (num_aero_strips, num_drag_strips)
         - 'M_drag_to_panel': shape (num_right_panels, num_drag_strips)
         - 'strip_panel_slices': list of (start, end) index tuples per aero strip
+        - 'M_smooth_drag': shape (num_drag_strips, num_aero_strips) cubic B-spline mapping matrix
     """
     num_aero = len(y_strip_centers)
     num_drag = len(y_drag_centers)
@@ -343,10 +347,46 @@ def build_panel_strip_wave_mapping(
         else:
             strip_panel_slices.append((0, 0))
 
+    # Construct smooth cubic B-spline mapping matrix with root symmetry S'(0) = 0
+    # matching the standard discretization used across the codebase (e.g. f_stall, cl_ss)
+    if num_aero >= 4:
+        try:
+            import lsdo_function_spaces as lfs
+            b_tip_val = float(np.max(y_drag_centers)) if b_tip is None else float(b_tip)
+            tau_aero = np.clip(y_strip_centers / b_tip_val, 0.0, 1.0)
+            tau_drag = np.clip(y_drag_centers / b_tip_val, 0.0, 1.0)
+
+            tau_colloc = np.concatenate([[0.0], tau_aero])
+            int_knots = [np.mean(tau_colloc[j:j+3]) for j in range(1, num_aero - 2)]
+            knots = np.concatenate([[0.0, 0.0, 0.0, 0.0], int_knots, [1.0, 1.0, 1.0, 1.0]])
+
+            space = lfs.BSplineSpace(
+                num_parametric_dimensions=1,
+                degree=3,
+                coefficients_shape=(num_aero + 1,),
+                knots=(knots,),
+            )
+
+            B_aero = space.compute_basis_matrix(tau_aero.reshape((-1, 1))).toarray()
+            d_root = np.zeros((1, num_aero + 1))
+            d_root[0, 0] = -1.0
+            d_root[0, 1] = 1.0
+
+            M_sys = np.vstack([B_aero, d_root])
+            M_inv = np.linalg.inv(M_sys)
+
+            B_drag = space.compute_basis_matrix(tau_drag.reshape((-1, 1))).toarray()
+            M_smooth_drag = B_drag @ M_inv[:, :-1]
+        except Exception:
+            M_smooth_drag = M_interp_drag
+    else:
+        M_smooth_drag = M_interp_drag
+
     return {
         'M_drag_to_aero': M_drag_to_aero,
         'M_drag_to_panel': M_drag_to_panel,
         'strip_panel_slices': strip_panel_slices,
+        'M_smooth_drag': M_smooth_drag,
     }
 
 
@@ -366,6 +406,7 @@ def evaluate_wave_drag_karman_tsien_rh(
     dy_aero_dyn: csdl.Variable,
     local_chord_drag: csdl.Variable,
     c_cal: float = 1.0,
+    k_shock: float = 24.0,
     beta_s: float = 20.0,
     m_n_buffet_limit: float = 1.30,
     rho_strip_max: float = 20.0,
@@ -454,23 +495,28 @@ def evaluate_wave_drag_karman_tsien_rh(
     # 6. Normal Mach number squared
     M_n_sq = M_loc_sq * (cos_sw ** 2)
 
-    # 7. Differentiable supersonic excess with smooth physical weak-shock saturation
-    delta_s_raw = (1.0 / beta_s) * csdl.softplus(beta_s * (M_n_sq - 1.0))
-    delta_s = delta_s_max * csdl.tanh(delta_s_raw / delta_s_max)
+    # 7. Differentiable supersonic excess (no tanh saturation to ensure non-vanishing sensitivity)
+    delta_s = (1.0 / beta_s) * csdl.softplus(beta_s * (M_n_sq - 1.0))
 
-    # 8. Weak-shock Rankine-Hugoniot entropy integrand per panel
-    rh_coeff = 2.0 * gamma / (3.0 * ((gamma + 1.0) ** 2))  # ~0.162037
-    dcd_w = c_cal * rh_coeff * (delta_s ** 3) * cos_sw
+    # 8. Weak-shock Rankine-Hugoniot entropy integrand per panel with thermodynamic scaling
+    # Oswatitsch's theorem integrates entropy generation flux across the vertical shock wave:
+    # D_wave = \iint p_inf * (Delta_s / R) * cos(Lambda) dA_shock
+    # Dividing by q_inf * S_ref introduces the exact thermodynamic ratio p_inf / q_inf = 2 / (gamma * M_inf^2).
+    # The transonic shock similitude parameter k_shock relates 3D shock height to surface footprint.
+    p_inf_over_q_inf = 2.0 / (gamma * (mach_node**2 + 1e-12))
+    rh_entropy_factor = 2.0 * gamma / (3.0 * ((gamma + 1.0) ** 2))  # ~0.162037
+    dcd_w = c_cal * p_inf_over_q_inf * k_shock * rh_entropy_factor * (delta_s ** 3) * cos_sw
     panel_dw_area = dcd_w * panel_area_right  # [m^2] wave drag area per panel
 
     # 9. Global full-wing wave drag (factor of 2 for symmetry)
     CD_wave = 2.0 * csdl.sum(panel_dw_area) / planform_area
     D_wave = q_node * planform_area * CD_wave
 
-    # 10. Strip-wise sectional wave drag breakdown on 100 drag strips
+    # 10. Strip-wise sectional wave drag breakdown on 100 drag strips via smooth cubic B-spline mapping
+    M_smooth = wave_panel_mapping.get('M_smooth_drag', M_interp_drag)
     aero_strip_dw_area = csdl.matvec(csdl.Variable(value=W_strip), panel_dw_area)  # shape: (num_aero_strips,)
     dw_area_prime_aero = (2.0 * aero_strip_dw_area) / dy_aero_dyn                # [m^2 / m = m]
-    dw_area_prime_drag = csdl.matvec(csdl.Variable(value=M_interp_drag), dw_area_prime_aero)
+    dw_area_prime_drag = csdl.matvec(csdl.Variable(value=M_smooth), dw_area_prime_aero)
     cd_wave_strip = dw_area_prime_drag / (local_chord_drag + 1e-12)              # shape: (num_drag_strips,)
 
     # 11. Per-strip peak normal Mach number aggregation via contiguous panel slices
@@ -487,7 +533,7 @@ def evaluate_wave_drag_karman_tsien_rh(
     aero_M_n_sq_max = csdl.concatenate(m_sq_list)  # shape: (num_aero_strips,)
     aero_M_n_sq_safe = csdl.softplus(rho_strip_max * aero_M_n_sq_max) / rho_strip_max + 1e-12
     aero_M_n_max = csdl.sqrt(aero_M_n_sq_safe)
-    strip_M_n_max = csdl.matvec(csdl.Variable(value=M_interp_drag), aero_M_n_max)  # shape: (num_drag_strips,)
+    strip_M_n_max = csdl.matvec(csdl.Variable(value=M_smooth), aero_M_n_max)  # shape: (num_drag_strips,)
 
     # 12. Buffet & critical Mach diagnostics (matching Korn-Lock conventions)
     m_dd = mach_node + (m_n_buffet_limit - strip_M_n_max)

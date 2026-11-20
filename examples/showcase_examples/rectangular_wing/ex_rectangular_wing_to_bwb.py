@@ -249,7 +249,7 @@ wake_load_penalty_threshold: float = float(os.environ.get('WAKE_LOAD_PENALTY_THR
 #   'korn_lock'        -> Empirical Korn-Lock strip theory using quarter-chord sweep (legacy default)
 #   'karman_tsien_rh'  -> Karman-Tsien compressibility correction + surface-integrated Rankine-Hugoniot weak shock entropy wave drag
 WaveDragModelType = Literal['korn_lock', 'karman_tsien_rh']
-wave_drag_model: WaveDragModelType = 'korn_lock'  # default preserves exact legacy behavior
+wave_drag_model: WaveDragModelType = 'karman_tsien_rh'
 wave_drag_model = os.environ.get('WAVE_DRAG_MODEL', wave_drag_model).strip().lower()
 if wave_drag_model not in ('korn_lock', 'karman_tsien_rh'):
     raise ValueError(f"Unknown wave_drag_model '{wave_drag_model}'. Must be 'korn_lock' or 'karman_tsien_rh'.")
@@ -541,17 +541,21 @@ else:
 chord_le_projections = []
 chord_te_projections = []
 quarter_chord_projections = []
+half_chord_projections = []
 for y_val in chord_station_y:
     chord_le_projections.append(geometry.project(np.array([0.0, y_val, 0.0])))
     chord_te_projections.append(geometry.project(np.array([1.0 * scale_factor, y_val, 0.0])))
     quarter_chord_projections.append(geometry.project(np.array([0.25 * scale_factor, y_val, 0.0])))
+    half_chord_projections.append(geometry.project(np.array([0.50 * scale_factor, y_val, 0.0])))
 
-# High-resolution quarter-chord sweep evaluation projections to strictly enforce sweep >= 0 across span
+# High-resolution half-chord sweep evaluation projections to strictly enforce sweep >= 0 across span
 num_sweep_eval_stations = 25
 sweep_eval_y = np.linspace(0.0, 5.0 * scale_factor, num_sweep_eval_stations)
 quarter_chord_sweep_projections = []
+half_chord_sweep_projections = []
 for y_val in sweep_eval_y:
     quarter_chord_sweep_projections.append(geometry.project(np.array([0.25 * scale_factor, y_val, 0.0])))
+    half_chord_sweep_projections.append(geometry.project(np.array([0.50 * scale_factor, y_val, 0.0])))
 
 # Project max thickness measurement points at x=0.3 for the 8 stations
 upper_thickness_projections = []
@@ -896,6 +900,7 @@ wave_panel_mapping = build_panel_strip_wave_mapping(
     M_interp_drag=M_interp_drag,
     y_strip_centers=y_strip_centers,
     y_drag_centers=y_drag_centers_init,
+    b_tip=b_tip_ref,
 )
 
 # Compute B-spline spaces and matrices for drag strip lift coefficient fitting
@@ -1686,21 +1691,28 @@ if geometry_parameterization_formulation == 'implicit':
         )
 
     # 4. Enforce sectional sweep angles via Galerkin weak form (n - 1 equations)
-    # Strictly define quarter-chord points along the 25% chord line (0.75 * LE + 0.25 * TE)
+    # Strictly define half-chord points along the 50% chord line (0.50 * LE + 0.50 * TE)
     chord_le_pts = [geometry.evaluate(chord_le_projections[i]) for i in range(num_chord_stations)]
     chord_te_pts = [geometry.evaluate(chord_te_projections[i]) for i in range(num_chord_stations)]
+    hc_pts = [0.50 * chord_le_pts[i] + 0.50 * chord_te_pts[i] for i in range(num_chord_stations)]
     qc_pts = [0.75 * chord_le_pts[i] + 0.25 * chord_te_pts[i] for i in range(num_chord_stations)]
-    dx_list = []
-    dy_list = []
+    dx_hc_list = []
+    dy_hc_list = []
+    dx_qc_list = []
+    dy_qc_list = []
     for i in range(num_chord_stations - 1):
-        dx_list.append(csdl.reshape(qc_pts[i + 1][0] - qc_pts[i][0], (1,)))
-        dy_list.append(csdl.reshape(qc_pts[i + 1][1] - qc_pts[i][1], (1,)))
-    dx_qc_vec = csdl.concatenate(dx_list)
-    dy_qc_vec = csdl.concatenate(dy_list)
+        dx_hc_list.append(csdl.reshape(hc_pts[i + 1][0] - hc_pts[i][0], (1,)))
+        dy_hc_list.append(csdl.reshape(hc_pts[i + 1][1] - hc_pts[i][1], (1,)))
+        dx_qc_list.append(csdl.reshape(qc_pts[i + 1][0] - qc_pts[i][0], (1,)))
+        dy_qc_list.append(csdl.reshape(qc_pts[i + 1][1] - qc_pts[i][1], (1,)))
+    dx_hc_vec = csdl.concatenate(dx_hc_list)
+    dy_hc_vec = csdl.concatenate(dy_hc_list)
+    dx_qc_vec = csdl.concatenate(dx_qc_list)
+    dy_qc_vec = csdl.concatenate(dy_qc_list)
 
     y_scale = 5.0 * scale_factor
     res_sweep = bspline_reg.compute_sweep_residual(
-        dx_qc_vec, dy_qc_vec, sweep_angle_control_points, y_scale=y_scale
+        dx_sweep=dx_hc_vec, dy_sweep=dy_hc_vec, sweep_angle_control_points=sweep_angle_control_points, y_scale=y_scale
     )
     # for i in range(num_chord_stations - 1):
     #     geometric_variables.add_variable(res_sweep[i], 0.0, penalty_value=None)
@@ -1712,15 +1724,29 @@ if geometry_parameterization_formulation == 'implicit':
     implicit_diagnostics = bspline_reg.compute_diagnostics(
         local_chords=local_chords_vec,
         local_thicknesses=local_thicknesses_vec,
-        dx_qc=dx_qc_vec,
-        dy_qc=dy_qc_vec,
+        dx_sweep=dx_hc_vec,
+        dy_sweep=dy_hc_vec,
         taper_control_points=taper_control_points,
         tc_target_control_points=tc_target_control_points,
         sweep_angle_control_points=sweep_angle_control_points,
     )
 
-# Right-half sectional quarter-chord sweep between successive evaluated quarter-chord stations:
-# Lambda_qc[i] = atan2(x_qc[i+1]-x_qc[i], y_qc[i+1]-y_qc[i])
+# Right-half sectional half-chord sweep between successive evaluated half-chord stations:
+# Lambda_hc[i] = atan2(x_hc[i+1]-x_hc[i], y_hc[i+1]-y_hc[i])
+hc_pts_right = [geometry.evaluate(half_chord_projections[i]) for i in range(num_chord_stations)]
+hc_pts_sweep = [geometry.evaluate(half_chord_sweep_projections[i]) for i in range(num_sweep_eval_stations)]
+lambda_hc_list = []
+for i in range(num_sweep_eval_stations - 1):
+    dx_hc = hc_pts_sweep[i + 1][0] - hc_pts_sweep[i][0]
+    dy_hc = hc_pts_sweep[i + 1][1] - hc_pts_sweep[i][1]
+    sw_hc = csdl.arctan2(dx_hc, dy_hc)
+    lambda_hc_list.append(csdl.reshape(sw_hc, (1,)))
+
+lambda_hc_vec = csdl.concatenate(lambda_hc_list)  # shape (num_sweep_eval_stations - 1,)
+max_half_chord_sweep_eval = csdl.maximum(lambda_hc_vec, axes=(0,), rho=50.0)
+half_chord_sweep_margin_eval = (60.0 * np.pi / 180.0) - max_half_chord_sweep_eval
+
+# Also evaluate quarter-chord sweep between successive stations for reference/diagnostics:
 qc_pts_right = [geometry.evaluate(quarter_chord_projections[i]) for i in range(num_chord_stations)]
 qc_pts_sweep = [geometry.evaluate(quarter_chord_sweep_projections[i]) for i in range(num_sweep_eval_stations)]
 lambda_qc_list = []
@@ -3121,7 +3147,7 @@ for node_idx in range(num_nodes):
     
     node_wave = evaluate_wave_drag(
         strip_tc=strip_tc,
-        strip_sweep=strip_sweep_qc,
+        strip_sweep=strip_sweep_halfchord,
         strip_cl=cl_strip_node,
         strip_area=strip_area,
         total_strip_area=total_strip_area,
@@ -3132,7 +3158,7 @@ for node_idx in range(num_nodes):
     if wave_drag_model == 'korn_lock':
         node_wave = evaluate_wave_drag(
             strip_tc=strip_tc,
-            strip_sweep=strip_sweep_qc,
+            strip_sweep=strip_sweep_halfchord,
             strip_cl=cl_strip_node,
             strip_area=strip_area,
             total_strip_area=total_strip_area,
@@ -3715,10 +3741,10 @@ if geometry_parameterization_formulation == 'explicit':
             tc_ratio = local_thicknesses[i] / local_chords[i]
             tc_ratio.set_as_constraint(lower=0.06, upper=0.35, scaler=10.0)
 
-    # Enforce evaluated Lambda_qc in [0, 60 deg] at every adjacent evaluation section:
+    # Enforce evaluated Lambda_hc in [0, 60 deg] at every adjacent evaluation section:
     sweep_max_rad = 60.0 * np.pi / 180.0
     for i in range(num_sweep_eval_stations - 1):
-        lambda_qc_vec[i].set_as_constraint(lower=0.0, upper=sweep_max_rad, scaler=1.0 / sweep_max_rad)
+        lambda_hc_vec[i].set_as_constraint(lower=0.0, upper=sweep_max_rad, scaler=1.0 / sweep_max_rad)
 else:
     # For AR and Area formulation, ParameterizationSolver explicitly enforces
     # taper ratios, planform area, and aspect ratio, and sweep is bounded by sweep_angle_dvs.
@@ -3745,7 +3771,8 @@ additional_outs = [
     atm_altitudes, atm_densities, atm_sound_speeds, atm_mach_numbers,
     atm_temperatures, atm_pressures, atm_viscosities, atm_dynamic_pressures,
     atm_speeds, atm_reynolds_per_unit_chord,
-    # Quarter-chord and half-chord sweep outputs:
+    # Half-chord and quarter-chord sweep outputs:
+    lambda_hc_vec, max_half_chord_sweep_eval, half_chord_sweep_margin_eval,
     lambda_qc_vec, max_quarter_chord_sweep, quarter_chord_sweep_margin,
     strip_sweep_halfchord, max_half_chord_sweep, half_chord_sweep_excess,
     # Wave-drag outputs:
@@ -4756,11 +4783,12 @@ if __name__ == '__main__':
             wake_hud_str = ""
 
         # Add iteration counter label using unscaled physical values
+        wave_model_hud_name = "KT-RH" if wave_drag_model == 'karman_tsien_rh' else "KORN-LOCKE"
         plotter.add_text(
             f"Iteration {iteration}/{num_iterations - 1}\n"
-            f"Formulation: {geometry_parameterization_formulation} | Res: {resolution} | Obj: {induced_drag_objective}\n"
+            f"Formulation: {geometry_parameterization_formulation} | Res: {resolution} | Wave Drag: {wave_model_hud_name}\n"
             f"CD_tot={cd_active_val*1e4:.1f} cts (CDi={(cdi_fourier_val if induced_drag_objective=='fourier' else cd_trefftz_val)*1e4:.1f}, CDprof={cd_profile_val*1e4:.1f}, CDwave={cd_wave_val*1e4:.1f})\n"
-            f"D_tot={d_total_val:.1f} N | Λ_qc_max={max_qc_sw_deg:.1f}° | Λ_0.5_max={max_hc_sw_deg:.1f}° | min(Mdd-M)={min_mdd_margin:+.4f}\n"
+            f"D_tot={d_total_val:.1f} N | Λ_0.5_max={max_hc_sw_deg:.1f}° | Λ_qc_max={max_qc_sw_deg:.1f}° | min(Mdd-M)={min_mdd_margin:+.4f}\n"
             f"{viscous_hud_str}"
             f"{wake_hud_str}"
             f"{geonic_hud_str}"
@@ -4815,7 +4843,9 @@ if __name__ == '__main__':
                 d_profile_val_opt = float(np.asarray(jax_sim[D_profile]).flatten()[0])
                 d_total_val_opt = float(np.asarray(jax_sim[D_total]).flatten()[0])
                 strip_tc_opt = np.asarray(jax_sim[strip_tc]).flatten()
-                strip_sweep_opt = np.asarray(jax_sim[strip_sweep_halfchord]).flatten()
+                strip_sweep_qc_opt = np.asarray(jax_sim[strip_sweep_qc]).flatten()
+                strip_sweep_hc_opt = np.asarray(jax_sim[strip_sweep_halfchord]).flatten()
+                strip_sweep_opt = strip_sweep_hc_opt
                 y_strip_pts_opt = np.asarray(jax_sim[y_strip_pts]).flatten()
                 strip_wave_cd_opt = np.asarray(jax_sim[strip_wave_cd_cruise]).flatten()
                 strip_M_crit_opt = np.asarray(jax_sim[strip_M_crit_cruise]).flatten()
@@ -4845,8 +4875,8 @@ if __name__ == '__main__':
                     d_profile_val=d_profile_val_opt,
                     d_total_val=d_total_val_opt,
                     strip_tc=strip_tc_opt,
-                    strip_sweep_qc=strip_sweep_opt,
-                    strip_sweep_halfchord=strip_sweep_opt,
+                    strip_sweep_qc=strip_sweep_qc_opt,
+                    strip_sweep_halfchord=strip_sweep_hc_opt,
                     y_strip_pts=y_strip_pts_opt,
                     strip_wave_cd=strip_wave_cd_opt,
                     strip_M_crit=strip_M_crit_opt,
@@ -5067,9 +5097,9 @@ if __name__ == '__main__':
                     strip_M_dd=strip_M_dd_opt,
                     strip_delta_M=strip_delta_M_opt,
                     strip_tc=strip_tc_opt,
-                    strip_sweep=strip_sweep_opt,
-                    strip_sweep_qc=strip_sweep_opt,
-                    strip_sweep_halfchord=strip_sweep_opt,
+                    strip_sweep=strip_sweep_hc_opt,
+                    strip_sweep_qc=strip_sweep_qc_opt,
+                    strip_sweep_halfchord=strip_sweep_hc_opt,
                     strip_cl=cl_local_elem_opt,
                     local_chord_drag=local_chord_drag_opt,
                     dy_strip=dy_strip_opt,
@@ -5200,6 +5230,8 @@ if __name__ == '__main__':
         img = mpimg.imread(wing_img_path)
         ax_img.imshow(img)
     ax_img.axis('off')
+    wave_model_title = "Karman-Tsien + RH" if wave_drag_model == 'karman_tsien_rh' else "Korn-Locke"
+    ax_img.set_title(f"Optimized Wing Geometry\n[Wave Drag: {wave_model_title}]", fontsize=11, fontweight='bold')
     
     # Right panels: Optimization history plots
     subplot_bg = '#eaeaf2'
@@ -5262,7 +5294,7 @@ if __name__ == '__main__':
         for spine in ax_geo.spines.values():
             spine.set_visible(False)
     
-    fig.suptitle("Optimal wing geometry vs theory", y=0.03, fontsize=15, fontweight='bold')
+    fig.suptitle(f"Optimal wing geometry vs theory [Wave Drag: {wave_model_title}]", y=0.03, fontsize=15, fontweight='bold')
     
     summary_fig_path = os.path.join(latest_folder, 'optimization_summary.png')
     plt.savefig(summary_fig_path, bbox_inches='tight', dpi=200)

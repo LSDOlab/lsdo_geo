@@ -295,23 +295,33 @@ class BsplineTargetRegularization:
 
     def compute_sweep_residual(
         self,
-        dx_qc: csdl.Variable,
-        dy_qc: csdl.Variable,
-        sweep_angle_control_points: csdl.Variable,
-        y_scale: float,
+        dx_sweep: csdl.Variable = None,
+        dy_sweep: csdl.Variable = None,
+        sweep_angle_control_points: csdl.Variable = None,
+        y_scale: float = 1.0,
+        dx_qc: csdl.Variable = None,
+        dy_qc: csdl.Variable = None,
     ) -> csdl.Variable:
         """
-        Compute normalized quarter-chord sweep weak residual vector of shape (n - 1,):
-            R_sweep = (dx_qc - dy_qc * (B_bar_sweep @ tan(sweep_angle_control_points))) / y_scale
+        Compute normalized sweep weak residual vector of shape (n - 1,):
+            R_sweep = (dx_sweep - dy_sweep * (B_bar_sweep @ tan(sweep_angle_control_points))) / y_scale
         where B_bar_sweep is the segment-averaged symmetric sweep B-spline matrix.
+        Supports half-chord sweep (default) or legacy quarter-chord sweep via dx_qc/dy_qc.
         """
-        dx_qc = _to_vec(dx_qc)
-        dy_qc = _to_vec(dy_qc)
+        if dx_sweep is None and dx_qc is not None:
+            dx_sweep = dx_qc
+        if dy_sweep is None and dy_qc is not None:
+            dy_sweep = dy_qc
+        if dx_sweep is None or dy_sweep is None:
+            raise ValueError("Must provide dx_sweep and dy_sweep (or dx_qc and dy_qc).")
+
+        dx_sweep = _to_vec(dx_sweep)
+        dy_sweep = _to_vec(dy_sweep)
         sweep_angle_control_points = _to_vec(sweep_angle_control_points)
         tan_sweep = csdl.tan(sweep_angle_control_points)
         tan_sweep_avg = csdl.matvec(self.B_bar_sweep, tan_sweep)
-        target_dx = dy_qc * tan_sweep_avg
-        res_sweep = (dx_qc - target_dx) / y_scale
+        target_dx = dy_sweep * tan_sweep_avg
+        res_sweep = (dx_sweep - target_dx) / y_scale
         res_sweep.add_name("sweep_weak_residual")
         return res_sweep
 
@@ -319,19 +329,26 @@ class BsplineTargetRegularization:
         self,
         local_chords: csdl.Variable,
         local_thicknesses: csdl.Variable,
-        dx_qc: csdl.Variable,
-        dy_qc: csdl.Variable,
-        taper_control_points: csdl.Variable,
-        tc_target_control_points: csdl.Variable,
-        sweep_angle_control_points: csdl.Variable,
+        dx_qc: csdl.Variable = None,
+        dy_qc: csdl.Variable = None,
+        taper_control_points: csdl.Variable = None,
+        tc_target_control_points: csdl.Variable = None,
+        sweep_angle_control_points: csdl.Variable = None,
+        dx_sweep: csdl.Variable = None,
+        dy_sweep: csdl.Variable = None,
     ) -> Dict[str, csdl.Variable]:
         """
         Compute dense profiles, mismatch residuals, and discrete second-difference curvature indicators.
         """
+        if dx_sweep is None and dx_qc is not None:
+            dx_sweep = dx_qc
+        if dy_sweep is None and dy_qc is not None:
+            dy_sweep = dy_qc
+
         local_chords = _to_vec(local_chords)
         local_thicknesses = _to_vec(local_thicknesses)
-        dx_qc = _to_vec(dx_qc)
-        dy_qc = _to_vec(dy_qc)
+        dx_sweep = _to_vec(dx_sweep)
+        dy_sweep = _to_vec(dy_sweep)
         taper_control_points = _to_vec(taper_control_points)
         tc_target_control_points = _to_vec(tc_target_control_points)
         sweep_angle_control_points = _to_vec(sweep_angle_control_points)
@@ -360,7 +377,7 @@ class BsplineTargetRegularization:
         # Dense piecewise-constant sweep reconstruction
         sweep_recon_list = []
         for i in range(self.n - 1):
-            sw_val = csdl.arctan2(dx_qc[i], dy_qc[i])
+            sw_val = csdl.arctan2(dx_sweep[i], dy_sweep[i])
             sweep_recon_list.append(csdl.reshape(sw_val, (1,)))
         station_sweep_angles = csdl.concatenate(sweep_recon_list)
 

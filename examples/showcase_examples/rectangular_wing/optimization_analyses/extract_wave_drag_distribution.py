@@ -180,7 +180,7 @@ def process_wave_drag_strips(
     else:
         strip_area = np.asarray(strip_area, dtype=float).flatten()
 
-    strip_wave_cd = np.asarray(strip_wave_cd, dtype=float).flatten()
+    strip_wave_cd = np.maximum(np.asarray(strip_wave_cd, dtype=float).flatten(), 0.0)
     strip_M_crit = np.asarray(strip_M_crit, dtype=float).flatten()
     strip_M_dd = np.asarray(strip_M_dd, dtype=float).flatten()
     strip_tc = np.asarray(strip_tc, dtype=float).flatten()
@@ -296,8 +296,10 @@ def plot_wave_drag_distribution(
     c_geom = '#546e7a'      # Slate grey for geometry annotations
 
     # Figure suptitle
+    model_name = str(results.get('wave_drag_model', 'korn_lock')).lower()
+    model_label = "Kármán–Tsien + Rankine–Hugoniot Model" if 'karman' in model_name else "Korn–Locke Model"
     fig.suptitle(
-        f"Spanwise Transonic Wave Drag & Mach Divergence Analysis (Korn–Lock Model)\n"
+        f"Spanwise Transonic Wave Drag & Mach Divergence Analysis ({model_label})\n"
         f"Right Half-Span: b/2 = {b_tip:.3f} m (Full b = {2*b_tip:.3f} m) | AR = {ar_val:.2f} | S_ref = {sref_val:.2f} m² | "
         f"Flight Condition: {altitude_ft:,.0f} ft ISA (M_∞ = {mach_cruise:.2f}, q_∞ = {q_cruise:,.0f} Pa)",
         fontsize=12, fontweight='bold', y=0.98
@@ -501,6 +503,7 @@ def extract_and_plot_wave_drag_distribution(
         strip_tc = np.asarray(jax_sim[main_script.strip_tc]).flatten()
         strip_sweep = np.asarray(jax_sim[main_script.strip_sweep_halfchord]).flatten()
         strip_cl = np.asarray(jax_sim[main_script.cl_local_elem]).flatten()
+        wave_drag_model = str(getattr(main_script, 'wave_drag_model', 'korn_lock'))
 
         sref_val = float(np.asarray(jax_sim[main_script.planform_area]).flatten()[0]) if hasattr(main_script, 'planform_area') else 10.0
         ar_val = float(np.asarray(jax_sim[main_script.aspect_ratio_calc]).flatten()[0]) if hasattr(main_script, 'aspect_ratio_calc') else 10.0
@@ -566,6 +569,7 @@ def extract_and_plot_wave_drag_distribution(
         ar_val = float(data['ar_val'])
         cd_wave_val = float(data['cd_wave_val'])
         d_wave_val = float(data['d_wave_val'])
+        wave_drag_model = str(data['wave_drag_model']) if 'wave_drag_model' in data else 'korn_lock'
 
         detected_m = detect_cruise_mach(strip_wave_cd, strip_M_crit, default_mach=MACH_CRUISE_DEFAULT)
         cached_mach = float(data['mach_cruise']) if 'mach_cruise' in data else (float(data['mach']) if 'mach' in data else None)
@@ -693,6 +697,7 @@ def extract_and_plot_wave_drag_distribution(
         strip_tc = np.asarray(jax_sim[main_script.strip_tc]).flatten()
         strip_sweep = np.asarray(jax_sim[main_script.strip_sweep_halfchord]).flatten()
         strip_cl = np.asarray(jax_sim[main_script.cl_local_elem]).flatten()
+        wave_drag_model = str(getattr(main_script, 'wave_drag_model', 'korn_lock'))
         sref_val = float(np.asarray(jax_sim[main_script.planform_area]).flatten()[0]) if hasattr(main_script, 'planform_area') else 10.0
         ar_val = float(np.asarray(jax_sim[main_script.aspect_ratio_calc]).flatten()[0]) if hasattr(main_script, 'aspect_ratio_calc') else 10.0
         cd_wave_val = float(np.asarray(jax_sim[main_script.CD_wave_cruise]).flatten()[0])
@@ -734,6 +739,8 @@ def extract_and_plot_wave_drag_distribution(
         altitude_m=altitude_m,
         sref_val=sref_val,
     )
+    if 'wave_drag_model' in locals():
+        results['wave_drag_model'] = wave_drag_model
 
     # 3. Save Cache for instantaneous reload
     try:
