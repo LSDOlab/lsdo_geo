@@ -255,7 +255,7 @@ if wave_drag_model not in ('korn_lock', 'karman_tsien_rh'):
     raise ValueError(f"Unknown wave_drag_model '{wave_drag_model}'. Must be 'korn_lock' or 'karman_tsien_rh'.")
 
 # Calibration factor for Karman-Tsien + Rankine-Hugoniot wave drag:
-wave_drag_c_cal: float = float(os.environ.get('WAVE_DRAG_C_CAL', '1.0'))
+wave_drag_c_cal: float = float(os.environ.get('WAVE_DRAG_C_CAL', '8.5'))
 
 # 8. Scale factor & warm start:
 scale_factor: float = 7.5             # Scale factor (7.5 for 50 m full-scale BWB; 1.0 for wind-tunnel scale)
@@ -3118,12 +3118,8 @@ strip_sweep_qc = compute_quarter_chord_sweep(qc_drag_pts)  # shape (num_drag_str
 max_strip_qc_sweep = csdl.maximum(strip_sweep_qc, axes=(0,), rho=50.0)
 strip_qc_sweep_excess = max_strip_qc_sweep - (60.0 * np.pi / 180.0)
 
-# Backward-compatible aliases for diagnostics and logging:
 # Strip half-chord points and aerodynamic half-chord sweep angle Lambda_c/2:
 mid_chord_drag_pts = 0.5 * (le_strip_center + te_strip_center)
-strip_sweep_halfchord = strip_sweep_qc  # Korn-Lock wave drag now uses quarter-chord sweep
-max_half_chord_sweep = max_strip_qc_sweep
-half_chord_sweep_excess = strip_qc_sweep_excess
 strip_sweep_halfchord = compute_half_chord_sweep(mid_chord_drag_pts)
 max_half_chord_sweep = csdl.maximum(strip_sweep_halfchord, axes=(0,), rho=50.0)
 half_chord_sweep_excess = max_half_chord_sweep - (60.0 * np.pi / 180.0)
@@ -3152,16 +3148,6 @@ for node_idx in range(num_nodes):
     lp_drag_node = csdl.matvec(csdl.Variable(value=M_interp_drag), lp_aero_node)
     cl_strip_node = lp_drag_node / (q_node_val * local_chord_drag)
     
-    node_wave = evaluate_wave_drag(
-        strip_tc=strip_tc,
-        strip_sweep=strip_sweep_halfchord,
-        strip_cl=cl_strip_node,
-        strip_area=strip_area,
-        total_strip_area=total_strip_area,
-        mach_node=atm_mach_numbers[node_idx],
-        q_node=q_node_val,
-        planform_area=planform_area,
-    )
     if wave_drag_model == 'korn_lock':
         node_wave = evaluate_wave_drag(
             strip_tc=strip_tc,
