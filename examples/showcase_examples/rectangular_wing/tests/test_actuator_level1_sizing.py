@@ -57,13 +57,14 @@ def test_level1_actuator_sizing_bounds_and_values():
             assert np.allclose(dims, ACTUATOR_BASE_DIMS_M, atol=1e-5)
             
         # 3. Dimensions must be positive and physically realistic
-        assert 0.4 <= L <= 1.2, f"Length {L} out of realistic range"
-        assert 0.15 <= W <= 0.40, f"Width {W} out of realistic range"
-        assert 0.09 <= H <= 0.20, f"Height {H} out of realistic range"
+        assert 0.2 <= L <= 1.2, f"Length {L} out of realistic range"
+        assert 0.08 <= W <= 0.40, f"Width {W} out of realistic range"
+        assert 0.03 <= H <= 0.20, f"Height {H} out of realistic range"
 
-    # Outboard station (4.0m) should have H ~ 12.9 cm
+    # Outboard station (4.0m) should scale according to Level 1 formula
     dims_4m = 2.0 * np.asarray(sim[hl_vars[2]]).flatten()
-    assert np.isclose(dims_4m[2], 0.1288, atol=1e-3)
+    expected_H_4m = ACTUATOR_BASE_DIMS_M[2] * (ACTUATOR_HEIGHT_FLOOR + (1.0 - ACTUATOR_HEIGHT_FLOOR) * np.sqrt(4.0 / 7.5))
+    assert np.isclose(dims_4m[2], expected_H_4m, atol=1e-3)
 
 
 def test_level1_actuator_derivatives():

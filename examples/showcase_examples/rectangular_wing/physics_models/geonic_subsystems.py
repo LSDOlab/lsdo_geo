@@ -56,22 +56,22 @@ MLG_BASE_DIMS_M: np.ndarray = np.array([3.4, 1.5, 1.2], dtype=float)
 MLG_BASE_MASS_KG: float = 1950.0
 
 # Outboard Elevon Actuator Housing per unit (length, width, height) in metres and mass in kg
-# Standard thin electromechanical / rotary actuator dimensions for outboard elevon installation
-ACTUATOR_BASE_LENGTH_M: float = float(os.environ.get('ACTUATOR_BASE_LENGTH_M', '1.00'))
-ACTUATOR_BASE_WIDTH_M: float = float(os.environ.get('ACTUATOR_BASE_WIDTH_M', '0.32'))
-ACTUATOR_BASE_HEIGHT_M: float = float(os.environ.get('ACTUATOR_BASE_HEIGHT_M', '0.14'))
+# Standard compact electromechanical / rotary actuator dimensions for outboard elevon installation
+ACTUATOR_BASE_LENGTH_M: float = float(os.environ.get('ACTUATOR_BASE_LENGTH_M', '0.40'))
+ACTUATOR_BASE_WIDTH_M: float = float(os.environ.get('ACTUATOR_BASE_WIDTH_M', '0.16'))
+ACTUATOR_BASE_HEIGHT_M: float = float(os.environ.get('ACTUATOR_BASE_HEIGHT_M', '0.06'))
 ACTUATOR_BASE_DIMS_M: np.ndarray = np.array([ACTUATOR_BASE_LENGTH_M, ACTUATOR_BASE_WIDTH_M, ACTUATOR_BASE_HEIGHT_M], dtype=float)
-ACTUATOR_MASS_KG: float = float(os.environ.get('ACTUATOR_MASS_KG', '35.0'))
+ACTUATOR_MASS_KG: float = float(os.environ.get('ACTUATOR_MASS_KG', '20.0'))
 ACTUATOR_HEIGHT_FLOOR: float = float(os.environ.get('ACTUATOR_HEIGHT_FLOOR', '0.70'))
 ACTUATOR_SPAN_FRACTIONS: Tuple[float, ...] = (0.65, 0.85)
-ACTUATOR_CHORD_FRACTION: float = 0.65
+ACTUATOR_CHORD_FRACTION: float = 0.60
 
 # Dual Symmetric APU Bays per unit (length, width, height) in metres and mass per unit in kg
 APU_BASE_DIMS_M: np.ndarray = np.array([2.0, 1.0, 0.8], dtype=float)
 APU_BASE_MASS_KG: float = 220.0
 
 # Dedicated clearance buffers
-GEONIC_ACTUATOR_CLEARANCE_M: float = 0.04
+GEONIC_ACTUATOR_CLEARANCE_M: float = 0.02
 GEONIC_APU_CLEARANCE_M: float = 0.10
 
 ALL_SUBSYSTEM_KEYS: set[str] = {'nlg', 'mlg', 'actuators', 'apu'}
