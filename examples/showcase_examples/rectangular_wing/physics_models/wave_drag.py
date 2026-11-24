@@ -347,40 +347,10 @@ def build_panel_strip_wave_mapping(
         else:
             strip_panel_slices.append((0, 0))
 
-    # Construct smooth cubic B-spline mapping matrix with root symmetry S'(0) = 0
-    # matching the standard discretization used across the codebase (e.g. f_stall, cl_ss)
-    if num_aero >= 4:
-        try:
-            import lsdo_function_spaces as lfs
-            b_tip_val = float(np.max(y_drag_centers)) if b_tip is None else float(b_tip)
-            tau_aero = np.clip(y_strip_centers / b_tip_val, 0.0, 1.0)
-            tau_drag = np.clip(y_drag_centers / b_tip_val, 0.0, 1.0)
-
-            tau_colloc = np.concatenate([[0.0], tau_aero])
-            int_knots = [np.mean(tau_colloc[j:j+3]) for j in range(1, num_aero - 2)]
-            knots = np.concatenate([[0.0, 0.0, 0.0, 0.0], int_knots, [1.0, 1.0, 1.0, 1.0]])
-
-            space = lfs.BSplineSpace(
-                num_parametric_dimensions=1,
-                degree=3,
-                coefficients_shape=(num_aero + 1,),
-                knots=(knots,),
-            )
-
-            B_aero = space.compute_basis_matrix(tau_aero.reshape((-1, 1))).toarray()
-            d_root = np.zeros((1, num_aero + 1))
-            d_root[0, 0] = -1.0
-            d_root[0, 1] = 1.0
-
-            M_sys = np.vstack([B_aero, d_root])
-            M_inv = np.linalg.inv(M_sys)
-
-            B_drag = space.compute_basis_matrix(tau_drag.reshape((-1, 1))).toarray()
-            M_smooth_drag = B_drag @ M_inv[:, :-1]
-        except Exception:
-            M_smooth_drag = M_interp_drag
-    else:
-        M_smooth_drag = M_interp_drag
+    # Construct mapping matrix from aero strips to drag strips.
+    # Monotone linear interpolation M_interp_drag guarantees strict non-negativity (M_ij >= 0),
+    # partition of unity, and zero Runge/collocation overshoots at the boundaries.
+    M_smooth_drag = M_interp_drag
 
     return {
         'M_drag_to_aero': M_drag_to_aero,
@@ -405,6 +375,7 @@ def evaluate_wave_drag_karman_tsien_rh(
     W_strip: np.ndarray,
     dy_aero_dyn: csdl.Variable,
     local_chord_drag: csdl.Variable,
+    panel_mask: Union[np.ndarray, csdl.Variable] = None,
     c_cal: float = 1.0,
     k_shock: float = 24.0,
     beta_s: float = 20.0,
@@ -495,18 +466,34 @@ def evaluate_wave_drag_karman_tsien_rh(
     # 6. Normal Mach number squared
     M_n_sq = M_loc_sq * (cos_sw ** 2)
 
-    # 7. Differentiable supersonic excess (no tanh saturation to ensure non-vanishing sensitivity)
+    # 7. Differentiable normal Mach number squared with smooth supersonic activation
     delta_s = (1.0 / beta_s) * csdl.softplus(beta_s * (M_n_sq - 1.0))
+    M_eff_sq = 1.0 + delta_s
 
-    # 8. Weak-shock Rankine-Hugoniot entropy integrand per panel with thermodynamic scaling
+    # 8. Exact Rankine-Hugoniot normal-shock entropy jump with thermodynamic scaling
     # Oswatitsch's theorem integrates entropy generation flux across the vertical shock wave:
     # D_wave = \iint p_inf * (Delta_s / R) * cos(Lambda) dA_shock
     # Dividing by q_inf * S_ref introduces the exact thermodynamic ratio p_inf / q_inf = 2 / (gamma * M_inf^2).
     # The transonic shock similitude parameter k_shock relates 3D shock height to surface footprint.
+    # Across a normal shock in a calorically perfect gas:
+    #   p2/p1 = (2*gamma*M_n^2 - (gamma - 1)) / (gamma + 1)
+    #   rho2/rho1 = (gamma + 1)*M_n^2 / ((gamma - 1)*M_n^2 + 2)
+    #   Delta_s / R = (1 / (gamma - 1)) * [ ln(p2/p1) - gamma * ln(rho2/rho1) ]
+    # In the weak-shock limit (M_n -> 1^+), the Taylor expansion of Delta_s/R is identically
+    # (2*gamma / (3*(gamma+1)^2)) * (M_n^2 - 1)^3.
+    # For moderate and strong shocks, exact Rankine-Hugoniot physics naturally prevents non-physical
+    # cubic blowup while maintaining a strictly positive, non-vanishing recovery gradient (no zero-derivative plateau).
+    p2_p1 = (2.0 * gamma * M_eff_sq - (gamma - 1.0)) / (gamma + 1.0)
+    rho2_rho1 = ((gamma + 1.0) * M_eff_sq) / ((gamma - 1.0) * M_eff_sq + 2.0)
+    delta_s_over_R = (1.0 / (gamma - 1.0)) * (csdl.log(p2_p1) - gamma * csdl.log(rho2_rho1))
+
     p_inf_over_q_inf = 2.0 / (gamma * (mach_node**2 + 1e-12))
-    rh_entropy_factor = 2.0 * gamma / (3.0 * ((gamma + 1.0) ** 2))  # ~0.162037
-    dcd_w = c_cal * p_inf_over_q_inf * k_shock * rh_entropy_factor * (delta_s ** 3) * cos_sw
-    panel_dw_area = dcd_w * panel_area_right  # [m^2] wave drag area per panel
+    dcd_w = c_cal * p_inf_over_q_inf * k_shock * delta_s_over_R * cos_sw
+    if panel_mask is not None:
+        panel_area_eff = panel_area_right * panel_mask
+    else:
+        panel_area_eff = panel_area_right
+    panel_dw_area = dcd_w * panel_area_eff  # [m^2] wave drag area per panel
 
     # 9. Global full-wing wave drag (factor of 2 for symmetry)
     CD_wave = 2.0 * csdl.sum(panel_dw_area) / planform_area

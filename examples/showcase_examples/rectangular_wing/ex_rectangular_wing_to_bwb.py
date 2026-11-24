@@ -847,6 +847,13 @@ tip_mask = ~np.isin(y_round, main_stations)
 if np.any(tip_mask):
     W_strip[-1, tip_mask] = 1.0
 
+# Dedicated selection matrix and lifting surface mask for wave drag (omits transverse tip-cap panels)
+W_strip_wave = np.copy(W_strip)
+is_lifting_surface = np.ones(num_right_panels)
+if np.any(tip_mask):
+    W_strip_wave[-1, tip_mask] = 0.0
+    is_lifting_surface[tip_mask] = 0.0
+
 y_strip_centers = np.array(y_strip_centers)
 b_tip_initial = float(np.max(Y_panels_right))
 eta_strips = y_strip_centers / b_tip_initial
@@ -894,9 +901,9 @@ for i, yd in enumerate(y_drag_centers_init):
         M_interp_drag[i, k] = 1.0 - t
         M_interp_drag[i, k+1] = t
 
-# Build static panel-to-strip mapping for Karman-Tsien RH wave drag
+# Build static panel-to-strip mapping for Karman-Tsien RH wave drag (using lifting surface strips)
 wave_panel_mapping = build_panel_strip_wave_mapping(
-    W_strip=W_strip,
+    W_strip=W_strip_wave,
     M_interp_drag=M_interp_drag,
     y_strip_centers=y_strip_centers,
     y_drag_centers=y_drag_centers_init,
@@ -3178,9 +3185,10 @@ for node_idx in range(num_nodes):
             planform_area=planform_area,
             wave_panel_mapping=wave_panel_mapping,
             M_interp_drag=M_interp_drag,
-            W_strip=W_strip,
+            W_strip=W_strip_wave,
             dy_aero_dyn=dy_aero_dyn,
             local_chord_drag=local_chord_drag,
+            panel_mask=is_lifting_surface,
             c_cal=wave_drag_c_cal,
         )
     wave_drag_results.append(node_wave)
