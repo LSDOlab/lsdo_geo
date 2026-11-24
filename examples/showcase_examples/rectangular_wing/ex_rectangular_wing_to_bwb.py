@@ -138,7 +138,7 @@ else:
 #   'oversized' -> Constrain TCP0 oversized box (8 sample points, payload_center_x DV, 0.2 m buffer)
 #   'pallets'   -> Constrain TCP0 6-pallet stack (32 sample points, pallet_stack_center_x DV, 0.2 m buffer)
 #   'both'      -> Constrain both payload cases (40-point batch, equal CG consistency constraint)
-geonic_payload_mode: str = 'none'  # Options: 'none', 'oversized', 'pallets', 'both'
+geonic_payload_mode: str = 'both'  # Options: 'none', 'oversized', 'pallets', 'both'
 geonic_payload_mode = os.environ.get('GEONIC_PAYLOAD_MODE', geonic_payload_mode)
 if 'GEONIC_PAYLOAD_MODE' not in os.environ and 'USE_GEONIC' in os.environ:
     geonic_payload_mode = 'oversized' if str(os.environ['USE_GEONIC']).strip() == '1' else 'none'
@@ -168,7 +168,7 @@ elif 'GEONIC_SUBSYSTEM_MODE' in os.environ:
 
 # 3d. Subsystem coupled dynamic sizing toggles:
 dynamic_landing_gear_sizing: bool = os.environ.get('DYNAMIC_LANDING_GEAR_SIZING', '1').strip().lower() not in ('0', 'false', 'no')
-dynamic_actuator_sizing: bool = os.environ.get('DYNAMIC_ACTUATOR_SIZING', '1').strip().lower() not in ('0', 'false', 'no')
+dynamic_actuator_sizing: bool = os.environ.get('DYNAMIC_ACTUATOR_SIZING', '0').strip().lower() in ('1', 'true', 'yes')
 
 # 3e. Non-interference constraint aggregation mode:
 #   'partial_aggregation' -> Smooth-union exterior SDF + local face-grid partitions (default)
@@ -1017,12 +1017,12 @@ if use_geonic_subsystems:
     if 'nlg' in active_subsystems:
         nlg_center_x = csdl.Variable(value=-7.0 * sf_ratio_init, name='nlg_center_x')
     if 'mlg' in active_subsystems:
-        mlg_center_x = csdl.Variable(value=5.5 * sf_ratio_init, name='mlg_center_x')
+        mlg_center_x = csdl.Variable(value=10.5 * sf_ratio_init, name='mlg_center_x')
         mlg_center_y = csdl.Variable(value=5.5 * sf_ratio_init, name='mlg_center_y')
     if 'apu' in active_subsystems:
-        # Initialized directly behind the MLG bay (x_mlg = 5.5 m, L_mlg = 3.4 m -> aft face at 7.2 m)
-        # APU (L = 2.0 m, hx = 1.0 m) with front face at 7.6 m -> center at 8.6 m, y centered at MLG spanwise station (5.5 m)
-        apu_center_x = csdl.Variable(value=8.6 * sf_ratio_init, name='apu_center_x')
+        # Initialized directly behind the MLG bay in the same column (y = 5.5 m)
+        # MLG at x = 10.5 m (L_mlg = 3.4 m -> aft face at 12.2 m) -> APU center at x = 14.0 m (front face at 13.0 m)
+        apu_center_x = csdl.Variable(value=14.0 * sf_ratio_init, name='apu_center_x')
         apu_center_y = csdl.Variable(value=5.5 * sf_ratio_init, name='apu_center_y')
 
 @dataclass
@@ -1151,18 +1151,22 @@ if geometry_parameterization_formulation == 'implicit':
                 variable=nlg_center_x, lower=-10.0 * sf_ratio_dv, upper=5.0 * sf_ratio_dv, scaler=1.0 / scale_factor
             )
         if 'mlg' in active_subsystems:
+            # Longitudinal translation (x): gives optimizer freedom for OML shaping & tip-back feasibility
             design_variables['mlg_center_x'] = DVInfo(
                 variable=mlg_center_x, lower=0.0, upper=15.0 * sf_ratio_dv, scaler=1.0 / scale_factor
             )
+            # Lateral translation (y): realistic spacing [5.0, 6.0] m (clears pallets at 4.3 m; in-line with APU column)
             design_variables['mlg_center_y'] = DVInfo(
-                variable=mlg_center_y, lower=2.4 * sf_ratio_dv, upper=12.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+                variable=mlg_center_y, lower=5.0 * sf_ratio_dv, upper=6.0 * sf_ratio_dv, scaler=1.0 / scale_factor
             )
         if 'apu' in active_subsystems:
+            # Longitudinal translation (x): gives optimizer freedom for OML shaping
             design_variables['apu_center_x'] = DVInfo(
-                variable=apu_center_x, lower=0.0, upper=15.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+                variable=apu_center_x, lower=0.0, upper=18.0 * sf_ratio_dv, scaler=1.0 / scale_factor
             )
+            # Lateral translation (y): tight bounds matching MLG column [5.0, 6.0] m for longitudinal tension trade-off
             design_variables['apu_center_y'] = DVInfo(
-                variable=apu_center_y, lower=1.0 * sf_ratio_dv, upper=10.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+                variable=apu_center_y, lower=5.0 * sf_ratio_dv, upper=6.0 * sf_ratio_dv, scaler=1.0 / scale_factor
             )
     design_variables['ttop_dvs'] = DVInfo(variable=ttop_dvs, lower=t_min_gauge, upper=t_max_gauge, scaler=thick_scaler)
     design_variables['tweb_dvs'] = DVInfo(variable=tweb_dvs, lower=t_min_gauge, upper=t_max_gauge, scaler=thick_scaler)
@@ -1288,15 +1292,15 @@ if geometry_parameterization_formulation == 'implicit':
             if use_geonic and geonic_payload_mode in {'pallets', 'both'} and 'dv_opt_pallet_stack_center_x' in prior_data:
                 pallet_stack_center_x.value = float(np.asarray(prior_data['dv_opt_pallet_stack_center_x']).flatten()[0])
             if use_geonic_subsystems:
-                if 'nlg' in active_subsystems and 'dv_opt_nlg_center_x' in prior_data:
+                if 'nlg' in active_subsystems and 'nlg_center_x' in design_variables and 'dv_opt_nlg_center_x' in prior_data:
                     nlg_center_x.value = float(np.asarray(prior_data['dv_opt_nlg_center_x']).flatten()[0])
-                if 'mlg' in active_subsystems and 'dv_opt_mlg_center_x' in prior_data:
+                if 'mlg' in active_subsystems and 'mlg_center_x' in design_variables and 'dv_opt_mlg_center_x' in prior_data:
                     mlg_center_x.value = float(np.asarray(prior_data['dv_opt_mlg_center_x']).flatten()[0])
-                if 'mlg' in active_subsystems and 'dv_opt_mlg_center_y' in prior_data:
+                if 'mlg' in active_subsystems and 'mlg_center_y' in design_variables and 'dv_opt_mlg_center_y' in prior_data:
                     mlg_center_y.value = float(np.asarray(prior_data['dv_opt_mlg_center_y']).flatten()[0])
-                if 'apu' in active_subsystems and 'dv_opt_apu_center_x' in prior_data:
+                if 'apu' in active_subsystems and 'apu_center_x' in design_variables and 'dv_opt_apu_center_x' in prior_data:
                     apu_center_x.value = float(np.asarray(prior_data['dv_opt_apu_center_x']).flatten()[0])
-                if 'apu' in active_subsystems and 'dv_opt_apu_center_y' in prior_data:
+                if 'apu' in active_subsystems and 'apu_center_y' in design_variables and 'dv_opt_apu_center_y' in prior_data:
                     apu_center_y.value = float(np.asarray(prior_data['dv_opt_apu_center_y']).flatten()[0])
 
     # ParameterizationSolver drives chord stretch states, thickness stretch states, 1 span stretch state, and sweep translation states
@@ -1403,18 +1407,22 @@ elif geometry_parameterization_formulation == 'explicit':
                 variable=nlg_center_x, lower=-10.0 * sf_ratio_dv, upper=5.0 * sf_ratio_dv, scaler=1.0 / scale_factor
             )
         if 'mlg' in active_subsystems:
+            # Longitudinal translation (x): gives optimizer freedom for OML shaping & tip-back feasibility
             design_variables['mlg_center_x'] = DVInfo(
                 variable=mlg_center_x, lower=0.0, upper=15.0 * sf_ratio_dv, scaler=1.0 / scale_factor
             )
+            # Lateral translation (y): realistic spacing [5.0, 6.0] m (clears pallets at 4.3 m; in-line with APU column)
             design_variables['mlg_center_y'] = DVInfo(
-                variable=mlg_center_y, lower=2.4 * sf_ratio_dv, upper=12.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+                variable=mlg_center_y, lower=5.0 * sf_ratio_dv, upper=6.0 * sf_ratio_dv, scaler=1.0 / scale_factor
             )
         if 'apu' in active_subsystems:
+            # Longitudinal translation (x): gives optimizer freedom for OML shaping
             design_variables['apu_center_x'] = DVInfo(
-                variable=apu_center_x, lower=0.0, upper=15.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+                variable=apu_center_x, lower=0.0, upper=18.0 * sf_ratio_dv, scaler=1.0 / scale_factor
             )
+            # Lateral translation (y): tight bounds matching MLG column [5.0, 6.0] m for longitudinal tension trade-off
             design_variables['apu_center_y'] = DVInfo(
-                variable=apu_center_y, lower=1.0 * sf_ratio_dv, upper=10.0 * sf_ratio_dv, scaler=1.0 / scale_factor
+                variable=apu_center_y, lower=5.0 * sf_ratio_dv, upper=6.0 * sf_ratio_dv, scaler=1.0 / scale_factor
             )
     design_variables['ttop_dvs'] = DVInfo(variable=ttop_dvs, lower=t_min_gauge, upper=t_max_gauge, scaler=thick_scaler)
     design_variables['tweb_dvs'] = DVInfo(variable=tweb_dvs, lower=t_min_gauge, upper=t_max_gauge, scaler=thick_scaler)
@@ -1499,15 +1507,15 @@ elif geometry_parameterization_formulation == 'explicit':
             if use_geonic and geonic_payload_mode in {'pallets', 'both'} and 'dv_opt_pallet_stack_center_x' in prior_data:
                 pallet_stack_center_x.value = float(np.asarray(prior_data['dv_opt_pallet_stack_center_x']).flatten()[0])
             if use_geonic_subsystems:
-                if 'nlg' in active_subsystems and 'dv_opt_nlg_center_x' in prior_data:
+                if 'nlg' in active_subsystems and 'nlg_center_x' in design_variables and 'dv_opt_nlg_center_x' in prior_data:
                     nlg_center_x.value = float(np.asarray(prior_data['dv_opt_nlg_center_x']).flatten()[0])
-                if 'mlg' in active_subsystems and 'dv_opt_mlg_center_x' in prior_data:
+                if 'mlg' in active_subsystems and 'mlg_center_x' in design_variables and 'dv_opt_mlg_center_x' in prior_data:
                     mlg_center_x.value = float(np.asarray(prior_data['dv_opt_mlg_center_x']).flatten()[0])
-                if 'mlg' in active_subsystems and 'dv_opt_mlg_center_y' in prior_data:
+                if 'mlg' in active_subsystems and 'mlg_center_y' in design_variables and 'dv_opt_mlg_center_y' in prior_data:
                     mlg_center_y.value = float(np.asarray(prior_data['dv_opt_mlg_center_y']).flatten()[0])
-                if 'apu' in active_subsystems and 'dv_opt_apu_center_x' in prior_data:
+                if 'apu' in active_subsystems and 'apu_center_x' in design_variables and 'dv_opt_apu_center_x' in prior_data:
                     apu_center_x.value = float(np.asarray(prior_data['dv_opt_apu_center_x']).flatten()[0])
-                if 'apu' in active_subsystems and 'dv_opt_apu_center_y' in prior_data:
+                if 'apu' in active_subsystems and 'apu_center_y' in design_variables and 'dv_opt_apu_center_y' in prior_data:
                     apu_center_y.value = float(np.asarray(prior_data['dv_opt_apu_center_y']).flatten()[0])
 
     chord_params = csdl.concatenate(
@@ -4109,10 +4117,17 @@ if run_pre_diagnostics:
         print(f"Dynamic Sizing: LG={'ON' if dynamic_landing_gear_sizing else 'OFF'}, Actuators={'ON' if dynamic_actuator_sizing else 'OFF'}")
         print(f"NLG: x={nlg_x_val:.3f}m, dims={2*nlg_hl_val} m, OML_margin={nlg_oml_m:+.4f}m, Ext_margin={nlg_ext_m:+.4f}m")
         print(f"MLG: x={mlg_x_val:.3f}m, y=±{mlg_y_val:.3f}m, dims={2*mlg_hl_val} m, OML_margin={mlg_oml_m:+.4f}m, Ext_margin={mlg_ext_m:+.4f}m")
+        if 'apu' in active_subsystems:
+            apu_x_val = float(np.asarray(jax_sim[apu_center_x]).flatten()[0])
+            apu_y_val = float(np.asarray(jax_sim[apu_center_y]).flatten()[0])
+            apu_oml_m = float(np.asarray(jax_sim[apu_oml_margin]).flatten()[0])
+            apu_ext_m = float(np.asarray(jax_sim[apu_ext_margin]).flatten()[0])
+            apu_hl_val = np.asarray(jax_sim[apu_half_lengths]).flatten()
+            print(f"APU: x={apu_x_val:.3f}m, y=±{apu_y_val:.3f}m, dims={2*apu_hl_val} m, OML_margin={apu_oml_m:+.4f}m, Ext_margin={apu_ext_m:+.4f}m")
         print(f"MLG Tip-Back Margin: {tip_m:+.4f}m | Overall Subsystem Margin: {sub_ov_m:+.4f}m ({'FEASIBLE' if sub_ov_m >= 0.0 else 'VIOLATED'})")
         if ('actuators' in active_subsystems or geonic_subsystem_mode == 'full') and geonic_aggregation_mode != 'volume_only' and len(act_int_raw_list) > 0:
             act_m = float(np.asarray(jax_sim[actuator_oml_margin]).flatten()[0])
-            print(f"Actuator OML Overall Margin: {act_m:+.4f}m ({'FEASIBLE' if act_m >= 0.0 else 'VIOLATED'})")
+            print(f"Actuator OML Margin: {act_m:+.4f}m ({'FEASIBLE' if act_m >= 0.0 else 'VIOLATED'})")
             for s_idx in range(len(ACTUATOR_SPAN_FRACTIONS)):
                 act_dims_s = 2.0 * np.asarray(jax_sim[act_half_lengths_list[s_idx]]).flatten()
                 print(f"  Actuator {s_idx} (eta={ACTUATOR_SPAN_FRACTIONS[s_idx]:.2f}): L={act_dims_s[0]:.2f}m, W={act_dims_s[1]:.2f}m, H={act_dims_s[2]:.3f}m ({act_dims_s[2]*100:.1f}cm)")
@@ -4348,6 +4363,13 @@ if __name__ == '__main__':
     video_path = os.path.join(latest_folder, 'optimization_history.mp4')
     frames_dir = os.path.join(latest_folder, 'temp_video_frames')
     os.makedirs(frames_dir, exist_ok=True)
+    video_translucent_path = os.path.join(latest_folder, 'optimization_history_translucent.mp4')
+    frames_translucent_dir = os.path.join(latest_folder, 'temp_video_frames_translucent')
+    os.makedirs(frames_translucent_dir, exist_ok=True)
+    wing_img_path = os.path.join(latest_folder, 'final_wing.png')
+    wing_translucent_img_path = os.path.join(latest_folder, 'final_wing_translucent.png')
+    summary_fig_path = os.path.join(latest_folder, 'optimization_summary.png')
+    summary_translucent_fig_path = os.path.join(latest_folder, 'optimization_summary_translucent.png')
     plotter = pv.Plotter(off_screen=True, window_size=[1920, 1080])
     plotter.set_background('black')
     
@@ -4500,6 +4522,7 @@ if __name__ == '__main__':
         plotter.clear_actors()
     
         # Add each plotting element to the plotter with smooth Phong shading and surface normals
+        wing_actor_tuples = []
         for element in plotting_elements:
             if isinstance(element, dict) and 'mesh' in element:
                 mesh = element['mesh']
@@ -4507,7 +4530,8 @@ if __name__ == '__main__':
             elif isinstance(element, tuple) and len(element) == 2:
                 mesh, kwargs = element
             elif isinstance(element, pv.Actor):
-                plotter.add_actor(element)
+                act = plotter.add_actor(element)
+                wing_actor_tuples.append((element, None, act))
                 continue
             elif isinstance(element, pv.DataSet):
                 mesh = element
@@ -4540,7 +4564,8 @@ if __name__ == '__main__':
             mesh_kwargs['specular_power'] = 30
             mesh_kwargs['ambient'] = 0.25
             mesh_kwargs['diffuse'] = 0.75
-            plotter.add_mesh(surf, **mesh_kwargs)
+            act = plotter.add_mesh(surf, **mesh_kwargs)
+            wing_actor_tuples.append((surf, mesh_kwargs, act))
     
         # Build parameter info string depending on active formulation
         dv_str = ""
@@ -4807,18 +4832,32 @@ if __name__ == '__main__':
         plotter.camera.focal_point = camera['focal_point']
         plotter.camera.up = camera['viewup']
     
+        # 1. Standard opaque wing screenshot
         frame_file = os.path.join(frames_dir, f"frame_{iteration:04d}.png")
         os.makedirs(frames_dir, exist_ok=True)
         plotter.screenshot(frame_file)
-        print(f"  Frame {iteration}/{num_iterations - 1} rendered")
+
+        # 2. Translucent wing screenshot (so internal payloads are clearly visible)
+        for surf, m_kwargs, act in wing_actor_tuples:
+            plotter.remove_actor(act)
+            if m_kwargs is not None:
+                t_kwargs = m_kwargs.copy()
+                t_kwargs['opacity'] = 0.35
+                plotter.add_mesh(surf, **t_kwargs)
+
+        frame_file_translucent = os.path.join(frames_translucent_dir, f"frame_{iteration:04d}.png")
+        os.makedirs(frames_translucent_dir, exist_ok=True)
+        plotter.screenshot(frame_file_translucent)
+        print(f"  Frame {iteration}/{num_iterations - 1} rendered (standard & translucent)")
     
-        # Save final wing render for the summary plot
+        # Save final wing renders for the summary plot
         if iteration == num_iterations - 1:
             try:
                 import shutil
                 shutil.copyfile(frame_file, wing_img_path)
+                shutil.copyfile(frame_file_translucent, wing_translucent_img_path)
             except Exception as e:
-                print(f"Warning: could not save wing image: {e}")
+                print(f"Warning: could not save wing images: {e}")
     
             # Cache panel telemetry for extract_lift_and_moment_distributions.py and extract_lift_distribution.py
             cache_file_opt = os.path.join(latest_folder, 'lift_and_moment_data.npz')
@@ -5183,7 +5222,7 @@ if __name__ == '__main__':
     
     plotter.close()
     
-    # Compile rendered frames into MP4 video using bundled imageio_ffmpeg binary
+    # Compile rendered frames into MP4 videos using bundled imageio_ffmpeg binary
     if not (os.environ.get('SKIP_FRAMES', '0') == '1'):
         try:
             import imageio_ffmpeg, subprocess, shutil
@@ -5202,6 +5241,21 @@ if __name__ == '__main__':
                 shutil.rmtree(frames_dir, ignore_errors=True)
             else:
                 print(f"Warning: ffmpeg video encoding failed: {res.stderr.decode('utf-8', errors='ignore')}")
+
+            cmd_t = [
+                ffmpeg_exe, '-y',
+                '-framerate', '4',
+                '-i', os.path.join(frames_translucent_dir, 'frame_%04d.png'),
+                '-c:v', 'libx264',
+                '-pix_fmt', 'yuv420p',
+                video_translucent_path
+            ]
+            res_t = subprocess.run(cmd_t, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            if res_t.returncode == 0:
+                print(f"Translucent video successfully saved to: {video_translucent_path}")
+                shutil.rmtree(frames_translucent_dir, ignore_errors=True)
+            else:
+                print(f"Warning: ffmpeg translucent video encoding failed: {res_t.stderr.decode('utf-8', errors='ignore')}")
         except Exception as e:
             print(f"Warning: video compilation encountered an error: {e}")
     
@@ -5301,10 +5355,85 @@ if __name__ == '__main__':
     plt.close()
     print(f"Summary figure saved to: {summary_fig_path}")
 
+    # Translucent summary figure (showing internal payloads inside OML)
+    if os.path.exists(wing_translucent_img_path):
+        try:
+            fig_t = plt.figure(figsize=(14, fig_height), dpi=150)
+            gs_t = fig_t.add_gridspec(n_rows, 2, width_ratios=[1.1, 1.5], wspace=0.25, hspace=0.25)
+            ax_img_t = fig_t.add_subplot(gs_t[:, 0])
+            img_t = mpimg.imread(wing_translucent_img_path)
+            ax_img_t.imshow(img_t)
+            ax_img_t.axis('off')
+            ax_img_t.set_title(f"Optimized Wing Geometry (Translucent OML)\n[Wave Drag: {wave_model_title}]", fontsize=11, fontweight='bold')
+            
+            # Subplot 1: CD
+            ax_cd_t = fig_t.add_subplot(gs_t[0, 1])
+            ax_cd_t.set_facecolor(subplot_bg)
+            ax_cd_t.grid(True, color=grid_color, linewidth=1.2)
+            ax_cd_t.plot(iters, cd_history, 'o-', color='#3b6998', linewidth=2, markersize=5)
+            ax_cd_t.axhline(cd_theory_counts, color='#7a9bbd', linestyle='--', linewidth=1.8)
+            ax_cd_t.text(1.02, cd_theory_counts, 'theory', color='#7a9bbd', transform=ax_cd_t.get_yaxis_transform(),
+                        va='center', fontsize=11, fontweight='bold')
+            ax_cd_t.set_ylabel(f'CD ({induced_drag_objective})', fontsize=11)
+            plt.setp(ax_cd_t.get_xticklabels(), visible=False)
+            for spine in ax_cd_t.spines.values():
+                spine.set_visible(False)
+            
+            # Subplot 2: CL
+            ax_cl_t = fig_t.add_subplot(gs_t[1, 1], sharex=ax_cd_t)
+            ax_cl_t.set_facecolor(subplot_bg)
+            ax_cl_t.grid(True, color=grid_color, linewidth=1.2)
+            ax_cl_t.plot(iters, cl_history, 'o-', color='#4fa86c', linewidth=2, markersize=5)
+            ax_cl_t.axhline(target_cl, color='#87c79d', linestyle='--', linewidth=1.8)
+            ax_cl_t.text(1.02, target_cl, 'L=W trim', color='#87c79d', transform=ax_cl_t.get_yaxis_transform(),
+                        va='center', fontsize=11, fontweight='bold')
+            ax_cl_t.set_ylabel('CL', fontsize=11)
+            plt.setp(ax_cl_t.get_xticklabels(), visible=False)
+            for spine in ax_cl_t.spines.values():
+                spine.set_visible(False)
+            
+            # Subplot 3: S_ref
+            ax_sref_t = fig_t.add_subplot(gs_t[2, 1], sharex=ax_cd_t)
+            ax_sref_t.set_facecolor(subplot_bg)
+            ax_sref_t.grid(True, color=grid_color, linewidth=1.2)
+            ax_sref_t.plot(iters, sref_history, 'o-', color='#c54b4b', linewidth=2, markersize=5)
+            ax_sref_t.axhline(target_sref, color='#e08585', linestyle='--', linewidth=1.8)
+            ax_sref_t.text(1.02, target_sref, 'con', color='#e08585', transform=ax_sref_t.get_yaxis_transform(),
+                        va='center', fontsize=11, fontweight='bold')
+            ax_sref_t.set_ylabel('S_ref [m²]', fontsize=11)
+            if has_geonic_history:
+                plt.setp(ax_sref_t.get_xticklabels(), visible=False)
+            else:
+                ax_sref_t.set_xlabel('Iterations', fontsize=11)
+            for spine in ax_sref_t.spines.values():
+                spine.set_visible(False)
+
+            # Subplot 4: Geonic Margin
+            if has_geonic_history:
+                ax_geo_t = fig_t.add_subplot(gs_t[3, 1], sharex=ax_cd_t)
+                ax_geo_t.set_facecolor(subplot_bg)
+                ax_geo_t.grid(True, color=grid_color, linewidth=1.2)
+                ax_geo_t.plot(iters, geonic_margin_history, 'o-', color='#9467bd', linewidth=2, markersize=5)
+                ax_geo_t.axhline(0.0, color='#2ca02c', linestyle='--', linewidth=1.8)
+                ax_geo_t.text(1.02, 0.0, 'con (≥0)', color='#2ca02c', transform=ax_geo_t.get_yaxis_transform(),
+                            va='center', fontsize=11, fontweight='bold')
+                ax_geo_t.set_ylabel('Geonic Margin [m]', fontsize=11)
+                ax_geo_t.set_xlabel('Iterations', fontsize=11)
+                for spine in ax_geo_t.spines.values():
+                    spine.set_visible(False)
+            
+            fig_t.suptitle(f"Optimal wing geometry vs theory (Translucent OML) [Wave Drag: {wave_model_title}]", y=0.03, fontsize=15, fontweight='bold')
+            plt.savefig(summary_translucent_fig_path, bbox_inches='tight', dpi=200)
+            plt.close()
+            print(f"Translucent summary figure saved to: {summary_translucent_fig_path}")
+        except Exception as e:
+            print(f"Warning: could not save translucent summary figure: {e}")
+
     import shutil
-    current_conv_id = '09524c37-f7d1-40a1-85ac-170d91a90d0c'
+    current_conv_id = 'b026a33e-c27d-44b1-a76b-0c6f2f133551'
     candidate_ids = [
         current_conv_id,
+        '09524c37-f7d1-40a1-85ac-170d91a90d0c',
         'ae98c491-cb6a-4455-8a09-a0df739801c2',
         '0ac41e2d-0335-41d9-9f48-d6791df931f1',
         'ce0e9874-a39a-41db-b481-5008cc744a13',
@@ -5365,10 +5494,16 @@ if __name__ == '__main__':
     if artifact_dir and os.path.exists(artifact_dir):
         if os.path.exists(video_path):
             shutil.copy2(video_path, os.path.join(artifact_dir, 'optimization_history.mp4'))
+        if os.path.exists(video_translucent_path):
+            shutil.copy2(video_translucent_path, os.path.join(artifact_dir, 'optimization_history_translucent.mp4'))
         if os.path.exists(summary_fig_path):
             shutil.copy2(summary_fig_path, os.path.join(artifact_dir, 'optimization_summary.png'))
+        if os.path.exists(summary_translucent_fig_path):
+            shutil.copy2(summary_translucent_fig_path, os.path.join(artifact_dir, 'optimization_summary_translucent.png'))
         if os.path.exists(wing_img_path):
             shutil.copy2(wing_img_path, os.path.join(artifact_dir, 'final_wing.png'))
+        if os.path.exists(wing_translucent_img_path):
+            shutil.copy2(wing_translucent_img_path, os.path.join(artifact_dir, 'final_wing_translucent.png'))
         if 'diagnostic_figure_path' in locals() and os.path.exists(diagnostic_figure_path):
             shutil.copy2(diagnostic_figure_path, os.path.join(artifact_dir, 'wake_load_consistency.png'))
         if 'closure_figure_path' in locals() and os.path.exists(closure_figure_path):
